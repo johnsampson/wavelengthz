@@ -1,0 +1,26 @@
+name = "wavelengthz"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "wavelengthz-db"
+database_id = "REPLACE_WITH_REAL_ID_AFTER_wrangler_d1_create"
+
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "wavelengthz-photos"
+
+[vars]
+SPOTIFY_REDIRECT_URI = "http://localhost:8787/callback"
+
+[env.test]
+[[env.test.d1_databases]]
+binding = "DB"
+database_name = "wavelengthz-db-test"
+database_id = "test-id"
+
+[[env.test.r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "wavelengthz-photos-test"
