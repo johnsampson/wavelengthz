@@ -4,11 +4,11 @@
     "module": "ES2022",
     "moduleResolution": "Bundler",
     "lib": ["ES2022"],
-    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers/types"],
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers/types", "./worker-configuration"],
     "strict": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "resolveJsonModule": true
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "worker-configuration.d.ts"]
 }

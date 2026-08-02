@@ -1,3 +1,4 @@
+-- Core user record
 CREATE TABLE users (
   id                TEXT PRIMARY KEY,
   spotify_id        TEXT UNIQUE NOT NULL,
