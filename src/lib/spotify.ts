@@ -71,3 +71,29 @@ export async function fetchSpotifyProfile(
   if (!res.ok) throw new Error(`Spotify profile fetch failed: ${res.status}`);
   return res.json();
 }
+
+export async function fetchTopArtists(
+  accessToken: string,
+  timeRange: string
+): Promise<Array<{ id: string; name: string; genres: string[]; rank: number }>> {
+  const res = await fetch(
+    `https://api.spotify.com/v1/me/top/artists?time_range=${timeRange}&limit=50`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!res.ok) throw new Error(`Spotify top artists fetch failed: ${res.status}`);
+  const data = await res.json<{ items: Array<{ id: string; name: string; genres: string[] }> }>();
+  return data.items.map((item, i) => ({ ...item, rank: i + 1 }));
+}
+
+export async function fetchTopTracks(
+  accessToken: string,
+  timeRange: string
+): Promise<Array<{ id: string; name: string; rank: number }>> {
+  const res = await fetch(
+    `https://api.spotify.com/v1/me/top/tracks?time_range=${timeRange}&limit=50`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!res.ok) throw new Error(`Spotify top tracks fetch failed: ${res.status}`);
+  const data = await res.json<{ items: Array<{ id: string; name: string }> }>();
+  return data.items.map((item, i) => ({ ...item, rank: i + 1 }));
+}
