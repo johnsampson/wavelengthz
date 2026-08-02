@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:workers';
+import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { applySchema } from './apply-schema';
 import worker from '../src/index';

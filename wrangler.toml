@@ -24,3 +24,6 @@ database_id = "test-id"
 [[env.test.r2_buckets]]
 binding = "PHOTOS"
 bucket_name = "wavelengthz-photos-test"
+
+[env.test.vars]
+SPOTIFY_REDIRECT_URI = "http://localhost:8787/callback"
