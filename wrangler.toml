@@ -27,3 +27,6 @@ bucket_name = "wavelengthz-photos-test"
 
 [env.test.vars]
 SPOTIFY_REDIRECT_URI = "http://localhost:8787/callback"
+SPOTIFY_CLIENT_ID = "test-client-id"
+SPOTIFY_CLIENT_SECRET = "test-client-secret"
+TOKEN_ENCRYPTION_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="

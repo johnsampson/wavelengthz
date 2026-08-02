@@ -1,6 +1,9 @@
 import { Router } from 'itty-router';
+import { registerAuthRoutes } from './routes/auth';
 
 export const router = Router();
+
+registerAuthRoutes(router);
 
 router.all('*', () => new Response('Not found', { status: 404 }));
 
