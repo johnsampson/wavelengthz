@@ -44,11 +44,14 @@ export function registerAuthRoutes(router: RouterType) {
     const now = Date.now();
     const expiresAt = now + token.expires_in * 1000;
 
-    const existing = await env.DB.prepare('SELECT id FROM users WHERE spotify_id = ?')
+    const existing = await env.DB.prepare('SELECT id, onboarded_at FROM users WHERE spotify_id = ?')
       .bind(profile.id)
-      .first<{ id: string }>();
+      .first<{ id: string; onboarded_at: number | null }>();
 
     const userId = existing?.id ?? crypto.randomUUID();
+    // A brand-new insert always has onboarded_at NULL (not set on insert), so this
+    // single check naturally covers both the new-user and abandoned-onboarding cases.
+    const onboarded = existing?.onboarded_at != null;
 
     if (existing) {
       await env.DB.prepare(
@@ -67,13 +70,17 @@ export function registerAuthRoutes(router: RouterType) {
     return new Response(null, {
       status: 302,
       headers: {
-        Location: existing ? '/' : '/onboarding.html',
+        Location: onboarded ? '/' : '/onboarding.html',
         'Set-Cookie': cookie,
       },
     });
   });
 
-  router.post('/logout', async () => {
+  router.post('/logout', async (request: Request, env: Env) => {
+    const sessionId = parseCookie(request, 'wl_session');
+    if (sessionId) {
+      await env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(sessionId).run();
+    }
     return new Response('ok', {
       status: 200,
       headers: {
