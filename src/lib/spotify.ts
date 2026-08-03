@@ -97,3 +97,37 @@ export async function fetchTopTracks(
   const data = await res.json<{ items: Array<{ id: string; name: string }> }>();
   return data.items.map((item, i) => ({ ...item, rank: i + 1 }));
 }
+
+export async function getClientCredentialsToken(env: Env): Promise<string> {
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Basic ' + btoa(`${env.SPOTIFY_CLIENT_ID}:${env.SPOTIFY_CLIENT_SECRET}`),
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({ grant_type: 'client_credentials' }),
+  });
+  if (!res.ok) throw new Error(`Spotify client-credentials fetch failed: ${res.status}`);
+  const data = await res.json<{ access_token: string }>();
+  return data.access_token;
+}
+
+export async function searchArtistsByGenre(token: string, genre: string, limit: number) {
+  const res = await fetch(
+    `https://api.spotify.com/v1/search?type=artist&limit=${limit}&q=${encodeURIComponent(`genre:"${genre}"`)}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!res.ok) throw new Error(`Spotify artist search failed: ${res.status}`);
+  const data = await res.json<{ artists: { items: any[] } }>();
+  return data.artists.items;
+}
+
+export async function fetchArtistTopTracks(token: string, artistId: string, market = 'US') {
+  const res = await fetch(
+    `https://api.spotify.com/v1/artists/${artistId}/top-tracks?market=${market}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!res.ok) throw new Error(`Spotify top tracks (artist) fetch failed: ${res.status}`);
+  const data = await res.json<{ tracks: any[] }>();
+  return data.tracks;
+}
