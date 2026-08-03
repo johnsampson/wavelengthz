@@ -9,6 +9,7 @@ import { registerMusicSwipeRoutes } from './routes/musicSwipes';
 import { registerPeopleSwipeRoutes } from './routes/peopleSwipes';
 import { registerMatchRoutes } from './routes/matches';
 import { registerNotificationRoutes } from './routes/notifications';
+import { registerSafetyRoutes } from './routes/safety';
 
 export const router = Router();
 
@@ -22,6 +23,7 @@ registerMusicSwipeRoutes(router);
 registerPeopleSwipeRoutes(router);
 registerMatchRoutes(router);
 registerNotificationRoutes(router);
+registerSafetyRoutes(router);
 
 router.all('*', () => new Response('Not found', { status: 404 }));
 
