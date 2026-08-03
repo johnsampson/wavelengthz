@@ -4,6 +4,7 @@ import { registerMeRoutes } from './routes/me';
 import { registerAdminRoutes } from './routes/admin';
 import { registerOnboardingRoutes } from './routes/onboarding';
 import { registerPhotoRoutes } from './routes/photos';
+import { registerCatalogRoutes } from './routes/catalog';
 
 export const router = Router();
 
@@ -12,6 +13,7 @@ registerMeRoutes(router);
 registerAdminRoutes(router);
 registerOnboardingRoutes(router);
 registerPhotoRoutes(router);
+registerCatalogRoutes(router);
 
 router.all('*', () => new Response('Not found', { status: 404 }));
 
