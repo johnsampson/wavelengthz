@@ -37,23 +37,40 @@ const GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
 
 const GENERAL_LIMIT = { limit: 120, windowSeconds: 60 };
 const SWIPE_LIMIT = { limit: 30, windowSeconds: 60 };
+// /callback is where Spotify OAuth actually creates accounts, and the plan
+// requires rate-limiting on account creation -- but it was excluded entirely,
+// because the middleware only matched `/api/`. It gets its own bucket, tighter
+// than the general limit: a legitimate user hits this once per login, so 20/min
+// still leaves generous headroom for a shared NAT / carrier-grade IP while
+// cutting the ceiling on scripted mass account creation by 6x.
+const CALLBACK_LIMIT = { limit: 20, windowSeconds: 60 };
 
 export default {
   fetch: async (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> => {
     const url = new URL(request.url);
-    const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
 
-    if (url.pathname.startsWith('/api/swipe/')) {
-      const swipeAllowed = await checkRateLimit(env.RATE_LIMIT_KV, `swipe:${ip}`, SWIPE_LIMIT.limit, SWIPE_LIMIT.windowSeconds);
-      if (!swipeAllowed) return Response.json({ error: 'rate_limited' }, { status: 429 });
-    }
-
-    if (url.pathname.startsWith('/api/')) {
-      const generallyAllowed = await checkRateLimit(env.RATE_LIMIT_KV, `general:${ip}`, GENERAL_LIMIT.limit, GENERAL_LIMIT.windowSeconds);
-      if (!generallyAllowed) return Response.json({ error: 'rate_limited' }, { status: 429 });
-    }
-
+    // The rate-limit checks live *inside* this try. They talk to KV, so a KV
+    // outage throws -- and outside the try that surfaced as a bare unhandled
+    // 500 that Sentry never saw, which is exactly the failure you most need
+    // visibility into.
     try {
+      const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+
+      if (url.pathname.startsWith('/api/swipe/')) {
+        const swipeAllowed = await checkRateLimit(env.RATE_LIMIT_KV, `swipe:${ip}`, SWIPE_LIMIT.limit, SWIPE_LIMIT.windowSeconds);
+        if (!swipeAllowed) return Response.json({ error: 'rate_limited' }, { status: 429 });
+      }
+
+      if (url.pathname === '/callback') {
+        const callbackAllowed = await checkRateLimit(env.RATE_LIMIT_KV, `callback:${ip}`, CALLBACK_LIMIT.limit, CALLBACK_LIMIT.windowSeconds);
+        if (!callbackAllowed) return Response.json({ error: 'rate_limited' }, { status: 429 });
+      }
+
+      if (url.pathname.startsWith('/api/')) {
+        const generallyAllowed = await checkRateLimit(env.RATE_LIMIT_KV, `general:${ip}`, GENERAL_LIMIT.limit, GENERAL_LIMIT.windowSeconds);
+        if (!generallyAllowed) return Response.json({ error: 'rate_limited' }, { status: 429 });
+      }
+
       return await router.fetch(request, env, ctx);
     } catch (error) {
       // Prefer fire-and-forget via ctx.waitUntil (always present on real
