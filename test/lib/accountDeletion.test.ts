@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { hardDeleteUser, purgeExpiredDeletions } from '../../src/lib/accountDeletion';
+import { createSession } from '../../src/lib/session';
 
 beforeAll(async () => {
   await applySchema(env.DB);
@@ -40,6 +41,11 @@ describe('hardDeleteUser', () => {
     await env.DB.prepare(`INSERT INTO people_swipes (id, swiper_id, target_id, direction, created_at, updated_at) VALUES ('ps1', 'u1', 'u2', 'right', 1000, 1000)`).run();
     await env.DB.prepare(`INSERT INTO reports (id, reporter_id, reported_id, reason, status, created_at) VALUES ('r1', 'u1', 'u2', 'spam', 'open', 1000)`).run();
     await env.DB.prepare(`INSERT INTO reports (id, reporter_id, reported_id, reason, status, created_at) VALUES ('r2', 'u2', 'u1', 'spam', 'open', 1000)`).run();
+    await env.DB.prepare(`INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('msw1', 'u1', 'artist', 'artist-x', 'right', 1000, 1000)`).run();
+    await env.DB.prepare(`INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u1', '[]', '[]', '[]', 'medium_term', 1000)`).run();
+    await env.DB.prepare(`INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES ('b1', 'u1', 'u2', 1000)`).run();
+    await env.DB.prepare(`INSERT INTO notifications (id, user_id, type, related_id, created_at) VALUES ('n1', 'u1', 'match', 'm1', 1000)`).run();
+    const { id: sessionId } = await createSession(env.DB, 'u1');
 
     await hardDeleteUser(env as any, 'u1');
 
@@ -51,6 +57,11 @@ describe('hardDeleteUser', () => {
     expect(await env.DB.prepare('SELECT * FROM people_swipes WHERE id = ?').bind('ps1').first()).toBeNull();
     expect(await env.DB.prepare('SELECT * FROM reports WHERE id = ?').bind('r1').first()).toBeNull(); // u1 was reporter
     expect(await env.DB.prepare('SELECT * FROM reports WHERE id = ?').bind('r2').first()).not.toBeNull(); // u1 was reported — kept
+    expect(await env.DB.prepare('SELECT * FROM music_swipes WHERE id = ?').bind('msw1').first()).toBeNull();
+    expect(await env.DB.prepare('SELECT * FROM music_profiles WHERE user_id = ?').bind('u1').first()).toBeNull();
+    expect(await env.DB.prepare('SELECT * FROM blocks WHERE id = ?').bind('b1').first()).toBeNull();
+    expect(await env.DB.prepare('SELECT * FROM notifications WHERE id = ?').bind('n1').first()).toBeNull();
+    expect(await env.DB.prepare('SELECT * FROM sessions WHERE id = ?').bind(sessionId).first()).toBeNull();
   });
 });
 
