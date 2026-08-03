@@ -6,6 +6,7 @@ import { registerOnboardingRoutes } from './routes/onboarding';
 import { registerPhotoRoutes } from './routes/photos';
 import { registerCatalogRoutes } from './routes/catalog';
 import { registerMusicSwipeRoutes } from './routes/musicSwipes';
+import { registerPeopleSwipeRoutes } from './routes/peopleSwipes';
 
 export const router = Router();
 
@@ -16,6 +17,7 @@ registerOnboardingRoutes(router);
 registerPhotoRoutes(router);
 registerCatalogRoutes(router);
 registerMusicSwipeRoutes(router);
+registerPeopleSwipeRoutes(router);
 
 router.all('*', () => new Response('Not found', { status: 404 }));
 
