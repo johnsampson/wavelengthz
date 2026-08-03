@@ -162,4 +162,52 @@ describe('POST /api/onboarding', () => {
     expect(row.bio).toBe('hi');
     expect(row.max_distance_km).toBe(40);
   });
+
+  it('preserves an existing bio on a second call that re-sends it (settings re-save path)', async () => {
+    // The Settings page reuses this endpoint just to change max_distance_km,
+    // and the UPDATE unconditionally does `SET bio = ?` bound to
+    // `body.bio ?? null`. That means the client is responsible for echoing
+    // the existing bio back; public/settings.js now does, and this locks in
+    // the backend half of that contract.
+    const cookie = await sessionCookieFor('u1');
+    const post = (payload: Record<string, unknown>) =>
+      worker.fetch(
+        new Request('http://localhost/api/onboarding', {
+          method: 'POST',
+          headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }),
+        env,
+        {} as ExecutionContext
+      );
+
+    await post({ bio: 'loud guitars', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, max_distance_km: 25 });
+
+    const resaved = await post({ bio: 'loud guitars', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, max_distance_km: 50 });
+    expect(resaved.status).toBe(200);
+
+    const row = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind('u1').first<any>();
+    expect(row.bio).toBe('loud guitars');
+    expect(row.max_distance_km).toBe(50);
+  });
+
+  it('documents that omitting bio clears it — the exact bug settings.js works around', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const post = (payload: Record<string, unknown>) =>
+      worker.fetch(
+        new Request('http://localhost/api/onboarding', {
+          method: 'POST',
+          headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }),
+        env,
+        {} as ExecutionContext
+      );
+
+    await post({ bio: 'loud guitars', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74 });
+    await post({ date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, max_distance_km: 50 });
+
+    const row = await env.DB.prepare('SELECT bio FROM users WHERE id = ?').bind('u1').first<any>();
+    expect(row.bio).toBeNull();
+  });
 });

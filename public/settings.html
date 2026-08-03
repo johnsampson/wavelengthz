@@ -11,12 +11,15 @@
   <p x-show="error" x-text="error" class="text-red-400 max-w-md mb-4" role="alert"></p>
   <p x-show="saved" class="text-emerald-400 max-w-md mb-4">Saved.</p>
 
+  <!-- Disabled until init() has loaded the real max_distance_km: saving while
+       the slider still shows its placeholder default would overwrite the
+       user's actual radius. -->
   <form class="max-w-md flex flex-col gap-4" @submit.prevent="updateDistance()">
     <label class="flex flex-col gap-1">
-      <span>Max distance (km): <span x-text="maxDistanceKm"></span></span>
-      <input type="range" min="5" max="200" x-model.number="maxDistanceKm" />
+      <span>Max distance (km): <span x-text="loading ? '…' : maxDistanceKm"></span></span>
+      <input type="range" min="5" max="200" x-model.number="maxDistanceKm" :disabled="loading" />
     </label>
-    <button type="submit" class="bg-neutral-800 rounded p-2">Save</button>
+    <button type="submit" class="bg-neutral-800 rounded p-2" :disabled="loading">Save</button>
   </form>
 
   <button class="mt-6 text-neutral-400 underline" @click="logout()">Log out</button>
@@ -35,51 +38,9 @@
   </div>
 
   <script type="module">
-    import { api } from '/app.js';
+    import { createSettingsApp } from '/settings.js';
 
-    window.settingsApp = function () {
-      return {
-        maxDistanceKm: 80,
-        confirmingDelete: false,
-        error: null,
-        saved: false,
-        async updateDistance() {
-          this.error = null;
-          this.saved = false;
-          try {
-            const me = await api.me();
-            await api.onboard({
-              date_of_birth: me.user.date_of_birth,
-              location_label: me.user.location_label,
-              lat: me.user.lat,
-              lng: me.user.lng,
-              max_distance_km: this.maxDistanceKm,
-            });
-            this.saved = true;
-          } catch (e) {
-            this.error = 'Could not save your settings. Please try again.';
-          }
-        },
-        async logout() {
-          this.error = null;
-          try {
-            await fetch('/logout', { method: 'POST', credentials: 'include' });
-            window.location.href = '/login';
-          } catch (e) {
-            this.error = 'Could not log out. Please try again.';
-          }
-        },
-        async deleteAccount() {
-          this.error = null;
-          try {
-            await api.deleteAccount();
-            window.location.href = '/';
-          } catch (e) {
-            this.error = 'Could not delete your account. Please try again.';
-          }
-        },
-      };
-    };
+    window.settingsApp = createSettingsApp;
   </script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </body>

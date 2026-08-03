@@ -4,6 +4,7 @@ const APP_SHELL = [
   '/index.html',
   '/app.js',
   '/swipe.js',
+  '/settings.js',
   '/tailwind.css',
   '/manifest.json',
   '/onboarding.html',
