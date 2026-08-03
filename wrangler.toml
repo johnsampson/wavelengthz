@@ -24,7 +24,7 @@ binding = "ASSETS"
 SPOTIFY_REDIRECT_URI = "http://localhost:8787/callback"
 
 [triggers]
-crons = ["0 3 * * *"]
+crons = ["0 3 * * *", "0 4 * * 0"]
 
 [env.test]
 [[env.test.d1_databases]]

@@ -12,6 +12,7 @@ import { registerNotificationRoutes } from './routes/notifications';
 import { registerSafetyRoutes } from './routes/safety';
 import { registerAccountRoutes } from './routes/account';
 import { purgeExpiredDeletions } from './lib/accountDeletion';
+import { refreshCatalogFromProfiles } from './db/catalogRefresh';
 import { checkRateLimit } from './lib/rateLimit';
 import { reportError } from './lib/sentry';
 
@@ -69,7 +70,11 @@ export default {
       return new Response('Internal Server Error', { status: 500 });
     }
   },
-  scheduled: async (_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> => {
-    ctx.waitUntil(purgeExpiredDeletions(env, GRACE_PERIOD_MS, Date.now()).then(() => undefined));
+  scheduled: async (event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> => {
+    if (event.cron === '0 4 * * 0') {
+      ctx.waitUntil(refreshCatalogFromProfiles(env).then(() => undefined));
+    } else {
+      ctx.waitUntil(purgeExpiredDeletions(env, GRACE_PERIOD_MS, Date.now()).then(() => undefined));
+    }
   },
 };
