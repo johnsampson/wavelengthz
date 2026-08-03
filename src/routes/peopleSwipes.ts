@@ -2,6 +2,7 @@ import type { RouterType, IRequest } from 'itty-router';
 import { getSessionUser, type UserRow } from '../lib/session';
 import { scoreCandidate, scoreCandidateFromInputs, createMatchIfMutual, type ScoringInputs } from '../lib/matching';
 import { getMusicProfiles, getRightSwipedItemIdsFor } from '../lib/profile';
+import type { MusicProfile } from '../lib/scoring';
 import { bucketedDistanceLabel, haversineKm } from '../lib/scoring';
 
 // Hard cap on the like-priority queue. It previously had no LIMIT at all, so a
@@ -36,19 +37,19 @@ async function primaryPhotoUrls(db: D1Database, userIds: string[]): Promise<Map<
   return urls;
 }
 
-const EMPTY_INPUTS: ScoringInputs = { profile: { topArtists: [], topGenres: [] }, rightSwiped: new Set() };
-
+/**
+ * Assembles one participant's scoring inputs from the batched lookups. A user
+ * absent from either map simply has nothing cached yet, which scores the same
+ * as the empty profile/swipe set the single-row loaders return.
+ */
 function inputsFor(
   userId: string,
-  profiles: Map<string, { topArtists: Array<{ id: string; rank: number }>; topGenres: string[] }>,
+  profiles: Map<string, MusicProfile>,
   swipes: Map<string, Set<string>>
 ): ScoringInputs {
-  const profile = profiles.get(userId);
-  const rightSwiped = swipes.get(userId);
-  if (!profile && !rightSwiped) return EMPTY_INPUTS;
   return {
-    profile: profile ?? EMPTY_INPUTS.profile,
-    rightSwiped: rightSwiped ?? new Set<string>(),
+    profile: profiles.get(userId) ?? { topArtists: [], topGenres: [] },
+    rightSwiped: swipes.get(userId) ?? new Set<string>(),
   };
 }
 
