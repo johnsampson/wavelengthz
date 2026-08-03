@@ -15,6 +15,9 @@ bucket_name = "wavelengthz-photos"
 [vars]
 SPOTIFY_REDIRECT_URI = "http://localhost:8787/callback"
 
+[triggers]
+crons = ["0 3 * * *"]
+
 [env.test]
 [[env.test.d1_databases]]
 binding = "DB"

@@ -10,6 +10,8 @@ import { registerPeopleSwipeRoutes } from './routes/peopleSwipes';
 import { registerMatchRoutes } from './routes/matches';
 import { registerNotificationRoutes } from './routes/notifications';
 import { registerSafetyRoutes } from './routes/safety';
+import { registerAccountRoutes } from './routes/account';
+import { purgeExpiredDeletions } from './lib/accountDeletion';
 
 export const router = Router();
 
@@ -24,10 +26,16 @@ registerPeopleSwipeRoutes(router);
 registerMatchRoutes(router);
 registerNotificationRoutes(router);
 registerSafetyRoutes(router);
+registerAccountRoutes(router);
 
 router.all('*', () => new Response('Not found', { status: 404 }));
+
+const GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
 
 export default {
   fetch: (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> =>
     router.fetch(request, env, ctx),
+  scheduled: async (_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> => {
+    ctx.waitUntil(purgeExpiredDeletions(env, GRACE_PERIOD_MS, Date.now()).then(() => undefined));
+  },
 };
