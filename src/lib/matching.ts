@@ -43,6 +43,17 @@ export async function createMatchIfMutual(
 
   if (!swipedRightBack || !swipedRightForward) return null;
 
+  // Defense in depth: never create a match between a blocked pair, even if
+  // mutual right-swipes exist (e.g. inserted before the block, or via a
+  // future code path that calls this function directly).
+  const blocked = await db
+    .prepare(
+      `SELECT 1 FROM blocks WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)`
+    )
+    .bind(swiperId, targetId, targetId, swiperId)
+    .first();
+  if (blocked) return null;
+
   const [userA, userB] = [swiperId, targetId].sort();
   const matchId = crypto.randomUUID();
   const now = Date.now();

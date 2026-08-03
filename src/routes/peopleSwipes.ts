@@ -10,10 +10,31 @@ async function primaryPhotoUrl(db: D1Database, userId: string): Promise<string |
   return photo ? `/photos/${photo.id}` : null;
 }
 
+// Guards against the "Null Island" bug: `haversineKm` doesn't throw on a null
+// lat/lng, JS silently coerces null to 0, so an unonboarded caller would
+// otherwise get scored as if they were at (0, 0) with no error.
+function hasCompletedOnboarding(user: UserRow): boolean {
+  return user.onboarded_at != null && user.lat != null && user.lng != null;
+}
+
+async function isBlockedEitherDirection(db: D1Database, aId: string, bId: string): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 FROM blocks WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)`
+    )
+    .bind(aId, bId, bId, aId)
+    .first();
+  return !!row;
+}
+
 export function registerPeopleSwipeRoutes(router: RouterType) {
   router.get('/api/candidates/people', async (request: Request, env: Env) => {
     const me = await getSessionUser(request, env.DB);
     if (!me) return new Response('Unauthorized', { status: 401 });
+
+    if (!hasCompletedOnboarding(me)) {
+      return Response.json({ error: 'onboarding_incomplete' }, { status: 400 });
+    }
 
     const limit = Number(new URL(request.url).searchParams.get('limit') ?? '10');
 
@@ -25,7 +46,8 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
          AND NOT EXISTS (
            SELECT 1 FROM blocks b WHERE (b.blocker_id = ? AND b.blocked_id = ps.swiper_id) OR (b.blocker_id = ps.swiper_id AND b.blocked_id = ?)
          )
-         AND u.deleted_at IS NULL
+         AND u.deleted_at IS NULL AND u.onboarded_at IS NOT NULL
+         AND u.lat IS NOT NULL AND u.lng IS NOT NULL
        ORDER BY ps.match_score DESC`
     ).bind(me.id, me.id, me.id, me.id).all<UserRow & { match_score: number }>();
 
@@ -83,10 +105,20 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
     const me = await getSessionUser(request, env.DB);
     if (!me) return new Response('Unauthorized', { status: 401 });
 
+    if (!hasCompletedOnboarding(me)) {
+      return Response.json({ error: 'onboarding_incomplete' }, { status: 400 });
+    }
+
     const { target_id, direction } = await request.json<{ target_id: string; direction: 'left' | 'right' }>();
 
-    const target = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(target_id).first<UserRow>();
+    const target = await env.DB.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL')
+      .bind(target_id)
+      .first<UserRow>();
     if (!target) return Response.json({ error: 'unknown target_id' }, { status: 400 });
+
+    if (await isBlockedEitherDirection(env.DB, me.id, target_id)) {
+      return Response.json({ error: 'blocked' }, { status: 403 });
+    }
 
     const alreadyLikedMe = await env.DB
       .prepare(`SELECT 1 FROM people_swipes WHERE swiper_id = ? AND target_id = ? AND direction = 'right'`)

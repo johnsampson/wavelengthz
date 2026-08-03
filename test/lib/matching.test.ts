@@ -75,4 +75,28 @@ describe('createMatchIfMutual', () => {
     const matchesAfter = await env.DB.prepare('SELECT * FROM matches').all<any>();
     expect(matchesAfter.results.length).toBe(1);
   });
+
+  it('does nothing if the two users have blocked each other, even with mutual right swipes recorded (defense in depth)', async () => {
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, created_at, updated_at) VALUES ('s1', 'u2', 'u1', 'right', 1000, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, created_at, updated_at) VALUES ('s2', 'u1', 'u2', 'right', 1000, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES ('b1', 'u1', 'u2', 1000)`
+    ).run();
+
+    const result = await createMatchIfMutual(env.DB, 'u1', 'u2');
+    expect(result).toBeNull();
+
+    const matches = await env.DB.prepare('SELECT * FROM matches').all<any>();
+    expect(matches.results.length).toBe(0);
+
+    const reverseResult = await createMatchIfMutual(env.DB, 'u2', 'u1');
+    expect(reverseResult).toBeNull();
+
+    const matchesAfter = await env.DB.prepare('SELECT * FROM matches').all<any>();
+    expect(matchesAfter.results.length).toBe(0);
+  });
 });

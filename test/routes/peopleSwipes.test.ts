@@ -15,6 +15,15 @@ async function makeUser(id: string) {
   ).bind(id, `sp-${id}`).run();
 }
 
+async function makeUnonboardedUser(id: string) {
+  // No lat/lng/onboarded_at -- simulates a session created before onboarding
+  // finished, or an account whose location was somehow never set.
+  await env.DB.prepare(
+    `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
+     VALUES (?, ?, 'a', 'r', 9999999999999, 1000, 1000)`
+  ).bind(id, `sp-${id}`).run();
+}
+
 async function cookieFor(userId: string) {
   const { cookie } = await createSession(env.DB, userId);
   return `wl_session=${cookie.split(';')[0].split('=')[1]}`;
@@ -128,5 +137,174 @@ describe('GET /api/swipes/people and PATCH', () => {
     expect(patchRes.status).toBe(200);
     const row = await env.DB.prepare('SELECT direction FROM people_swipes WHERE id = ?').bind('ps1').first<any>();
     expect(row.direction).toBe('right');
+  });
+});
+
+describe('onboarding-incomplete guard (Null Island prevention)', () => {
+  it('rejects GET /api/candidates/people with 400 when the caller has no lat/lng/onboarded_at', async () => {
+    await makeUnonboardedUser('u4');
+    const cookie = await cookieFor('u4');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('onboarding_incomplete');
+  });
+
+  it('rejects POST /api/swipe/people with 400 when the caller has no lat/lng/onboarded_at', async () => {
+    await makeUnonboardedUser('u4');
+    const cookie = await cookieFor('u4');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/swipe/people', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_id: 'u1', direction: 'right' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('onboarding_incomplete');
+    const swipeRow = await env.DB.prepare('SELECT * FROM people_swipes WHERE swiper_id = ?').bind('u4').first<any>();
+    expect(swipeRow).toBeNull();
+  });
+
+  it('excludes an unonboarded (no lat/lng) user from the like-priority queue even if they swiped right on the caller', async () => {
+    // u4 has no lat/lng but somehow has a right-swipe row on u1 -- should never
+    // surface as a like-priority candidate since scoring them would be bogus.
+    await makeUnonboardedUser('u4');
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, match_score, created_at, updated_at) VALUES ('s1', 'u4', 'u1', 'right', 0.9, 1000, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'u4')).toBeUndefined();
+  });
+});
+
+describe('POST /api/swipe/people rejects a soft-deleted target', () => {
+  it('returns 400 unknown target_id when the target has been soft-deleted', async () => {
+    await env.DB.prepare('UPDATE users SET deleted_at = ? WHERE id = ?').bind(2000, 'u2').run();
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/swipe/people', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_id: 'u2', direction: 'right' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('unknown target_id');
+    const swipeRow = await env.DB.prepare('SELECT * FROM people_swipes WHERE swiper_id = ? AND target_id = ?').bind('u1', 'u2').first<any>();
+    expect(swipeRow).toBeNull();
+  });
+});
+
+describe('blocks enforced at the swipe/match-creation layer', () => {
+  it('rejects swiping on someone you have blocked, with 403 and no swipe written', async () => {
+    await env.DB.prepare(`INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES ('b1', 'u1', 'u2', 1000)`).run();
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/swipe/people', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_id: 'u2', direction: 'right' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(403);
+    const body = await res.json<any>();
+    expect(body.error).toBe('blocked');
+    const swipeRow = await env.DB.prepare('SELECT * FROM people_swipes WHERE swiper_id = ? AND target_id = ?').bind('u1', 'u2').first<any>();
+    expect(swipeRow).toBeNull();
+  });
+
+  it('rejects swiping on someone who has blocked you, with 403', async () => {
+    await env.DB.prepare(`INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES ('b1', 'u2', 'u1', 1000)`).run();
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/swipe/people', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_id: 'u2', direction: 'right' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(403);
+    const body = await res.json<any>();
+    expect(body.error).toBe('blocked');
+  });
+
+  it('does not create a match even when a prior mutual-right exists and a block is then added', async () => {
+    // u2 already swiped right on u1 before the block existed.
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, match_score, created_at, updated_at) VALUES ('s1', 'u2', 'u1', 'right', 0.9, 1000, 1000)`
+    ).run();
+    await env.DB.prepare(`INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES ('b1', 'u1', 'u2', 1000)`).run();
+
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/swipe/people', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_id: 'u2', direction: 'right' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(403);
+
+    const matches = await env.DB.prepare('SELECT * FROM matches').all<any>();
+    expect(matches.results.length).toBe(0);
+  });
+});
+
+describe('blocked-user exclusion from candidate queries (permanent regression coverage)', () => {
+  it('excludes a blocked user from the blocker\'s normal candidate pool', async () => {
+    await env.DB.prepare(`INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES ('b1', 'u1', 'u2', 1000)`).run();
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'u2')).toBeUndefined();
+    expect(body.candidates.find((c: any) => c.id === 'u3')).toBeDefined();
+  });
+
+  it('excludes the blocker from the blocked user\'s normal candidate pool (reverse direction)', async () => {
+    await env.DB.prepare(`INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES ('b1', 'u1', 'u2', 1000)`).run();
+    const cookie = await cookieFor('u2');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'u1')).toBeUndefined();
+    expect(body.candidates.find((c: any) => c.id === 'u3')).toBeDefined();
+  });
+
+  it('excludes a blocked liker from the target\'s like-priority queue', async () => {
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, match_score, created_at, updated_at) VALUES ('s1', 'u2', 'u1', 'right', 0.9, 1000, 1000)`
+    ).run();
+    await env.DB.prepare(`INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES ('b1', 'u1', 'u2', 1000)`).run();
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'u2')).toBeUndefined();
+  });
+
+  it('excludes the liker from their own like-priority queue view if the target later blocked them (reverse direction)', async () => {
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, match_score, created_at, updated_at) VALUES ('s1', 'u1', 'u2', 'right', 0.9, 1000, 1000)`
+    ).run();
+    await env.DB.prepare(`INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES ('b1', 'u2', 'u1', 1000)`).run();
+    const cookie = await cookieFor('u2');
+    const req = new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'u1')).toBeUndefined();
   });
 });
