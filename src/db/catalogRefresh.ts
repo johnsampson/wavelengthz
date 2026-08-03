@@ -1,6 +1,8 @@
 import { getClientCredentialsToken, fetchArtistById } from '../lib/spotify';
 
-export async function refreshCatalogFromProfiles(env: Env): Promise<{ artistsAdded: number }> {
+export async function refreshCatalogFromProfiles(
+  env: Env
+): Promise<{ artistsAdded: number; failedArtistIds: string[] }> {
   const profiles = await env.DB.prepare('SELECT top_artists FROM music_profiles').all<{ top_artists: string }>();
 
   const candidateIds = new Set<string>();
@@ -11,20 +13,28 @@ export async function refreshCatalogFromProfiles(env: Env): Promise<{ artistsAdd
 
   let token: string | null = null;
   let artistsAdded = 0;
+  const failedArtistIds: string[] = [];
 
   for (const artistId of candidateIds) {
     const existing = await env.DB.prepare('SELECT 1 FROM artists WHERE id = ?').bind(artistId).first();
     if (existing) continue;
 
-    if (!token) token = await getClientCredentialsToken(env);
-    const artist = await fetchArtistById(token, artistId);
+    try {
+      // Wrap the per-artist fetch + insert so a transient failure (e.g. a
+      // 429/500 from Spotify, or a stale artist id) only drops this one
+      // artist instead of aborting the rest of an unattended weekly run.
+      if (!token) token = await getClientCredentialsToken(env);
+      const artist = await fetchArtistById(token, artistId);
 
-    await env.DB.prepare(
-      `INSERT OR IGNORE INTO artists (id, name, genres, image_url, popularity, source, added_by_user_id, approved, created_at)
-       VALUES (?, ?, ?, ?, ?, 'spotify_search', NULL, 1, ?)`
-    ).bind(artist.id, artist.name, JSON.stringify(artist.genres ?? []), artist.images?.[0]?.url ?? null, artist.popularity ?? null, Date.now()).run();
-    artistsAdded += 1;
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO artists (id, name, genres, image_url, popularity, source, added_by_user_id, approved, created_at)
+         VALUES (?, ?, ?, ?, ?, 'spotify_search', NULL, 1, ?)`
+      ).bind(artist.id, artist.name, JSON.stringify(artist.genres ?? []), artist.images?.[0]?.url ?? null, artist.popularity ?? null, Date.now()).run();
+      artistsAdded += 1;
+    } catch {
+      failedArtistIds.push(artistId);
+    }
   }
 
-  return { artistsAdded };
+  return { artistsAdded, failedArtistIds };
 }

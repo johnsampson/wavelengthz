@@ -42,4 +42,46 @@ describe('refreshCatalogFromProfiles', () => {
 
     vi.unstubAllGlobals();
   });
+
+  it('skips an artist whose fetch fails, without aborting the rest of the run', async () => {
+    await env.DB.prepare(
+      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at)
+       VALUES ('u1', ?, '[]', '[]', 'medium_term', 1000)`
+    )
+      .bind(
+        JSON.stringify([
+          { artist_id: 'already-known', rank: 1 },
+          { artist_id: 'artist-ok', rank: 2 },
+          { artist_id: 'artist-fail', rank: 3 },
+        ])
+      )
+      .run();
+
+    const fetchMock = vi.fn(async (input: RequestInfo) => {
+      const url = input.toString();
+      if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+      if (url.includes('/v1/artists/artist-ok')) {
+        return new Response(JSON.stringify({ id: 'artist-ok', name: 'Reliable Artist', genres: ['pop'], images: [], popularity: 70 }), { status: 200 });
+      }
+      if (url.includes('/v1/artists/artist-fail')) {
+        // simulate a transient upstream failure (e.g. 429/500) for this one artist
+        return new Response('server error', { status: 500 });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await refreshCatalogFromProfiles(env as any);
+
+    expect(result.artistsAdded).toBe(1);
+    expect(result.failedArtistIds).toEqual(['artist-fail']);
+
+    const okRow = await env.DB.prepare('SELECT * FROM artists WHERE id = ?').bind('artist-ok').first<any>();
+    expect(okRow).not.toBeNull();
+
+    const failedRow = await env.DB.prepare('SELECT * FROM artists WHERE id = ?').bind('artist-fail').first<any>();
+    expect(failedRow).toBeNull();
+
+    vi.unstubAllGlobals();
+  });
 });
