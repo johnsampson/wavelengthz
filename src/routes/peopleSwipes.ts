@@ -1,13 +1,55 @@
 import type { RouterType, IRequest } from 'itty-router';
 import { getSessionUser, type UserRow } from '../lib/session';
-import { scoreCandidate, createMatchIfMutual } from '../lib/matching';
-import { bucketedDistanceLabel } from '../lib/scoring';
+import { scoreCandidate, scoreCandidateFromInputs, createMatchIfMutual, type ScoringInputs } from '../lib/matching';
+import { getMusicProfiles, getRightSwipedItemIdsFor } from '../lib/profile';
+import { bucketedDistanceLabel, haversineKm } from '../lib/scoring';
 
-async function primaryPhotoUrl(db: D1Database, userId: string): Promise<string | null> {
-  const photo = await db.prepare('SELECT id FROM user_photos WHERE user_id = ? AND position = 0')
-    .bind(userId)
-    .first<{ id: string }>();
-  return photo ? `/photos/${photo.id}` : null;
+// Hard cap on the like-priority queue. It previously had no LIMIT at all, so a
+// popular account's deck request grew without bound.
+const LIKE_PRIORITY_LIMIT = 50;
+const POOL_LIMIT = 200;
+
+// Coarse latitude band used to pre-filter the pool in SQL. ~111km per degree
+// of latitude everywhere on the globe, so this never excludes anyone who is
+// actually within range; the exact haversine check in JS does the real
+// exclusion. Longitude is deliberately *not* bounded in SQL: the degrees-per-km
+// factor varies with cos(latitude) and the band wraps incorrectly across the
+// antimeridian, which would silently drop valid candidates.
+const KM_PER_DEGREE_LATITUDE = 111;
+
+/**
+ * Batched form of the old per-candidate primary-photo lookup: one query for
+ * the whole pool instead of one DB round trip per candidate rendered.
+ */
+async function primaryPhotoUrls(db: D1Database, userIds: string[]): Promise<Map<string, string>> {
+  const urls = new Map<string, string>();
+  if (userIds.length === 0) return urls;
+
+  const rows = await db
+    .prepare(
+      `SELECT user_id, id FROM user_photos WHERE position = 0 AND user_id IN (${new Array(userIds.length).fill('?').join(', ')})`
+    )
+    .bind(...userIds)
+    .all<{ user_id: string; id: string }>();
+
+  for (const row of rows.results) urls.set(row.user_id, `/photos/${row.id}`);
+  return urls;
+}
+
+const EMPTY_INPUTS: ScoringInputs = { profile: { topArtists: [], topGenres: [] }, rightSwiped: new Set() };
+
+function inputsFor(
+  userId: string,
+  profiles: Map<string, { topArtists: Array<{ id: string; rank: number }>; topGenres: string[] }>,
+  swipes: Map<string, Set<string>>
+): ScoringInputs {
+  const profile = profiles.get(userId);
+  const rightSwiped = swipes.get(userId);
+  if (!profile && !rightSwiped) return EMPTY_INPUTS;
+  return {
+    profile: profile ?? EMPTY_INPUTS.profile,
+    rightSwiped: rightSwiped ?? new Set<string>(),
+  };
 }
 
 // Guards against the "Null Island" bug: `haversineKm` doesn't throw on a null
@@ -38,6 +80,13 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
 
     const limit = Number(new URL(request.url).searchParams.get('limit') ?? '10');
 
+    // Coarse latitude band, refined by the exact haversine check below. This
+    // keeps the pool query from dragging in candidates on the other side of
+    // the planet only to have them scored and then discarded.
+    const latDelta = me.max_distance_km / KM_PER_DEGREE_LATITUDE;
+    const minLat = me.lat! - latDelta;
+    const maxLat = me.lat! + latDelta;
+
     const likePriorityRows = await env.DB.prepare(
       `SELECT u.*, ps.match_score FROM people_swipes ps
        JOIN users u ON u.id = ps.swiper_id
@@ -48,8 +97,10 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
          )
          AND u.deleted_at IS NULL AND u.onboarded_at IS NOT NULL
          AND u.lat IS NOT NULL AND u.lng IS NOT NULL
-       ORDER BY ps.match_score DESC`
-    ).bind(me.id, me.id, me.id, me.id).all<UserRow & { match_score: number }>();
+         AND u.lat BETWEEN ? AND ?
+       ORDER BY ps.match_score DESC
+       LIMIT ?`
+    ).bind(me.id, me.id, me.id, me.id, minLat, maxLat, LIKE_PRIORITY_LIMIT).all<UserRow & { match_score: number }>();
 
     const likePriorityIds = new Set(likePriorityRows.results.map((r) => r.id));
 
@@ -57,46 +108,64 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
       `SELECT u.* FROM users u
        WHERE u.id != ? AND u.deleted_at IS NULL AND u.onboarded_at IS NOT NULL
          AND u.lat IS NOT NULL AND u.lng IS NOT NULL
+         AND u.lat BETWEEN ? AND ?
          AND NOT EXISTS (SELECT 1 FROM people_swipes ps WHERE ps.swiper_id = ? AND ps.target_id = u.id)
          AND NOT EXISTS (
            SELECT 1 FROM blocks b WHERE (b.blocker_id = ? AND b.blocked_id = u.id) OR (b.blocker_id = u.id AND b.blocked_id = ?)
          )
-       LIMIT 200`
-    ).bind(me.id, me.id, me.id, me.id).all<UserRow>();
+       LIMIT ?`
+    ).bind(me.id, minLat, maxLat, me.id, me.id, me.id, POOL_LIMIT).all<UserRow>();
 
     const pool = poolRows.results.filter((u) => !likePriorityIds.has(u.id));
 
-    const scored = await Promise.all(
-      pool.map(async (candidate) => {
-        const { score, distanceKm } = await scoreCandidate(env.DB, me, candidate, false);
-        return { candidate, score, distanceKm };
-      })
-    );
-    scored.sort((a, b) => b.score - a.score);
+    // max_distance_km is a filter, not just a scoring weight (docs/PLAN.md):
+    // someone outside the radius must not appear at all, however good their
+    // music overlap is. The SQL band above is intentionally loose, so the
+    // authoritative exclusion is this exact haversine check.
+    const withinRadius = <T extends UserRow>(candidate: T) =>
+      haversineKm(me.lat!, me.lng!, candidate.lat!, candidate.lng!) <= me.max_distance_km;
 
-    const likePriorityFormatted = await Promise.all(
-      likePriorityRows.results.map(async (c) => ({
-        id: c.id,
-        displayName: c.display_name,
-        bio: c.bio,
-        distanceLabel: bucketedDistanceLabel((await scoreCandidate(env.DB, me, c, true)).distanceKm),
-        primaryPhotoUrl: await primaryPhotoUrl(env.DB, c.id),
-        likedYou: true,
+    const likePriority = likePriorityRows.results.filter(withinRadius);
+    const inRangePool = pool.filter(withinRadius);
+
+    // Everything the scorer needs, loaded in a fixed number of queries rather
+    // than 4-5 per candidate. `me`'s own profile and right-swipes in
+    // particular don't change across the loop, so re-fetching them per
+    // candidate was pure waste — and with a full pool it pushed the request
+    // past the Workers subrequest limit outright.
+    const scoringIds = [me.id, ...inRangePool.map((u) => u.id)];
+    const [profiles, rightSwipes] = await Promise.all([
+      getMusicProfiles(env.DB, scoringIds),
+      getRightSwipedItemIdsFor(env.DB, scoringIds),
+    ]);
+    const meInputs = inputsFor(me.id, profiles, rightSwipes);
+
+    const scored = inRangePool
+      .map((candidate) => ({
+        candidate,
+        ...scoreCandidateFromInputs(me, meInputs, candidate, inputsFor(candidate.id, profiles, rightSwipes), false),
       }))
-    );
+      .sort((a, b) => b.score - a.score);
 
-    const normalFormatted = await Promise.all(
-      scored.map(async ({ candidate, distanceKm }) => ({
-        id: candidate.id,
-        displayName: candidate.display_name,
-        bio: candidate.bio,
-        distanceLabel: bucketedDistanceLabel(distanceKm),
-        primaryPhotoUrl: await primaryPhotoUrl(env.DB, candidate.id),
-        likedYou: false,
-      }))
-    );
+    // Slice before the photo lookup so it only covers what's actually
+    // returned. Distance needs no DB access at all — it's haversine over
+    // lat/lng we already have — so the like-priority rows never needed the
+    // full four-query scoring pass they used to make just to read distanceKm.
+    const selected = [
+      ...likePriority.map((c) => ({ user: c as UserRow, likedYou: true })),
+      ...scored.map(({ candidate }) => ({ user: candidate, likedYou: false })),
+    ].slice(0, limit);
 
-    const candidates = [...likePriorityFormatted, ...normalFormatted].slice(0, limit);
+    const photoUrls = await primaryPhotoUrls(env.DB, selected.map((s) => s.user.id));
+
+    const candidates = selected.map(({ user, likedYou }) => ({
+      id: user.id,
+      displayName: user.display_name,
+      bio: user.bio,
+      distanceLabel: bucketedDistanceLabel(haversineKm(me.lat!, me.lng!, user.lat!, user.lng!)),
+      primaryPhotoUrl: photoUrls.get(user.id) ?? null,
+      likedYou,
+    }));
 
     return Response.json({ candidates });
   });

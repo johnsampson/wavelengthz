@@ -39,7 +39,7 @@ async function cookieFor(userId: string) {
 beforeEach(async () => {
   // Child rows before parent `users` rows -- D1 enforces FK constraints here.
   await env.DB.exec(
-    'DELETE FROM notifications; DELETE FROM matches; DELETE FROM blocks; DELETE FROM people_swipes; DELETE FROM user_photos; DELETE FROM sessions; DELETE FROM users;'
+    'DELETE FROM notifications; DELETE FROM matches; DELETE FROM blocks; DELETE FROM people_swipes; DELETE FROM music_swipes; DELETE FROM music_profiles; DELETE FROM user_photos; DELETE FROM sessions; DELETE FROM users;'
   );
   await makeUser('u1');
   await makeUser('u2');
@@ -110,6 +110,127 @@ describe('GET /api/candidates/people', () => {
     const body = await res.json<any>();
     const u2 = body.candidates.find((c: any) => c.id === 'u2');
     expect(u2.primaryPhotoUrl).toBe('/photos/p2');
+  });
+});
+
+describe('max_distance_km is enforced as a filter, not just a scoring weight', () => {
+  async function makeUserAt(id: string, lat: number, lng: number) {
+    await env.DB.prepare(
+      `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, onboarded_at, access_token, refresh_token, token_expires_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 80, 1000, 'a', 'r', 9999999999999, 1000, 1000)`
+    ).bind(id, `sp-${id}`, lat, lng).run();
+  }
+
+  it('never returns a candidate outside the caller\'s radius', async () => {
+    // London, ~7,600km from the Austin coordinates the shared fixtures use.
+    await makeUserAt('far', 51.5, -0.12);
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'far')).toBeUndefined();
+    expect(body.candidates.find((c: any) => c.id === 'u2')).toBeDefined();
+  });
+
+  it('excludes a candidate just outside the radius but keeps one just inside', async () => {
+    // Same longitude as the fixtures, offset purely in latitude: ~111km per
+    // degree, so 0.5deg ~= 55km (inside 80km) and 1.0deg ~= 111km (outside).
+    await makeUserAt('near', 30.27 + 0.5, -97.74);
+    await makeUserAt('outside', 30.27 + 1.0, -97.74);
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'near')).toBeDefined();
+    expect(body.candidates.find((c: any) => c.id === 'outside')).toBeUndefined();
+  });
+
+  it('respects a widened radius, admitting a candidate a narrower one excluded', async () => {
+    await makeUserAt('mid', 30.27 + 1.0, -97.74); // ~111km away
+    const cookie = await cookieFor('u1');
+
+    const narrow = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect((await narrow.json<any>()).candidates.find((c: any) => c.id === 'mid')).toBeUndefined();
+
+    await env.DB.prepare('UPDATE users SET max_distance_km = ? WHERE id = ?').bind(200, 'u1').run();
+    const wide = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect((await wide.json<any>()).candidates.find((c: any) => c.id === 'mid')).toBeDefined();
+  });
+
+  it('excludes an out-of-radius liker from the like-priority queue too', async () => {
+    await makeUserAt('far', 51.5, -0.12);
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, match_score, created_at, updated_at) VALUES ('s1', 'far', 'u1', 'right', 0.99, 1000, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'far')).toBeUndefined();
+  });
+});
+
+describe('GET /api/candidates/people query count does not scale with pool size', () => {
+  // The route used to issue ~5 DB queries per candidate (4 from scoreCandidate,
+  // 2 of which re-read the *caller's* unchanging data, plus a primaryPhotoUrl
+  // lookup). With a 200-candidate pool that is 1000+ subrequests -- at or past
+  // the Workers per-request limit, so the whole deck 500s with "Too many
+  // subrequests" rather than merely being slow. Assert the count is flat.
+  function countingEnv() {
+    let prepareCount = 0;
+    const db = new Proxy(env.DB, {
+      get(target, prop, receiver) {
+        if (prop === 'prepare') {
+          return (...args: any[]) => {
+            prepareCount += 1;
+            return (target as any).prepare(...args);
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+    return { proxied: { ...env, DB: db } as any, count: () => prepareCount };
+  }
+
+  async function seedPool(count: number) {
+    for (let i = 0; i < count; i++) {
+      const id = `pool${i}`;
+      await env.DB.prepare(
+        `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, onboarded_at, access_token, refresh_token, token_expires_at, created_at, updated_at)
+         VALUES (?, ?, 30.27, -97.74, 80, 1000, 'a', 'r', 9999999999999, 1000, 1000)`
+      ).bind(id, `sp-${id}`).run();
+      await env.DB.prepare(
+        `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at)
+         VALUES (?, '[{"artist_id":"a1","rank":1}]', '[]', '["pop"]', 'medium_term', 1000)`
+      ).bind(id).run();
+      await env.DB.prepare(
+        `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at)
+         VALUES (?, ?, 'artist', 'a1', 'right', 1000, 1000)`
+      ).bind(`msw-${id}`, id).run();
+    }
+  }
+
+  async function queryCountForPool(size: number) {
+    await seedPool(size);
+    const cookie = await cookieFor('u1');
+    const { proxied, count } = countingEnv();
+    const res = await worker.fetch(
+      new Request('http://localhost/api/candidates/people?limit=10', { headers: { Cookie: cookie } }),
+      proxied,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(200);
+    return count();
+  }
+
+  it('issues the same number of queries for a 40-candidate pool as for a 4-candidate one', async () => {
+    const small = await queryCountForPool(4);
+
+    await env.DB.exec('DELETE FROM music_swipes; DELETE FROM music_profiles;');
+    await env.DB.exec("DELETE FROM users WHERE id LIKE 'pool%';");
+
+    const large = await queryCountForPool(40);
+
+    expect(large).toBe(small);
+    // Session lookup + like-priority + pool + 2 batched scoring loads + photos.
+    expect(small).toBeLessThanOrEqual(8);
   });
 });
 

@@ -1,7 +1,49 @@
 import type { UserRow } from './session';
 import { getMusicProfile, getRightSwipedItemIds } from './profile';
+import type { MusicProfile } from './scoring';
 import { haversineKm, proximityScore, spotifyOverlap, jaccard, computeBlendedScore } from './scoring';
 
+/** Everything scoring needs about one participant, already loaded. */
+export interface ScoringInputs {
+  profile: MusicProfile;
+  rightSwiped: Set<string>;
+}
+
+/**
+ * Pure scoring core — no DB access.
+ *
+ * Split out from `scoreCandidate` so the people-swipe deck can load every
+ * participant's profile and right-swipes in a fixed number of batched queries
+ * and then score the whole pool in memory. Scoring the deck through
+ * `scoreCandidate` instead re-fetched the *caller's* own profile and swipes
+ * once per candidate, which is both wasted work and a hard cliff: at 200 pool
+ * candidates the route blew past the Workers subrequest limit and the entire
+ * deck failed with "Too many subrequests".
+ */
+export function scoreCandidateFromInputs(
+  me: UserRow,
+  meInputs: ScoringInputs,
+  candidate: UserRow,
+  candidateInputs: ScoringInputs,
+  alreadyLikedMe: boolean
+): { score: number; distanceKm: number } {
+  const distanceKm = haversineKm(me.lat!, me.lng!, candidate.lat!, candidate.lng!);
+
+  const score = computeBlendedScore({
+    spotifyOverlap: spotifyOverlap(meInputs.profile, candidateInputs.profile),
+    musicSwipeOverlap: jaccard(meInputs.rightSwiped, candidateInputs.rightSwiped),
+    mutualInterestBoost: alreadyLikedMe ? 1 : 0,
+    proximityScore: proximityScore(distanceKm, me.max_distance_km),
+  });
+
+  return { score, distanceKm };
+}
+
+/**
+ * Single-pair convenience wrapper: loads both sides, then scores. Fine for
+ * POST /api/swipe/people (one candidate per request); use
+ * `scoreCandidateFromInputs` with batched loads for anything in a loop.
+ */
 export async function scoreCandidate(
   db: D1Database,
   me: UserRow,
@@ -15,16 +57,13 @@ export async function scoreCandidate(
     getRightSwipedItemIds(db, candidate.id),
   ]);
 
-  const distanceKm = haversineKm(me.lat!, me.lng!, candidate.lat!, candidate.lng!);
-
-  const score = computeBlendedScore({
-    spotifyOverlap: spotifyOverlap(meProfile, candidateProfile),
-    musicSwipeOverlap: jaccard(meRightSwiped, candidateRightSwiped),
-    mutualInterestBoost: alreadyLikedMe ? 1 : 0,
-    proximityScore: proximityScore(distanceKm, me.max_distance_km),
-  });
-
-  return { score, distanceKm };
+  return scoreCandidateFromInputs(
+    me,
+    { profile: meProfile, rightSwiped: meRightSwiped },
+    candidate,
+    { profile: candidateProfile, rightSwiped: candidateRightSwiped },
+    alreadyLikedMe
+  );
 }
 
 export async function createMatchIfMutual(
