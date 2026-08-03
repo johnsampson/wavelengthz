@@ -57,6 +57,36 @@ describe('POST /api/onboarding', () => {
     expect(row.onboarded_at).toBeNull();
   });
 
+  it('rejects and writes nothing when date_of_birth is a number', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const req = new Request('http://localhost/api/onboarding', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date_of_birth: 12345, location_label: 'Austin, TX', lat: 30.27, lng: -97.74 }),
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_date_of_birth');
+    const row = await env.DB.prepare('SELECT onboarded_at FROM users WHERE id = ?').bind('u1').first<any>();
+    expect(row.onboarded_at).toBeNull();
+  });
+
+  it('rejects and writes nothing when date_of_birth is a boolean', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const req = new Request('http://localhost/api/onboarding', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date_of_birth: true, location_label: 'Austin, TX', lat: 30.27, lng: -97.74 }),
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_date_of_birth');
+    const row = await env.DB.prepare('SELECT onboarded_at FROM users WHERE id = ?').bind('u1').first<any>();
+    expect(row.onboarded_at).toBeNull();
+  });
+
   it('rejects and writes nothing when the user is under 18', async () => {
     const cookie = await sessionCookieFor('u1');
     const req = new Request('http://localhost/api/onboarding', {

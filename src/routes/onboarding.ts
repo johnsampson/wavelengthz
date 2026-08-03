@@ -17,7 +17,11 @@ export function registerOnboardingRoutes(router: RouterType) {
     if (!user) return new Response('Unauthorized', { status: 401 });
 
     const body = await request.json<OnboardingBody>();
-    if (!body.date_of_birth || Number.isNaN(new Date(body.date_of_birth).getTime())) {
+    if (
+      typeof body.date_of_birth !== 'string' ||
+      !body.date_of_birth ||
+      Number.isNaN(new Date(body.date_of_birth).getTime())
+    ) {
       return Response.json({ error: 'invalid_date_of_birth' }, { status: 400 });
     }
 
