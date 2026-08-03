@@ -9,6 +9,14 @@ export function attachSwipeDeck(container, { onSwipe, thresholdPx = 80 }) {
   let currentX = 0;
   let dragging = false;
 
+  // A previous card may have been dismissed via drag, which leaves this same
+  // DOM node (Alpine reuses #card in place rather than recreating it) with a
+  // fully off-screen `transform` from `settle()`. Without this reset, every
+  // subsequent card -- dragged or dismissed via the accessible Like/Pass
+  // buttons -- would render permanently invisible off-screen.
+  container.style.transition = '';
+  container.style.transform = '';
+
   function onPointerDown(e) {
     dragging = true;
     startX = e.clientX;

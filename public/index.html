@@ -13,13 +13,13 @@
       class="px-4 py-2 rounded-full"
       :class="mode === 'people' ? 'bg-white text-black' : 'bg-neutral-800'"
       @click="setMode('people')"
-      aria-pressed="mode === 'people'"
+      :aria-pressed="mode === 'people'"
     >People</button>
     <button
       class="px-4 py-2 rounded-full"
       :class="mode === 'music' ? 'bg-white text-black' : 'bg-neutral-800'"
       @click="setMode('music')"
-      aria-pressed="mode === 'music'"
+      :aria-pressed="mode === 'music'"
     >Music</button>
   </header>
 
