@@ -12,6 +12,10 @@ database_id = "REPLACE_WITH_REAL_ID_AFTER_wrangler_d1_create"
 binding = "PHOTOS"
 bucket_name = "wavelengthz-photos"
 
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "REPLACE_WITH_REAL_ID_AFTER_wrangler_kv_namespace_create"
+
 [assets]
 directory = "./public"
 binding = "ASSETS"
@@ -32,6 +36,10 @@ database_id = "test-id"
 binding = "PHOTOS"
 bucket_name = "wavelengthz-photos-test"
 
+[[env.test.kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "test-kv-id"
+
 [env.test.vars]
 SPOTIFY_REDIRECT_URI = "http://localhost:8787/callback"
 SPOTIFY_CLIENT_ID = "test-client-id"
@@ -44,3 +52,4 @@ R2_SECRET_ACCESS_KEY = "test-secret-access-key"
 R2_BUCKET_NAME = "wavelengthz-photos-test"
 RESEND_API_KEY = "test-resend-api-key"
 RESEND_FROM_ADDRESS = "matches@wavelengthz.app"
+SENTRY_DSN = "https://testpublickey@o0.ingest.sentry.io/0"

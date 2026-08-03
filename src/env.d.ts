@@ -24,6 +24,7 @@ interface Env {
   R2_BUCKET_NAME: string;
   RESEND_API_KEY: string;
   RESEND_FROM_ADDRESS: string;
+  SENTRY_DSN: string;
 }
 
 // `cloudflare:test`'s `env` export is typed as `Cloudflare.Env` (a separate
@@ -42,5 +43,6 @@ declare namespace Cloudflare {
     R2_BUCKET_NAME: string;
     RESEND_API_KEY: string;
     RESEND_FROM_ADDRESS: string;
+    SENTRY_DSN: string;
   }
 }

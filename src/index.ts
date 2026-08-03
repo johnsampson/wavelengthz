@@ -12,6 +12,8 @@ import { registerNotificationRoutes } from './routes/notifications';
 import { registerSafetyRoutes } from './routes/safety';
 import { registerAccountRoutes } from './routes/account';
 import { purgeExpiredDeletions } from './lib/accountDeletion';
+import { checkRateLimit } from './lib/rateLimit';
+import { reportError } from './lib/sentry';
 
 export const router = Router();
 
@@ -32,9 +34,35 @@ router.all('*', () => new Response('Not found', { status: 404 }));
 
 const GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
 
+const GENERAL_LIMIT = { limit: 120, windowSeconds: 60 };
+const SWIPE_LIMIT = { limit: 30, windowSeconds: 60 };
+
 export default {
-  fetch: (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> =>
-    router.fetch(request, env, ctx),
+  fetch: async (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> => {
+    const url = new URL(request.url);
+    const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+
+    if (url.pathname.startsWith('/api/swipe/')) {
+      const swipeAllowed = await checkRateLimit(env.RATE_LIMIT_KV, `swipe:${ip}`, SWIPE_LIMIT.limit, SWIPE_LIMIT.windowSeconds);
+      if (!swipeAllowed) return Response.json({ error: 'rate_limited' }, { status: 429 });
+    }
+
+    if (url.pathname.startsWith('/api/')) {
+      const generallyAllowed = await checkRateLimit(env.RATE_LIMIT_KV, `general:${ip}`, GENERAL_LIMIT.limit, GENERAL_LIMIT.windowSeconds);
+      if (!generallyAllowed) return Response.json({ error: 'rate_limited' }, { status: 429 });
+    }
+
+    try {
+      return await router.fetch(request, env, ctx);
+    } catch (error) {
+      // reportError is documented to never throw (a Sentry outage must not
+      // break the response path), so awaiting it directly here is safe and
+      // avoids depending on ctx.waitUntil, which isn't always present (e.g.
+      // in tests that pass a minimal fake ExecutionContext).
+      await reportError(env, error, { path: url.pathname });
+      return new Response('Internal Server Error', { status: 500 });
+    }
+  },
   scheduled: async (_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> => {
     ctx.waitUntil(purgeExpiredDeletions(env, GRACE_PERIOD_MS, Date.now()).then(() => undefined));
   },
