@@ -31,8 +31,14 @@ export function registerMeRoutes(router: RouterType) {
       const topGenres = JSON.stringify([...genreRank.keys()]);
       const now = Date.now();
 
+      // OR IGNORE: two concurrent first-time /api/me requests for the same user can
+      // both pass the SELECT check above and both attempt this INSERT. Whichever
+      // lands first wins; the loser's row is discarded instead of throwing a PK
+      // violation. The freshly-fetched `profile` object below is returned either way
+      // — both requests computed equally valid data from Spotify, so it doesn't
+      // matter whose insert actually persisted.
       await env.DB.prepare(
-        `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at)
+        `INSERT OR IGNORE INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at)
          VALUES (?, ?, ?, ?, ?, ?)`
       ).bind(user.id, topArtists, topTracks, topGenres, TIME_RANGE, now).run();
 

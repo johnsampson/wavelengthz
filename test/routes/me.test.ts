@@ -10,7 +10,9 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await env.DB.exec('DELETE FROM sessions; DELETE FROM users; DELETE FROM music_profiles;');
+  // music_profiles and sessions both FK-reference users(id), so they must be
+  // cleared before users to avoid a foreign key constraint violation.
+  await env.DB.exec('DELETE FROM sessions; DELETE FROM music_profiles; DELETE FROM users;');
 });
 
 describe('GET /api/me', () => {
@@ -51,6 +53,78 @@ describe('GET /api/me', () => {
 
     const row = await env.DB.prepare('SELECT * FROM music_profiles WHERE user_id = ?').bind('u1').first<any>();
     expect(row).toBeTruthy();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('does not throw when a concurrent request wins the music_profiles insert race', async () => {
+    const encToken = await encrypt('access-tok', env.TOKEN_ENCRYPTION_KEY);
+    await env.DB.prepare(
+      `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
+       VALUES ('u2', 'sp2', ?, ?, ?, 1000, 1000)`
+    ).bind(encToken, encToken, Date.now() + 100000).run();
+    const { cookie } = await createSession(env.DB, 'u2');
+    const sessionId = cookie.split(';')[0].split('=')[1];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('top/artists')) {
+          return new Response(JSON.stringify({ items: [{ id: 'a2', name: 'Artist Two', genres: ['rock'] }] }), { status: 200 });
+        }
+        if (url.includes('top/tracks')) {
+          return new Response(JSON.stringify({ items: [{ id: 't2', name: 'Track Two' }] }), { status: 200 });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      })
+    );
+
+    const realDb = env.DB;
+    let racedAlready = false;
+
+    // Simulates a second concurrent /api/me request winning the race: right before
+    // our own INSERT executes, another row for the same user_id lands in the table
+    // (as if a concurrent request's INSERT completed first). With plain INSERT this
+    // would throw a primary-key violation; with INSERT OR IGNORE it should not.
+    const racyDb = {
+      prepare: (sql: string) => {
+        const real = realDb.prepare(sql);
+        if (sql.includes('INTO music_profiles') && !racedAlready) {
+          racedAlready = true;
+          return {
+            bind: (...args: unknown[]) => {
+              const boundReal = real.bind(...args);
+              return {
+                run: async () => {
+                  await realDb
+                    .prepare(
+                      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at)
+                       VALUES (?, '[]', '[]', '[]', 'medium_term', ?)`
+                    )
+                    .bind(args[0], Date.now())
+                    .run();
+                  return boundReal.run();
+                },
+              };
+            },
+          };
+        }
+        return real;
+      },
+    } as unknown as D1Database;
+
+    const racyEnv = { ...env, DB: racyDb };
+
+    const req = new Request('http://localhost/api/me', { headers: { Cookie: `wl_session=${sessionId}` } });
+    const res = await worker.fetch(req, racyEnv, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    expect(body.user.id).toBe('u2');
+    expect(body.musicProfile.top_artists).toContain('a2');
+
+    const rows = await realDb.prepare('SELECT * FROM music_profiles WHERE user_id = ?').bind('u2').all();
+    expect(rows.results.length).toBe(1);
 
     vi.unstubAllGlobals();
   });
