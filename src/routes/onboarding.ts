@@ -30,6 +30,15 @@ export function registerOnboardingRoutes(router: RouterType) {
       return Response.json({ error: 'underage' }, { status: 403 });
     }
 
+    if (
+      typeof body.lat !== 'number' ||
+      Number.isNaN(body.lat) ||
+      typeof body.lng !== 'number' ||
+      Number.isNaN(body.lng)
+    ) {
+      return Response.json({ error: 'location_required' }, { status: 400 });
+    }
+
     const now = Date.now();
     await env.DB.prepare(
       `UPDATE users SET bio = ?, date_of_birth = ?, age_verified_at = ?, location_label = ?, lat = ?, lng = ?,

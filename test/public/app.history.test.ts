@@ -31,4 +31,35 @@ describe('api client — history and photo methods', () => {
     );
     vi.unstubAllGlobals();
   });
+
+  it('a non-2xx JSON error response attaches status and parsed body to the thrown error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ error: 'underage' }), { status: 403 }))
+    );
+    let caught: any;
+    try {
+      await api.onboard({ date_of_birth: '2015-01-01', location_label: 'x', lat: 1, lng: 1 });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeDefined();
+    expect(caught.status).toBe(403);
+    expect(caught.body).toEqual({ error: 'underage' });
+    vi.unstubAllGlobals();
+  });
+
+  it('a non-2xx non-JSON error response still throws with a null body (no unhandled rejection)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
+    let caught: any;
+    try {
+      await api.me();
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeDefined();
+    expect(caught.status).toBe(500);
+    expect(caught.body).toBeNull();
+    vi.unstubAllGlobals();
+  });
 });

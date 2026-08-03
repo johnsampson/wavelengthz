@@ -8,6 +8,8 @@
 </head>
 <body class="min-h-screen bg-neutral-950 text-neutral-50 p-4" x-data="settingsApp()">
   <h1 class="text-2xl font-semibold mb-4">Settings</h1>
+  <p x-show="error" x-text="error" class="text-red-400 max-w-md mb-4" role="alert"></p>
+  <p x-show="saved" class="text-emerald-400 max-w-md mb-4">Saved.</p>
 
   <form class="max-w-md flex flex-col gap-4" @submit.prevent="updateDistance()">
     <label class="flex flex-col gap-1">
@@ -39,23 +41,42 @@
       return {
         maxDistanceKm: 80,
         confirmingDelete: false,
+        error: null,
+        saved: false,
         async updateDistance() {
-          const me = await api.me();
-          await api.onboard({
-            date_of_birth: me.user.date_of_birth,
-            location_label: me.user.location_label,
-            lat: me.user.lat,
-            lng: me.user.lng,
-            max_distance_km: this.maxDistanceKm,
-          });
+          this.error = null;
+          this.saved = false;
+          try {
+            const me = await api.me();
+            await api.onboard({
+              date_of_birth: me.user.date_of_birth,
+              location_label: me.user.location_label,
+              lat: me.user.lat,
+              lng: me.user.lng,
+              max_distance_km: this.maxDistanceKm,
+            });
+            this.saved = true;
+          } catch (e) {
+            this.error = 'Could not save your settings. Please try again.';
+          }
         },
         async logout() {
-          await fetch('/logout', { method: 'POST', credentials: 'include' });
-          window.location.href = '/login';
+          this.error = null;
+          try {
+            await fetch('/logout', { method: 'POST', credentials: 'include' });
+            window.location.href = '/login';
+          } catch (e) {
+            this.error = 'Could not log out. Please try again.';
+          }
         },
         async deleteAccount() {
-          await api.deleteAccount();
-          window.location.href = '/';
+          this.error = null;
+          try {
+            await api.deleteAccount();
+            window.location.href = '/';
+          } catch (e) {
+            this.error = 'Could not delete your account. Please try again.';
+          }
         },
       };
     };

@@ -8,10 +8,11 @@
 </head>
 <body class="min-h-screen bg-neutral-950 text-neutral-50 p-4" x-data="matchesApp()" x-init="init()">
   <h1 class="text-2xl font-semibold mb-4">Your matches</h1>
+  <p x-show="error" x-text="error" class="text-red-400 max-w-md mb-4" role="alert"></p>
   <ul class="flex flex-col gap-2 max-w-md">
     <template x-for="match in matches" :key="match.id">
       <li class="flex items-center justify-between bg-neutral-900 rounded p-3">
-        <a class="underline" :href="`/messages.html?matchId=${match.id}`" x-text="match.otherUserId"></a>
+        <a class="underline" :href="`/messages.html?matchId=${match.id}`" x-text="match.otherDisplayName || match.otherUserId"></a>
         <span class="flex gap-2">
           <button class="text-sm text-red-400" @click="unmatch(match.id)">Unmatch</button>
           <button class="text-sm text-yellow-400" @click="report(match.otherUserId)">Report</button>
@@ -28,25 +29,46 @@
     window.matchesApp = function () {
       return {
         matches: [],
+        error: null,
         init() {
           this.load();
         },
         async load() {
-          const res = await api.matches();
-          this.matches = res.matches;
+          this.error = null;
+          try {
+            const res = await api.matches();
+            this.matches = res.matches;
+          } catch (e) {
+            this.error = 'Could not load your matches. Please try again.';
+          }
         },
         async unmatch(matchId) {
-          await api.unmatch(matchId);
-          await this.load();
+          this.error = null;
+          try {
+            await api.unmatch(matchId);
+            await this.load();
+          } catch (e) {
+            this.error = 'Could not unmatch. Please try again.';
+          }
         },
         async block(userId) {
-          await api.block(userId);
-          await this.load();
+          this.error = null;
+          try {
+            await api.block(userId);
+            await this.load();
+          } catch (e) {
+            this.error = 'Could not block that user. Please try again.';
+          }
         },
         async report(userId) {
           const reason = prompt('Reason (inappropriate_photos, harassment, fake_profile, spam, underage, other):');
           if (!reason) return;
-          await api.report(userId, reason);
+          this.error = null;
+          try {
+            await api.report(userId, reason);
+          } catch (e) {
+            this.error = 'Could not submit that report. Please try again.';
+          }
         },
       };
     };

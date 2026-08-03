@@ -22,6 +22,12 @@
     <p x-show="error === 'underage'" class="text-red-400" role="alert">
       You must be 18 or older to use Wavelengthz.
     </p>
+    <p x-show="error === 'location_missing'" class="text-red-400" role="alert">
+      Please share your location or enter one manually below before continuing.
+    </p>
+    <p x-show="error === 'submit_failed'" class="text-red-400" role="alert">
+      Something went wrong saving your profile. Please try again.
+    </p>
 
     <div class="flex flex-col gap-2">
       <button type="button" class="bg-neutral-800 rounded p-2" @click="useBrowserLocation()">
@@ -49,6 +55,7 @@
     <fieldset class="flex flex-col gap-2">
       <legend>Photos</legend>
       <input type="file" accept="image/jpeg,image/png,image/webp" @change="uploadPhoto($event)" aria-label="Upload a profile photo" />
+      <p x-show="photoError" x-text="photoError" class="text-red-400 text-sm" role="alert"></p>
       <ul>
         <template x-for="photo in photos" :key="photo.photoId">
           <li class="flex items-center justify-between">
@@ -78,6 +85,7 @@
         maxDistanceKm: 80,
         photos: [],
         error: null,
+        photoError: null,
 
         init() {},
 
@@ -97,20 +105,34 @@
         async uploadPhoto(event) {
           const file = event.target.files[0];
           if (!file) return;
-          const { uploadUrl, photoId } = await api.photoUploadUrl({ contentType: file.type, sizeBytes: file.size });
-          await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
-          this.photos.push({ photoId, name: file.name });
+          this.photoError = null;
+          try {
+            const { uploadUrl, photoId } = await api.photoUploadUrl({ contentType: file.type, sizeBytes: file.size });
+            await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+            this.photos.push({ photoId, name: file.name });
+          } catch (e) {
+            this.photoError = 'Could not upload that photo. Please try again.';
+          }
         },
 
         async removePhoto(photoId) {
-          await api.deletePhoto(photoId);
-          this.photos = this.photos.filter((p) => p.photoId !== photoId);
+          this.photoError = null;
+          try {
+            await api.deletePhoto(photoId);
+            this.photos = this.photos.filter((p) => p.photoId !== photoId);
+          } catch (e) {
+            this.photoError = 'Could not remove that photo. Please try again.';
+          }
         },
 
         async submit() {
           this.error = null;
           const lat = this.lat ?? this.manualLat;
           const lng = this.lng ?? this.manualLng;
+          if (lat == null || lng == null) {
+            this.error = 'location_missing';
+            return;
+          }
           const locationLabel = this.locationLabel === 'Current location' ? this.locationLabel : this.manualLabel;
           try {
             await api.onboard({
@@ -123,7 +145,13 @@
             });
             window.location.href = '/';
           } catch (e) {
-            this.error = 'underage';
+            if (e.status === 403 && e.body?.error === 'underage') {
+              this.error = 'underage';
+            } else if (e.status === 400 && e.body?.error === 'location_required') {
+              this.error = 'location_missing';
+            } else {
+              this.error = 'submit_failed';
+            }
           }
         },
       };

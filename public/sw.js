@@ -6,6 +6,11 @@ const APP_SHELL = [
   '/swipe.js',
   '/tailwind.css',
   '/manifest.json',
+  '/onboarding.html',
+  '/history.html',
+  '/matches.html',
+  '/messages.html',
+  '/settings.html',
 ];
 
 self.addEventListener('install', (event) => {

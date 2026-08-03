@@ -1,6 +1,18 @@
 async function request(path, options = {}) {
   const res = await fetch(path, { credentials: 'include', ...options });
-  if (!res.ok) throw new Error(`Request to ${path} failed: ${res.status}`);
+  if (!res.ok) {
+    let body = null;
+    try {
+      body = await res.json();
+    } catch (e) {
+      // Response body wasn't JSON (or was empty) -- leave body null so
+      // callers can still inspect `status` without crashing on parse.
+    }
+    const err = new Error(`Request to ${path} failed: ${res.status}`);
+    err.status = res.status;
+    err.body = body;
+    throw err;
+  }
   return res.status === 204 ? null : res.json();
 }
 
