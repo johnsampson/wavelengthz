@@ -15,14 +15,19 @@ export function registerMatchRoutes(router: RouterType) {
     if (!user) return new Response('Unauthorized', { status: 401 });
 
     const rows = await env.DB.prepare(
-      `SELECT id, user_a_id, user_b_id, created_at FROM matches
-       WHERE unmatched_at IS NULL AND (user_a_id = ? OR user_b_id = ?)
-       ORDER BY created_at DESC`
+      `SELECT m.id, m.user_a_id, m.user_b_id, m.created_at,
+              ua.display_name as user_a_display_name, ub.display_name as user_b_display_name
+       FROM matches m
+       JOIN users ua ON ua.id = m.user_a_id
+       JOIN users ub ON ub.id = m.user_b_id
+       WHERE m.unmatched_at IS NULL AND (m.user_a_id = ? OR m.user_b_id = ?)
+       ORDER BY m.created_at DESC`
     ).bind(user.id, user.id).all<any>();
 
     const matches = rows.results.map((m) => ({
       id: m.id,
       otherUserId: m.user_a_id === user.id ? m.user_b_id : m.user_a_id,
+      otherDisplayName: m.user_a_id === user.id ? m.user_b_display_name : m.user_a_display_name,
       createdAt: m.created_at,
     }));
 
@@ -77,7 +82,14 @@ export function registerMatchRoutes(router: RouterType) {
       `INSERT INTO notifications (id, user_id, type, related_id, created_at) VALUES (?, ?, 'message', ?, ?)`
     ).bind(crypto.randomUUID(), recipientId, messageId, now).run();
 
-    await notifyMessage(env.DB, env, messageId, recipientId);
+    try {
+      await notifyMessage(env.DB, env, messageId, recipientId);
+    } catch (err) {
+      // Same reasoning as notifyMatch: the message is already committed, so
+      // an email-provider failure must not surface as a failed send to the
+      // caller.
+      console.error('notifyMessage failed', err);
+    }
 
     return Response.json({ ok: true, messageId });
   });

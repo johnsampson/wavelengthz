@@ -139,7 +139,14 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
       match = await createMatchIfMutual(env.DB, me.id, target_id);
       if (match) {
         const { notifyMatch } = await import('../lib/notifications');
-        await notifyMatch(env.DB, env, match.matchId);
+        try {
+          await notifyMatch(env.DB, env, match.matchId);
+        } catch (err) {
+          // Email delivery failures must never turn a successful match into
+          // a failed request for the caller -- the match row is already
+          // committed. Log and move on.
+          console.error('notifyMatch failed', err);
+        }
       }
     }
 

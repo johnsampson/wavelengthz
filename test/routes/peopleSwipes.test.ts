@@ -160,6 +160,51 @@ describe('match creation dispatches a transactional email', () => {
   });
 });
 
+describe('match creation survives an email-provider outage', () => {
+  it('still returns matched: true and commits the match even when Resend errors', async () => {
+    await makeUserWithEmail('e1', 'e1@example.com');
+    await makeUserWithEmail('e2', 'e2@example.com');
+    // Resend returns a non-2xx for every call -- sendEmail throws.
+    const fetchMock = vi.fn(async () => new Response('service unavailable', { status: 503 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const cookie1 = await cookieFor('e1');
+    const cookie2 = await cookieFor('e2');
+
+    await worker.fetch(
+      new Request('http://localhost/api/swipe/people', {
+        method: 'POST',
+        headers: { Cookie: cookie1, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_id: 'e2', direction: 'right' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/swipe/people', {
+        method: 'POST',
+        headers: { Cookie: cookie2, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_id: 'e1', direction: 'right' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+
+    // The Resend call was attempted (and failed), but the caller still gets
+    // a clean 200 with matched: true -- the DB write already succeeded and
+    // email delivery is best-effort, not a precondition for the response.
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    expect(body.matched).toBe(true);
+
+    const matches = await env.DB.prepare('SELECT * FROM matches').all<any>();
+    expect(matches.results.length).toBe(1);
+
+    vi.unstubAllGlobals();
+  });
+});
+
 describe('GET /api/swipes/people and PATCH', () => {
   it('lists history joined with the target display name and allows changing a past decision', async () => {
     await env.DB.prepare('UPDATE users SET display_name = ? WHERE id = ?').bind('U Two', 'u2').run();
