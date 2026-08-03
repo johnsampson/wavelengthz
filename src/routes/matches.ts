@@ -2,9 +2,19 @@ import type { RouterType, IRequest } from 'itty-router';
 import { getSessionUser } from '../lib/session';
 import { notifyMessage } from '../lib/notifications';
 
+// A soft-deleted account must disappear from matches and messaging
+// immediately (docs/PLAN.md §9), not linger until the 7-day grace period
+// expires and the hard purge runs. `getSessionUser` already excludes the
+// *caller* if they're deleted; these joins cover the counterpart.
 async function loadActiveMatchForParticipant(db: D1Database, matchId: string, userId: string) {
   return db
-    .prepare(`SELECT * FROM matches WHERE id = ? AND unmatched_at IS NULL AND (user_a_id = ? OR user_b_id = ?)`)
+    .prepare(
+      `SELECT m.* FROM matches m
+       JOIN users ua ON ua.id = m.user_a_id
+       JOIN users ub ON ub.id = m.user_b_id
+       WHERE m.id = ? AND m.unmatched_at IS NULL AND (m.user_a_id = ? OR m.user_b_id = ?)
+         AND ua.deleted_at IS NULL AND ub.deleted_at IS NULL`
+    )
     .bind(matchId, userId, userId)
     .first<{ id: string; user_a_id: string; user_b_id: string }>();
 }
@@ -21,6 +31,7 @@ export function registerMatchRoutes(router: RouterType) {
        JOIN users ua ON ua.id = m.user_a_id
        JOIN users ub ON ub.id = m.user_b_id
        WHERE m.unmatched_at IS NULL AND (m.user_a_id = ? OR m.user_b_id = ?)
+         AND ua.deleted_at IS NULL AND ub.deleted_at IS NULL
        ORDER BY m.created_at DESC`
     ).bind(user.id, user.id).all<any>();
 

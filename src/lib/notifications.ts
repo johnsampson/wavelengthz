@@ -1,8 +1,15 @@
 import { sendEmail } from './email';
 
 export async function notifyMatch(db: D1Database, env: Env, matchId: string): Promise<void> {
+  // `u.deleted_at IS NULL`: a soft-deleted account stays in the users table
+  // for the 7-day grace period before the hard purge. Emailing that address
+  // in the meantime contradicts the deletion the user just requested.
   const rows = await db
-    .prepare(`SELECT n.id as notification_id, u.email FROM notifications n JOIN users u ON u.id = n.user_id WHERE n.related_id = ? AND n.type = 'match'`)
+    .prepare(
+      `SELECT n.id as notification_id, u.email FROM notifications n
+       JOIN users u ON u.id = n.user_id
+       WHERE n.related_id = ? AND n.type = 'match' AND u.deleted_at IS NULL`
+    )
     .bind(matchId)
     .all<{ notification_id: string; email: string | null }>();
 
@@ -18,7 +25,12 @@ export async function notifyMatch(db: D1Database, env: Env, matchId: string): Pr
 }
 
 export async function notifyMessage(db: D1Database, env: Env, messageId: string, recipientId: string): Promise<void> {
-  const recipient = await db.prepare('SELECT email FROM users WHERE id = ?').bind(recipientId).first<{ email: string | null }>();
+  // See notifyMatch: never email an account that's inside its post-deletion
+  // grace period.
+  const recipient = await db
+    .prepare('SELECT email FROM users WHERE id = ? AND deleted_at IS NULL')
+    .bind(recipientId)
+    .first<{ email: string | null }>();
   if (!recipient?.email) return;
 
   const notification = await db

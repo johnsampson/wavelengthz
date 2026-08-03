@@ -52,6 +52,17 @@ describe('GET /api/matches', () => {
     expect(body.matches.length).toBe(0);
   });
 
+  it('hides a match whose other participant has been soft-deleted', async () => {
+    // A soft-deleted account must "disappear from all candidate pools,
+    // matches, and search right away" (docs/PLAN.md) -- not linger for the
+    // whole 7-day grace period before the hard purge runs.
+    await env.DB.prepare('UPDATE users SET deleted_at = ? WHERE id = ?').bind(2000, 'u2').run();
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/matches', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.matches.length).toBe(0);
+  });
+
   it('rejects an unmatch attempt from a non-participant and leaves the match active', async () => {
     const cookie = await cookieFor('u3');
     const res = await worker.fetch(
@@ -128,6 +139,47 @@ describe('messages', () => {
     const notification = await env.DB.prepare("SELECT * FROM notifications WHERE type = 'message' AND user_id = 'u2'").first<any>();
     expect(notification).toBeTruthy();
     expect(notification.email_sent_at).toBeNull(); // send failed, never stamped
+  });
+
+  it('blocks messaging when the other participant has been soft-deleted', async () => {
+    await env.DB.prepare('UPDATE users SET deleted_at = ? WHERE id = ?').bind(2000, 'u2').run();
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: 'hi' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(403);
+
+    const messages = await env.DB.prepare('SELECT * FROM messages WHERE match_id = ?').bind('m1').all<any>();
+    expect(messages.results.length).toBe(0);
+    expect(fetch).not.toHaveBeenCalled(); // no email to a deleted user's address
+  });
+
+  it('blocks reading messages when the other participant has been soft-deleted', async () => {
+    await env.DB.prepare('UPDATE users SET deleted_at = ? WHERE id = ?').bind(2000, 'u2').run();
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages', { headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it('blocks unmatching a match whose other participant has been soft-deleted', async () => {
+    await env.DB.prepare('UPDATE users SET deleted_at = ? WHERE id = ?').bind(2000, 'u2').run();
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/unmatch', { method: 'POST', headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(404);
   });
 
   it('blocks messaging after unmatch', async () => {
