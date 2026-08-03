@@ -24,6 +24,7 @@ beforeEach(async () => {
     DELETE FROM messages; DELETE FROM matches; DELETE FROM user_photos;
     DELETE FROM people_swipes; DELETE FROM music_swipes; DELETE FROM music_profiles;
     DELETE FROM blocks; DELETE FROM reports; DELETE FROM notifications; DELETE FROM sessions;
+    DELETE FROM tracks; DELETE FROM artists;
     DELETE FROM users;
   `);
 });
@@ -50,6 +51,33 @@ describe('hardDeleteUser', () => {
     expect(await env.DB.prepare('SELECT * FROM people_swipes WHERE id = ?').bind('ps1').first()).toBeNull();
     expect(await env.DB.prepare('SELECT * FROM reports WHERE id = ?').bind('r1').first()).toBeNull(); // u1 was reporter
     expect(await env.DB.prepare('SELECT * FROM reports WHERE id = ?').bind('r2').first()).not.toBeNull(); // u1 was reported — kept
+  });
+});
+
+describe('hardDeleteUser and catalog attribution', () => {
+  it('nulls added_by_user_id on artists/tracks the user added, rather than leaving it dangling', async () => {
+    // artists.added_by_user_id / tracks.added_by_user_id are nullable FKs to users(id),
+    // populated by the catalog search-and-add feature (src/routes/catalog.ts). The
+    // catalog rows themselves outlive the user, so hardDeleteUser must null the
+    // attribution rather than leave it pointing at a row it's about to delete —
+    // D1 enforces this FK too.
+    await seedFullUser('u1');
+    await env.DB.prepare(
+      `INSERT INTO artists (id, name, genres, source, added_by_user_id, approved, created_at) VALUES ('a1', 'User Added Artist', '["pop"]', 'user_added', 'u1', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, source, added_by_user_id, approved, created_at) VALUES ('t1', 'User Added Track', 'a1', 'user_added', 'u1', 1, 1000)`
+    ).run();
+
+    await hardDeleteUser(env as any, 'u1');
+
+    expect(await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind('u1').first()).toBeNull();
+    const artist = await env.DB.prepare('SELECT * FROM artists WHERE id = ?').bind('a1').first<any>();
+    expect(artist).not.toBeNull();
+    expect(artist.added_by_user_id).toBeNull();
+    const track = await env.DB.prepare('SELECT * FROM tracks WHERE id = ?').bind('t1').first<any>();
+    expect(track).not.toBeNull();
+    expect(track.added_by_user_id).toBeNull();
   });
 });
 
