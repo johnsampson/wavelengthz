@@ -81,6 +81,36 @@ describe('GET /api/candidates/people', () => {
     expect(u2.primaryPhotoUrl).toBe('/photos/p1');
     expect(u3.primaryPhotoUrl).toBeNull();
   });
+
+  it('still shows a primaryPhotoUrl after the candidate deletes their position-0 photo', async () => {
+    // Regression: DELETE /api/photos/:id used to leave a hole at position 0,
+    // and primaryPhotoUrl matches strictly on `position = 0` -- so deleting
+    // your first photo made you permanently photoless in everyone's deck.
+    await env.DB.prepare(
+      `INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES ('p1', 'u2', 'users/u2/p1.jpg', 0, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES ('p2', 'u2', 'users/u2/p2.jpg', 1, 2000)`
+    ).run();
+
+    const u2Cookie = await cookieFor('u2');
+    const delRes = await worker.fetch(
+      new Request('http://localhost/api/photos/p1', { method: 'DELETE', headers: { Cookie: u2Cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(delRes.status).toBe(200);
+
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    const body = await res.json<any>();
+    const u2 = body.candidates.find((c: any) => c.id === 'u2');
+    expect(u2.primaryPhotoUrl).toBe('/photos/p2');
+  });
 });
 
 describe('POST /api/swipe/people', () => {

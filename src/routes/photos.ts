@@ -48,6 +48,22 @@ export function registerPhotoRoutes(router: RouterType) {
     await env.PHOTOS.delete(photo.r2_key);
     await env.DB.prepare('DELETE FROM user_photos WHERE id = ?').bind(request.params.id).run();
 
+    // Close the gap the delete just opened. `primaryPhotoUrl` (people-swipe
+    // deck) matches strictly on `position = 0` and new uploads take
+    // `position = COUNT(*)`, so leaving a hole would make the user
+    // permanently photoless to everyone else the moment they delete their
+    // first photo -- and would let the next upload collide with an existing
+    // position.
+    const remaining = await env.DB.prepare(
+      'SELECT id FROM user_photos WHERE user_id = ? ORDER BY position ASC, created_at ASC'
+    )
+      .bind(user.id)
+      .all<{ id: string }>();
+
+    const renumber = env.DB.prepare('UPDATE user_photos SET position = ? WHERE id = ?');
+    const statements = remaining.results.map((row, index) => renumber.bind(index, row.id));
+    if (statements.length > 0) await env.DB.batch(statements);
+
     return Response.json({ ok: true });
   });
 
@@ -63,8 +79,22 @@ export function registerPhotoRoutes(router: RouterType) {
     const object = await env.PHOTOS.get(photo.r2_key);
     if (!object) return new Response('Not found', { status: 404 });
 
+    // The presigned upload URL only binds `host` into the SigV4 signature
+    // (src/lib/r2.ts), so the stored `Content-Type` is attacker-controlled
+    // regardless of what was declared to POST /api/photos: a client can claim
+    // an `image/jpeg` slot and then PUT an HTML/JS payload as `text/html`.
+    // Echoing that back would be stored XSS on our own origin with
+    // same-origin access to the victim's session. Whitelist the stored value
+    // against the same set the upload endpoint accepts, and send `nosniff` so
+    // the browser can't content-sniff its way past the fallback either.
+    const storedType = object.httpMetadata?.contentType;
+    const contentType = storedType && ALLOWED_TYPES.has(storedType) ? storedType : 'application/octet-stream';
+
     return new Response(object.body, {
-      headers: { 'Content-Type': object.httpMetadata?.contentType ?? 'application/octet-stream' },
+      headers: {
+        'Content-Type': contentType,
+        'X-Content-Type-Options': 'nosniff',
+      },
     });
   });
 }
