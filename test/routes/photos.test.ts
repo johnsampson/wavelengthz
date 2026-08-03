@@ -89,7 +89,7 @@ describe('GET /photos/:id', () => {
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toBe('image/jpeg');
-    expect(await res.text()).toBe('fake-jpeg-bytes');
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(new TextEncoder().encode('fake-jpeg-bytes'));
   });
 
   it('returns 404 for an unknown photo id', async () => {
