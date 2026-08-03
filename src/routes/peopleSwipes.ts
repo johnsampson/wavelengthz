@@ -137,6 +137,10 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
     let match = null;
     if (direction === 'right') {
       match = await createMatchIfMutual(env.DB, me.id, target_id);
+      if (match) {
+        const { notifyMatch } = await import('../lib/notifications');
+        await notifyMatch(env.DB, env, match.matchId);
+      }
     }
 
     return Response.json({ ok: true, matched: !!match });

@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
 import worker from '../../src/index';
@@ -22,6 +22,13 @@ async function makeUnonboardedUser(id: string) {
     `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
      VALUES (?, ?, 'a', 'r', 9999999999999, 1000, 1000)`
   ).bind(id, `sp-${id}`).run();
+}
+
+async function makeUserWithEmail(id: string, email: string) {
+  await env.DB.prepare(
+    `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, onboarded_at, email, access_token, refresh_token, token_expires_at, created_at, updated_at)
+     VALUES (?, ?, 30.27, -97.74, 80, 1000, ?, 'a', 'r', 9999999999999, 1000, 1000)`
+  ).bind(id, `sp-${id}`, email).run();
 }
 
 async function cookieFor(userId: string) {
@@ -109,6 +116,47 @@ describe('POST /api/swipe/people', () => {
 
     const swipeRow = await env.DB.prepare('SELECT match_score FROM people_swipes WHERE swiper_id = ? AND target_id = ?').bind('u1', 'u2').first<any>();
     expect(swipeRow.match_score).not.toBeNull();
+  });
+});
+
+describe('match creation dispatches a transactional email', () => {
+  it('calls the Resend API for a matched user who has an email on file', async () => {
+    await makeUserWithEmail('e1', 'e1@example.com');
+    await makeUserWithEmail('e2', 'e2@example.com');
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const cookie1 = await cookieFor('e1');
+    const cookie2 = await cookieFor('e2');
+
+    await worker.fetch(
+      new Request('http://localhost/api/swipe/people', {
+        method: 'POST',
+        headers: { Cookie: cookie1, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_id: 'e2', direction: 'right' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(fetchMock).not.toHaveBeenCalled(); // no match yet -- one-directional swipe
+
+    await worker.fetch(
+      new Request('http://localhost/api/swipe/people', {
+        method: 'POST',
+        headers: { Cookie: cookie2, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_id: 'e1', direction: 'right' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith('https://api.resend.com/emails', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenCalledTimes(2); // one email per matched participant
+
+    const notifications = await env.DB.prepare("SELECT * FROM notifications WHERE type = 'match'").all<any>();
+    expect(notifications.results.every((n: any) => n.email_sent_at !== null)).toBe(true);
+
+    vi.unstubAllGlobals();
   });
 });
 
