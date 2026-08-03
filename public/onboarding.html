@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wavelengthz — Set up your profile</title>
+  <link rel="stylesheet" href="/tailwind.css" />
+</head>
+<body class="min-h-screen bg-neutral-950 text-neutral-50 p-4" x-data="onboardingApp()" x-init="init()">
+  <form class="max-w-md mx-auto flex flex-col gap-4" @submit.prevent="submit()">
+    <h1 class="text-2xl font-semibold">Tell us about you</h1>
+
+    <label class="flex flex-col gap-1">
+      <span>Bio</span>
+      <textarea class="bg-neutral-900 rounded p-2" x-model="bio" maxlength="500"></textarea>
+    </label>
+
+    <label class="flex flex-col gap-1">
+      <span>Date of birth</span>
+      <input class="bg-neutral-900 rounded p-2" type="date" x-model="dateOfBirth" required />
+    </label>
+    <p x-show="error === 'underage'" class="text-red-400" role="alert">
+      You must be 18 or older to use Wavelengthz.
+    </p>
+
+    <div class="flex flex-col gap-2">
+      <button type="button" class="bg-neutral-800 rounded p-2" @click="useBrowserLocation()">
+        Use my current location
+      </button>
+      <p x-show="locationLabel" x-text="locationLabel" class="text-neutral-400 text-sm"></p>
+      <details>
+        <summary class="text-sm text-neutral-400">Enter location manually instead</summary>
+        <label class="flex flex-col gap-1 mt-2">
+          <span>City / region</span>
+          <input class="bg-neutral-900 rounded p-2" type="text" x-model="manualLabel" />
+        </label>
+        <div class="flex gap-2 mt-2">
+          <input class="bg-neutral-900 rounded p-2 w-1/2" type="number" step="any" placeholder="Latitude" x-model.number="manualLat" />
+          <input class="bg-neutral-900 rounded p-2 w-1/2" type="number" step="any" placeholder="Longitude" x-model.number="manualLng" />
+        </div>
+      </details>
+    </div>
+
+    <label class="flex flex-col gap-1">
+      <span>Max distance (km): <span x-text="maxDistanceKm"></span></span>
+      <input type="range" min="5" max="200" x-model.number="maxDistanceKm" />
+    </label>
+
+    <fieldset class="flex flex-col gap-2">
+      <legend>Photos</legend>
+      <input type="file" accept="image/jpeg,image/png,image/webp" @change="uploadPhoto($event)" aria-label="Upload a profile photo" />
+      <ul>
+        <template x-for="photo in photos" :key="photo.photoId">
+          <li class="flex items-center justify-between">
+            <span x-text="photo.name"></span>
+            <button type="button" class="text-red-400" @click="removePhoto(photo.photoId)">Remove</button>
+          </li>
+        </template>
+      </ul>
+    </fieldset>
+
+    <button type="submit" class="bg-emerald-600 rounded p-3 font-semibold">Continue</button>
+  </form>
+
+  <script type="module">
+    import { api } from '/app.js';
+
+    window.onboardingApp = function () {
+      return {
+        bio: '',
+        dateOfBirth: '',
+        locationLabel: '',
+        manualLabel: '',
+        manualLat: null,
+        manualLng: null,
+        lat: null,
+        lng: null,
+        maxDistanceKm: 80,
+        photos: [],
+        error: null,
+
+        init() {},
+
+        useBrowserLocation() {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              this.lat = pos.coords.latitude;
+              this.lng = pos.coords.longitude;
+              this.locationLabel = 'Current location';
+            },
+            () => {
+              this.locationLabel = 'Location permission denied — use manual entry below.';
+            }
+          );
+        },
+
+        async uploadPhoto(event) {
+          const file = event.target.files[0];
+          if (!file) return;
+          const { uploadUrl, photoId } = await api.photoUploadUrl({ contentType: file.type, sizeBytes: file.size });
+          await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+          this.photos.push({ photoId, name: file.name });
+        },
+
+        async removePhoto(photoId) {
+          await api.deletePhoto(photoId);
+          this.photos = this.photos.filter((p) => p.photoId !== photoId);
+        },
+
+        async submit() {
+          this.error = null;
+          const lat = this.lat ?? this.manualLat;
+          const lng = this.lng ?? this.manualLng;
+          const locationLabel = this.locationLabel === 'Current location' ? this.locationLabel : this.manualLabel;
+          try {
+            await api.onboard({
+              bio: this.bio,
+              date_of_birth: this.dateOfBirth,
+              location_label: locationLabel,
+              lat,
+              lng,
+              max_distance_km: this.maxDistanceKm,
+            });
+            window.location.href = '/';
+          } catch (e) {
+            this.error = 'underage';
+          }
+        },
+      };
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</body>
+</html>

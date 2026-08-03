@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wavelengthz — Matches</title>
+  <link rel="stylesheet" href="/tailwind.css" />
+</head>
+<body class="min-h-screen bg-neutral-950 text-neutral-50 p-4" x-data="matchesApp()" x-init="init()">
+  <h1 class="text-2xl font-semibold mb-4">Your matches</h1>
+  <ul class="flex flex-col gap-2 max-w-md">
+    <template x-for="match in matches" :key="match.id">
+      <li class="flex items-center justify-between bg-neutral-900 rounded p-3">
+        <a class="underline" :href="`/messages.html?matchId=${match.id}`" x-text="match.otherUserId"></a>
+        <span class="flex gap-2">
+          <button class="text-sm text-red-400" @click="unmatch(match.id)">Unmatch</button>
+          <button class="text-sm text-yellow-400" @click="report(match.otherUserId)">Report</button>
+          <button class="text-sm text-neutral-400" @click="block(match.otherUserId)">Block</button>
+        </span>
+      </li>
+    </template>
+  </ul>
+  <p x-show="matches.length === 0" class="text-neutral-400">No matches yet — keep swiping!</p>
+
+  <script type="module">
+    import { api } from '/app.js';
+
+    window.matchesApp = function () {
+      return {
+        matches: [],
+        init() {
+          this.load();
+        },
+        async load() {
+          const res = await api.matches();
+          this.matches = res.matches;
+        },
+        async unmatch(matchId) {
+          await api.unmatch(matchId);
+          await this.load();
+        },
+        async block(userId) {
+          await api.block(userId);
+          await this.load();
+        },
+        async report(userId) {
+          const reason = prompt('Reason (inappropriate_photos, harassment, fake_profile, spam, underage, other):');
+          if (!reason) return;
+          await api.report(userId, reason);
+        },
+      };
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</body>
+</html>

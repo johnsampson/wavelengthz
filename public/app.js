@@ -29,4 +29,10 @@ export const api = {
     }),
   unmatch: (matchId) => request(`/api/matches/${matchId}/unmatch`, { method: 'POST' }),
   deleteAccount: () => request('/api/account', { method: 'DELETE' }),
+  photoUploadUrl: (payload) =>
+    request('/api/photos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+  deletePhoto: (photoId) => request(`/api/photos/${photoId}`, { method: 'DELETE' }),
+  swipeHistory: (mode, limit = 20, offset = 0) => request(`/api/swipes/${mode}?limit=${limit}&offset=${offset}`),
+  updateSwipe: (mode, id, direction) =>
+    request(`/api/swipes/${mode}/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }) }),
 };

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wavelengthz — History</title>
+  <link rel="stylesheet" href="/tailwind.css" />
+</head>
+<body class="min-h-screen bg-neutral-950 text-neutral-50 p-4" x-data="historyApp()" x-init="init()">
+  <div class="flex gap-2 mb-4">
+    <button class="px-4 py-2 rounded-full" :class="mode === 'people' ? 'bg-white text-black' : 'bg-neutral-800'" @click="setMode('people')">People</button>
+    <button class="px-4 py-2 rounded-full" :class="mode === 'music' ? 'bg-white text-black' : 'bg-neutral-800'" @click="setMode('music')">Music</button>
+  </div>
+
+  <ul class="flex flex-col gap-2 max-w-md">
+    <template x-for="swipe in swipes" :key="swipe.id">
+      <li class="flex items-center justify-between bg-neutral-900 rounded p-3">
+        <span x-text="swipe.name || swipe.target_id"></span>
+        <span class="flex items-center gap-2">
+          <span x-text="swipe.direction === 'right' ? '♥ Liked' : '✕ Passed'"></span>
+          <button class="text-sm underline" @click="toggle(swipe)">Change</button>
+        </span>
+      </li>
+    </template>
+  </ul>
+
+  <script type="module">
+    import { api } from '/app.js';
+
+    window.historyApp = function () {
+      return {
+        mode: 'people',
+        swipes: [],
+        init() {
+          this.load();
+        },
+        setMode(mode) {
+          this.mode = mode;
+          this.load();
+        },
+        async load() {
+          const res = await api.swipeHistory(this.mode);
+          this.swipes = res.swipes;
+        },
+        async toggle(swipe) {
+          const newDirection = swipe.direction === 'right' ? 'left' : 'right';
+          await api.updateSwipe(this.mode, swipe.id, newDirection);
+          swipe.direction = newDirection;
+        },
+      };
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</body>
+</html>

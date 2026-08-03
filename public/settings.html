@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wavelengthz — Settings</title>
+  <link rel="stylesheet" href="/tailwind.css" />
+</head>
+<body class="min-h-screen bg-neutral-950 text-neutral-50 p-4" x-data="settingsApp()">
+  <h1 class="text-2xl font-semibold mb-4">Settings</h1>
+
+  <form class="max-w-md flex flex-col gap-4" @submit.prevent="updateDistance()">
+    <label class="flex flex-col gap-1">
+      <span>Max distance (km): <span x-text="maxDistanceKm"></span></span>
+      <input type="range" min="5" max="200" x-model.number="maxDistanceKm" />
+    </label>
+    <button type="submit" class="bg-neutral-800 rounded p-2">Save</button>
+  </form>
+
+  <button class="mt-6 text-neutral-400 underline" @click="logout()">Log out</button>
+
+  <div class="mt-8 border-t border-neutral-800 pt-4">
+    <button class="text-red-400 underline" @click="confirmingDelete = true" x-show="!confirmingDelete">
+      Delete my account
+    </button>
+    <div x-show="confirmingDelete" class="flex flex-col gap-2">
+      <p role="alert">This deletes your account. Are you sure?</p>
+      <div class="flex gap-2">
+        <button class="bg-red-600 rounded px-3 py-1" @click="deleteAccount()">Yes, delete</button>
+        <button class="bg-neutral-800 rounded px-3 py-1" @click="confirmingDelete = false">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { api } from '/app.js';
+
+    window.settingsApp = function () {
+      return {
+        maxDistanceKm: 80,
+        confirmingDelete: false,
+        async updateDistance() {
+          const me = await api.me();
+          await api.onboard({
+            date_of_birth: me.user.date_of_birth,
+            location_label: me.user.location_label,
+            lat: me.user.lat,
+            lng: me.user.lng,
+            max_distance_km: this.maxDistanceKm,
+          });
+        },
+        async logout() {
+          await fetch('/logout', { method: 'POST', credentials: 'include' });
+          window.location.href = '/login';
+        },
+        async deleteAccount() {
+          await api.deleteAccount();
+          window.location.href = '/';
+        },
+      };
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</body>
+</html>

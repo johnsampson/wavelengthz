@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wavelengthz — Messages</title>
+  <link rel="stylesheet" href="/tailwind.css" />
+</head>
+<body class="min-h-screen bg-neutral-950 text-neutral-50 p-4 flex flex-col" x-data="messagesApp()" x-init="init()">
+  <ul class="flex-1 flex flex-col gap-2 overflow-y-auto max-w-md w-full mx-auto">
+    <template x-for="message in messages" :key="message.id">
+      <li class="bg-neutral-900 rounded p-2" x-text="message.body"></li>
+    </template>
+  </ul>
+  <form class="flex gap-2 max-w-md w-full mx-auto mt-4" @submit.prevent="send()">
+    <label class="sr-only" for="message-input">Message</label>
+    <input id="message-input" class="flex-1 bg-neutral-900 rounded p-2" x-model="draft" required />
+    <button type="submit" class="bg-emerald-600 rounded px-4">Send</button>
+  </form>
+
+  <script type="module">
+    import { api } from '/app.js';
+
+    window.messagesApp = function () {
+      return {
+        matchId: new URLSearchParams(window.location.search).get('matchId'),
+        messages: [],
+        draft: '',
+        init() {
+          this.load();
+        },
+        async load() {
+          const res = await api.messages(this.matchId);
+          this.messages = res.messages;
+        },
+        async send() {
+          if (!this.draft.trim()) return;
+          await api.sendMessage(this.matchId, this.draft);
+          this.draft = '';
+          await this.load();
+        },
+      };
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</body>
+</html>
