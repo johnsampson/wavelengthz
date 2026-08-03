@@ -76,6 +76,10 @@ export function registerCatalogRoutes(router: RouterType) {
     if (!user) return new Response('Unauthorized', { status: 401 });
 
     const { spotifyTrackId, artistId } = await request.json<{ spotifyTrackId: string; artistId: string }>();
+
+    const artist = await env.DB.prepare('SELECT id FROM artists WHERE id = ?').bind(artistId).first();
+    if (!artist) return Response.json({ error: 'unknown artist_id' }, { status: 400 });
+
     const token = await getValidAccessToken(user, env, env.DB).catch(() => getClientCredentialsToken(env));
     const track = await fetchTrackById(token, spotifyTrackId);
 

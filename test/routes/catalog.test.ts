@@ -9,7 +9,10 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await env.DB.exec('DELETE FROM sessions; DELETE FROM users; DELETE FROM artists; DELETE FROM tracks;');
+  // Children before parents: tracks/artists reference users via added_by_user_id,
+  // and tracks references artists — deleting users/artists first trips the FK constraint
+  // once a prior test has left a row with a non-null reference.
+  await env.DB.exec('DELETE FROM sessions; DELETE FROM tracks; DELETE FROM artists; DELETE FROM users;');
   await env.DB.prepare(
     `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
      VALUES ('u1', 'sp1', 'a', 'r', 9999999999999, 1000, 1000)`
@@ -58,6 +61,36 @@ describe('GET /api/artists/search', () => {
     expect(fresh.inCatalog).toBe(false);
     vi.unstubAllGlobals();
   });
+
+  it('dedupes an artist that appears in both the local catalog and the live Spotify results', async () => {
+    // Stub Spotify's artist search to return the SAME id already seeded locally ('local-1'),
+    // simulating the case where a catalog artist also matches the live search.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+        if (url.includes('/v1/search') && url.includes('type=artist')) {
+          return new Response(
+            JSON.stringify({
+              artists: { items: [{ id: 'local-1', name: 'Local Artist', genres: ['pop'], images: [], popularity: 40 }] },
+            }),
+            { status: 200 }
+          );
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/artists/search?q=local', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    const matches = body.results.filter((r: any) => r.id === 'local-1');
+    expect(matches).toHaveLength(1);
+    expect(matches[0].inCatalog).toBe(true);
+    vi.unstubAllGlobals();
+  });
 });
 
 describe('POST /api/artists', () => {
@@ -75,6 +108,25 @@ describe('POST /api/artists', () => {
     expect(row.source).toBe('spotify_search');
     expect(row.approved).toBe(1);
     expect(row.added_by_user_id).toBe('u1');
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('POST /api/tracks', () => {
+  it('returns 400 (not an uncaught exception) for an unknown artistId and inserts nothing', async () => {
+    stubSpotify();
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/tracks', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ spotifyTrackId: 'some-track', artistId: 'does-not-exist' }),
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('unknown artist_id');
+    const row = await env.DB.prepare('SELECT * FROM tracks WHERE id = ?').bind('some-track').first<any>();
+    expect(row).toBeNull();
     vi.unstubAllGlobals();
   });
 });
