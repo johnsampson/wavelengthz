@@ -19,6 +19,8 @@
 // `getSessionUser` only matches rows with an active session (never created for it),
 // and the people-swipe candidate/target queries require `onboarded_at IS NOT NULL`,
 // which the tombstone never has.
+import { reportError } from './sentry';
+
 const TOMBSTONE_USER_ID = '00000000-0000-0000-0000-000000000000';
 const TOMBSTONE_SPOTIFY_ID = '__wavelengthz_deleted_user_tombstone__';
 
@@ -68,11 +70,22 @@ export async function hardDeleteUser(env: Env, userId: string): Promise<void> {
   await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(userId).run();
 }
 
+/**
+ * Hard-deletes every account whose grace period has expired.
+ *
+ * Per-user failures are isolated rather than fatal. This runs from a cron via
+ * `ctx.waitUntil(...)`, where a rejection is swallowed with no trace: a single
+ * bad user (a transient R2/D1 error, or the subrequest limit on a big night)
+ * used to abort the rest of the batch, and the unpurged accounts would just
+ * accumulate indefinitely with nobody the wiser. Each failure is reported to
+ * Sentry and surfaced in the return value; the batch continues. Failed users
+ * still have `deleted_at` set, so the next nightly run retries them.
+ */
 export async function purgeExpiredDeletions(
   env: Env,
   gracePeriodMs: number,
   nowMs: number
-): Promise<{ purgedCount: number }> {
+): Promise<{ purgedCount: number; failedIds: string[] }> {
   const cutoff = nowMs - gracePeriodMs;
   const rows = await env.DB.prepare(
     'SELECT id FROM users WHERE deleted_at IS NOT NULL AND deleted_at < ? AND id != ?'
@@ -80,9 +93,20 @@ export async function purgeExpiredDeletions(
     .bind(cutoff, TOMBSTONE_USER_ID)
     .all<{ id: string }>();
 
+  let purgedCount = 0;
+  const failedIds: string[] = [];
+
   for (const row of rows.results) {
-    await hardDeleteUser(env, row.id);
+    try {
+      await hardDeleteUser(env, row.id);
+      purgedCount += 1;
+    } catch (error) {
+      failedIds.push(row.id);
+      // reportError is documented never to throw, so this can't itself take
+      // down the batch.
+      await reportError(env, error, { path: `scheduled:purgeExpiredDeletions:${row.id}` });
+    }
   }
 
-  return { purgedCount: rows.results.length };
+  return { purgedCount, failedIds };
 }

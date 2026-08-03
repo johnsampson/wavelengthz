@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { hardDeleteUser, purgeExpiredDeletions } from '../../src/lib/accountDeletion';
 import { createSession } from '../../src/lib/session';
@@ -106,5 +106,69 @@ describe('purgeExpiredDeletions', () => {
     expect(result.purgedCount).toBe(1);
     expect(await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind('old').first()).toBeNull();
     expect(await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind('recent').first()).not.toBeNull();
+  });
+
+  it('isolates a per-user failure so the rest of the batch is still purged, and reports it', async () => {
+    // Previously one bad user aborted the whole loop, and the caller wraps
+    // this in ctx.waitUntil(...) with no .catch() -- so the remaining expired
+    // accounts silently accumulated forever with zero visibility.
+    const GRACE = 7 * 24 * 60 * 60 * 1000;
+    const now = 100_000_000_000;
+    for (const id of ['a', 'boom', 'c']) {
+      await seedFullUser(id);
+      await env.DB.prepare('UPDATE users SET deleted_at = ? WHERE id = ?').bind(now - GRACE - 1000, id).run();
+    }
+    await env.DB.prepare(
+      `INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES ('p1', 'boom', 'users/boom/p1.jpg', 0, 1000)`
+    ).run();
+
+    const sentryCalls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        sentryCalls.push(String(url));
+        return new Response('', { status: 200 });
+      })
+    );
+
+    // hardDeleteUser only ever calls PHOTOS.delete; make it throw for one user.
+    const failingEnv = {
+      ...env,
+      PHOTOS: {
+        delete: async (key: string) => {
+          if (key.includes('boom')) throw new Error('R2 unavailable');
+          return env.PHOTOS.delete(key);
+        },
+      },
+    } as any;
+
+    const result = await purgeExpiredDeletions(failingEnv, GRACE, now);
+
+    expect(result.purgedCount).toBe(2);
+    expect(result.failedIds).toEqual(['boom']);
+    expect(await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind('a').first()).toBeNull();
+    expect(await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind('c').first()).toBeNull();
+    expect(await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind('boom').first()).not.toBeNull();
+    expect(sentryCalls.some((u) => u.includes('/envelope/'))).toBe(true);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('reports nothing and purges everything when the batch is clean', async () => {
+    const GRACE = 7 * 24 * 60 * 60 * 1000;
+    const now = 100_000_000_000;
+    await seedFullUser('a');
+    await env.DB.prepare('UPDATE users SET deleted_at = ? WHERE id = ?').bind(now - GRACE - 1000, 'a').run();
+
+    const fetchMock = vi.fn(async () => new Response('', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await purgeExpiredDeletions(env as any, GRACE, now);
+
+    expect(result.purgedCount).toBe(1);
+    expect(result.failedIds).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
   });
 });

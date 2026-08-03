@@ -88,10 +88,24 @@ export default {
     }
   },
   scheduled: async (event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> => {
+    // waitUntil swallows rejections, so anything that escapes the job itself
+    // would vanish without a trace. purgeExpiredDeletions already isolates and
+    // reports per-user failures; this catch covers the whole-job failures
+    // (e.g. the initial SELECT) that it can't.
+    const report = (path: string) => (error: unknown) => reportError(env, error, { path });
+
     if (event.cron === '0 4 * * 0') {
-      ctx.waitUntil(refreshCatalogFromProfiles(env).then(() => undefined));
+      ctx.waitUntil(
+        refreshCatalogFromProfiles(env)
+          .then(() => undefined)
+          .catch(report('scheduled:refreshCatalogFromProfiles'))
+      );
     } else {
-      ctx.waitUntil(purgeExpiredDeletions(env, GRACE_PERIOD_MS, Date.now()).then(() => undefined));
+      ctx.waitUntil(
+        purgeExpiredDeletions(env, GRACE_PERIOD_MS, Date.now())
+          .then(() => undefined)
+          .catch(report('scheduled:purgeExpiredDeletions'))
+      );
     }
   },
 };
