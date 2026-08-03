@@ -128,4 +128,37 @@ describe('GET /api/me', () => {
 
     vi.unstubAllGlobals();
   });
+
+  // Regression test for a Task 4 code-review finding that was deferred to Task 18:
+  // an uncaught Spotify API failure inside /api/me previously propagated as a raw
+  // exception instead of a graceful error response. Task 18 added a global
+  // try/catch around routing (src/index.ts) that should now convert this into a
+  // clean 500 with no internal error details leaked into the response body.
+  it('returns a clean 500 with no leaked error details when the Spotify API call throws', async () => {
+    const encToken = await encrypt('access-tok', env.TOKEN_ENCRYPTION_KEY);
+    await env.DB.prepare(
+      `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
+       VALUES ('u3', 'sp3', ?, ?, ?, 1000, 1000)`
+    ).bind(encToken, encToken, Date.now() + 100000).run();
+    const { cookie } = await createSession(env.DB, 'u3');
+    const sessionId = cookie.split(';')[0].split('=')[1];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('Spotify API is down, secret=abc123');
+      })
+    );
+
+    const req = new Request('http://localhost/api/me', {
+      headers: { Cookie: `wl_session=${sessionId}`, 'CF-Connecting-IP': '5.5.5.5' },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(500);
+    const text = await res.text();
+    expect(text).not.toContain('Spotify API is down');
+    expect(text).not.toContain('secret=abc123');
+
+    vi.unstubAllGlobals();
+  });
 });

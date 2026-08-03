@@ -55,11 +55,17 @@ export default {
     try {
       return await router.fetch(request, env, ctx);
     } catch (error) {
-      // reportError is documented to never throw (a Sentry outage must not
-      // break the response path), so awaiting it directly here is safe and
-      // avoids depending on ctx.waitUntil, which isn't always present (e.g.
-      // in tests that pass a minimal fake ExecutionContext).
-      await reportError(env, error, { path: url.pathname });
+      // Prefer fire-and-forget via ctx.waitUntil (always present on real
+      // Workers runtimes) so a slow or unreachable Sentry never delays the
+      // client's 500 response. Only fall back to awaiting directly when
+      // waitUntil isn't available (e.g. tests that pass a minimal fake
+      // ExecutionContext) — reportError is documented to never throw, so
+      // awaiting it there is still safe, just not fire-and-forget.
+      if (typeof ctx.waitUntil === 'function') {
+        ctx.waitUntil(reportError(env, error, { path: url.pathname }));
+      } else {
+        await reportError(env, error, { path: url.pathname });
+      }
       return new Response('Internal Server Error', { status: 500 });
     }
   },
