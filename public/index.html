@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Wavelengthz</title>
+  <link rel="stylesheet" href="/tailwind.css" />
+  <link rel="manifest" href="/manifest.json" />
+</head>
+<body class="min-h-screen bg-neutral-950 text-neutral-50" x-data="deckApp()" x-init="init()">
+  <header class="flex items-center justify-center gap-2 p-4">
+    <button
+      class="px-4 py-2 rounded-full"
+      :class="mode === 'people' ? 'bg-white text-black' : 'bg-neutral-800'"
+      @click="setMode('people')"
+      aria-pressed="mode === 'people'"
+    >People</button>
+    <button
+      class="px-4 py-2 rounded-full"
+      :class="mode === 'music' ? 'bg-white text-black' : 'bg-neutral-800'"
+      @click="setMode('music')"
+      aria-pressed="mode === 'music'"
+    >Music</button>
+  </header>
+
+  <main class="flex flex-col items-center gap-6 px-4">
+    <div id="deck-container" class="relative w-full max-w-sm aspect-[3/4]" x-show="current">
+      <article class="absolute inset-0 rounded-2xl bg-neutral-900 shadow-xl overflow-hidden" id="card">
+        <img :src="current?.primaryPhotoUrl" :alt="current?.name || current?.displayName || 'candidate photo'" class="w-full h-2/3 object-cover" />
+        <div class="p-4">
+          <h2 class="text-xl font-semibold" x-text="current?.name || current?.displayName"></h2>
+          <p class="text-neutral-400" x-text="current?.bio || current?.distanceLabel"></p>
+        </div>
+      </article>
+    </div>
+
+    <p x-show="!current" class="text-neutral-400">No more candidates right now — check back later.</p>
+
+    <div class="flex gap-6" x-show="current">
+      <button
+        class="w-16 h-16 rounded-full bg-neutral-800 text-2xl"
+        @click="decide('left')"
+        aria-label="Pass"
+      >✕</button>
+      <button
+        class="w-16 h-16 rounded-full bg-emerald-600 text-2xl"
+        @click="decide('right')"
+        aria-label="Like"
+      >♥</button>
+    </div>
+  </main>
+
+  <script type="module">
+    import { api } from '/app.js';
+    import { attachSwipeDeck } from '/swipe.js';
+
+    window.deckApp = function () {
+      return {
+        mode: 'people',
+        queue: [],
+        current: null,
+        detachSwipe: null,
+
+        async init() {
+          await this.loadQueue();
+        },
+
+        async setMode(mode) {
+          this.mode = mode;
+          this.queue = [];
+          this.current = null;
+          await this.loadQueue();
+        },
+
+        async loadQueue() {
+          const res = await api.candidates(this.mode, 10);
+          this.queue = res.candidates;
+          this.showNext();
+        },
+
+        showNext() {
+          if (this.detachSwipe) this.detachSwipe();
+          this.current = this.queue.shift() ?? null;
+          this.$nextTick(() => {
+            const card = document.getElementById('card');
+            if (card && this.current) {
+              this.detachSwipe = attachSwipeDeck(card, { onSwipe: (dir) => this.decide(dir) });
+            }
+          });
+        },
+
+        async decide(direction) {
+          if (!this.current) return;
+          if (this.mode === 'people') {
+            await api.swipe('people', { target_id: this.current.id, direction });
+          } else {
+            await api.swipe('music', { item_type: this.current.itemType, item_id: this.current.itemId, direction });
+          }
+          if (this.queue.length === 0) await this.loadQueue();
+          else this.showNext();
+        },
+      };
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</body>
+</html>

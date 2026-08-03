@@ -1,0 +1,19 @@
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+/*
+ * `npm install -D tailwindcss @tailwindcss/cli` resolves to Tailwind v4 (the
+ * `@tailwindcss/cli` package only exists for v4 -- v3's CLI ships inside the
+ * main `tailwindcss` package), so this uses v4's native `@import "tailwindcss"`
+ * entrypoint rather than the v3-style `@tailwind base/components/utilities`
+ * directives. Verified empirically (see task-16-report.md): v4's automatic
+ * content-detection heuristic silently produced a CSS file missing classes
+ * that are actually used in index.html/app.js/swipe.js, with no error --
+ * confirmed by round-tripping a canary class through a full rebuild and
+ * finding it absent from the output. These explicit @source directives make
+ * the scanned file set deterministic and verified-correct instead of relying
+ * on that heuristic.
+ */
+@source "./index.html";
+@source "./app.js";
+@source "./swipe.js";

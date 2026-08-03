@@ -12,6 +12,10 @@ database_id = "REPLACE_WITH_REAL_ID_AFTER_wrangler_d1_create"
 binding = "PHOTOS"
 bucket_name = "wavelengthz-photos"
 
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
 [vars]
 SPOTIFY_REDIRECT_URI = "http://localhost:8787/callback"
 
