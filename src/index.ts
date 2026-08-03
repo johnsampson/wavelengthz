@@ -3,6 +3,7 @@ import { registerAuthRoutes } from './routes/auth';
 import { registerMeRoutes } from './routes/me';
 import { registerAdminRoutes } from './routes/admin';
 import { registerOnboardingRoutes } from './routes/onboarding';
+import { registerPhotoRoutes } from './routes/photos';
 
 export const router = Router();
 
@@ -10,6 +11,7 @@ registerAuthRoutes(router);
 registerMeRoutes(router);
 registerAdminRoutes(router);
 registerOnboardingRoutes(router);
+registerPhotoRoutes(router);
 
 router.all('*', () => new Response('Not found', { status: 404 }));
 

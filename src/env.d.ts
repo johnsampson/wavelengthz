@@ -18,6 +18,10 @@ interface Env {
   SPOTIFY_CLIENT_SECRET: string;
   TOKEN_ENCRYPTION_KEY: string;
   SEED_SECRET: string;
+  R2_ACCOUNT_ID: string;
+  R2_ACCESS_KEY_ID: string;
+  R2_SECRET_ACCESS_KEY: string;
+  R2_BUCKET_NAME: string;
 }
 
 // `cloudflare:test`'s `env` export is typed as `Cloudflare.Env` (a separate
@@ -30,5 +34,9 @@ declare namespace Cloudflare {
     SPOTIFY_CLIENT_SECRET: string;
     TOKEN_ENCRYPTION_KEY: string;
     SEED_SECRET: string;
+    R2_ACCOUNT_ID: string;
+    R2_ACCESS_KEY_ID: string;
+    R2_SECRET_ACCESS_KEY: string;
+    R2_BUCKET_NAME: string;
   }
 }
