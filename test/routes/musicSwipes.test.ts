@@ -86,4 +86,31 @@ describe('GET /api/swipes/music and PATCH', () => {
     const row = await env.DB.prepare('SELECT direction FROM music_swipes WHERE id = ?').bind('s1').first<any>();
     expect(row.direction).toBe('right');
   });
+
+  it('rejects patching a swipe owned by another user', async () => {
+    await env.DB.prepare(
+      `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
+       VALUES ('u2', 'sp2', 'a', 'r', 9999999999999, 1000, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s1', 'u1', 'artist', 'a1', 'left', 1000, 1000)`
+    ).run();
+    const before = await env.DB.prepare('SELECT direction, updated_at FROM music_swipes WHERE id = ?').bind('s1').first<any>();
+
+    const u2cookie = await cookieFor('u2');
+    const patchRes = await worker.fetch(
+      new Request('http://localhost/api/swipes/music/s1', {
+        method: 'PATCH',
+        headers: { Cookie: u2cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ direction: 'right' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(patchRes.status).toBe(404);
+
+    const after = await env.DB.prepare('SELECT direction, updated_at FROM music_swipes WHERE id = ?').bind('s1').first<any>();
+    expect(after.direction).toBe(before.direction);
+    expect(after.updated_at).toBe(before.updated_at);
+  });
 });
