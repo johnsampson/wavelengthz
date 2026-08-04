@@ -21,7 +21,7 @@ directory = "./public"
 binding = "ASSETS"
 
 [vars]
-SPOTIFY_REDIRECT_URI = "http://localhost:8787/callback"
+SPOTIFY_REDIRECT_URI = "http://127.0.0.1:8787/callback"
 
 [triggers]
 crons = ["0 3 * * *", "0 4 * * 0"]
@@ -41,7 +41,7 @@ binding = "RATE_LIMIT_KV"
 id = "test-kv-id"
 
 [env.test.vars]
-SPOTIFY_REDIRECT_URI = "http://localhost:8787/callback"
+SPOTIFY_REDIRECT_URI = "http://127.0.0.1:8787/callback"
 SPOTIFY_CLIENT_ID = "test-client-id"
 SPOTIFY_CLIENT_SECRET = "test-client-secret"
 TOKEN_ENCRYPTION_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="

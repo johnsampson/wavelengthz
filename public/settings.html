@@ -4,44 +4,87 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Wavelengthz — Settings</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/tailwind.css" />
 </head>
-<body class="min-h-screen bg-neutral-950 text-neutral-50 p-4" x-data="settingsApp()">
-  <h1 class="text-2xl font-semibold mb-4">Settings</h1>
-  <p x-show="error" x-text="error" class="text-red-400 max-w-md mb-4" role="alert"></p>
-  <p x-show="saved" class="text-emerald-400 max-w-md mb-4">Saved.</p>
+<body class="min-h-screen bg-base text-neutral-50 p-4 pb-24" x-data="settingsApp()">
+  <div id="wl-header-root"></div>
+  <h1 class="mx-auto mb-4 max-w-md text-2xl font-bold">Settings</h1>
+
+  <div x-show="spotifyAvatarUrl" class="mx-auto mb-4 flex max-w-md items-center gap-3">
+    <img :src="spotifyAvatarUrl" alt="" class="h-12 w-12 rounded-full object-cover" />
+    <div class="text-sm">
+      <p class="font-semibold text-neutral-200">Connected via Spotify</p>
+      <p class="text-neutral-500">This photo is never shown to matches -- it's just your account identity.</p>
+    </div>
+  </div>
+
+  <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
+  <p x-show="saved" class="mx-auto mb-4 max-w-md text-brand-400">Saved.</p>
 
   <!-- Disabled until init() has loaded the real max_distance_km: saving while
        the slider still shows its placeholder default would overwrite the
        user's actual radius. -->
-  <form class="max-w-md flex flex-col gap-4" @submit.prevent="updateDistance()">
+  <form class="card mx-auto flex max-w-md flex-col gap-4 p-5" @submit.prevent="updateDistance()">
     <label class="flex flex-col gap-1">
-      <span>Max distance (km): <span x-text="loading ? '…' : maxDistanceKm"></span></span>
-      <input type="range" min="5" max="200" x-model.number="maxDistanceKm" :disabled="loading" />
+      <span class="field-label">Max distance (km): <span x-text="loading ? '…' : maxDistanceKm" class="text-neutral-200 normal-case"></span></span>
+      <input type="range" min="5" max="200" x-model.number="maxDistanceKm" :disabled="loading" class="accent-brand-500" />
     </label>
-    <button type="submit" class="bg-neutral-800 rounded p-2" :disabled="loading">Save</button>
+    <button type="submit" class="btn-primary" :disabled="loading">Save</button>
   </form>
 
-  <button class="mt-6 text-neutral-400 underline" @click="logout()">Log out</button>
+  <div class="card mx-auto mt-4 flex max-w-md flex-col gap-2 p-5">
+    <span class="field-label">Photos (<span x-text="photos.length"></span>/<span x-text="maxPhotos"></span>)</span>
+    <input
+      type="file"
+      accept="image/jpeg,image/png,image/webp"
+      @change="uploadPhoto($event)"
+      aria-label="Upload a profile photo"
+      class="text-sm"
+      :disabled="photos.length >= maxPhotos"
+    />
+    <p x-show="photoError" x-text="photoError" class="text-sm text-red-400" role="alert"></p>
+    <div class="grid grid-cols-4 gap-2">
+      <template x-for="photo in photos" :key="photo.photoId">
+        <div class="relative">
+          <img :src="photo.url" alt="" class="aspect-square w-full rounded-lg object-cover" />
+          <button
+            type="button"
+            class="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-xs text-white"
+            @click="removePhoto(photo.photoId)"
+            aria-label="Remove photo"
+          >✕</button>
+        </div>
+      </template>
+    </div>
+  </div>
 
-  <div class="mt-8 border-t border-neutral-800 pt-4">
-    <button class="text-red-400 underline" @click="confirmingDelete = true" x-show="!confirmingDelete">
+  <button class="btn-ghost mx-auto mt-6 block" @click="logout()">Log out</button>
+
+  <div class="mx-auto mt-8 max-w-md border-t border-white/10 pt-4">
+    <button class="btn-ghost text-red-400" @click="confirmingDelete = true" x-show="!confirmingDelete">
       Delete my account
     </button>
-    <div x-show="confirmingDelete" class="flex flex-col gap-2">
-      <p role="alert">This deletes your account. Are you sure?</p>
+    <div x-show="confirmingDelete" class="card flex flex-col gap-3 p-4">
+      <p role="alert" class="text-sm text-neutral-200">This deletes your account. Are you sure?</p>
       <div class="flex gap-2">
-        <button class="bg-red-600 rounded px-3 py-1" @click="deleteAccount()">Yes, delete</button>
-        <button class="bg-neutral-800 rounded px-3 py-1" @click="confirmingDelete = false">Cancel</button>
+        <button class="btn-danger flex-1" @click="deleteAccount()">Yes, delete</button>
+        <button class="btn-secondary flex-1" @click="confirmingDelete = false">Cancel</button>
       </div>
     </div>
   </div>
 
   <script type="module">
     import { createSettingsApp } from '/settings.js';
+    import { mountHeader, mountNav } from '/nav.js';
+    mountHeader();
+    mountNav();
 
     window.settingsApp = createSettingsApp;
   </script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <div id="wl-nav-root"></div>
 </body>
 </html>

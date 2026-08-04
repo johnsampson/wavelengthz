@@ -1,0 +1,20 @@
+# Intentionally empty.
+#
+# Wrangler merges .dev.vars on top of configured vars for any local/dev-mode
+# run -- including the test suite, since @cloudflare/vitest-pool-workers runs
+# on Wrangler's dev machinery under the hood, regardless of the `environment:
+# 'test'` it's targeting. That means whatever's in .dev.vars (personal, git-
+# ignored, meant for `wrangler dev`) silently overrides the fake secrets
+# wrangler.toml's [env.test.vars] deliberately provides for the test suite,
+# making test results depend on what happens to be in a given developer's
+# local .dev.vars file.
+#
+# When a `.dev.vars.<environment>` file exists, Wrangler uses it INSTEAD of
+# .dev.vars for that environment, rather than merging the two. This file
+# being present (even empty) is what keeps the test run hermetic: it blocks
+# .dev.vars from being consulted at all when environment='test', leaving
+# wrangler.toml's [env.test.vars] as the sole, committed source of truth.
+#
+# Do not add real or personal values here. If a future task needs a fake
+# value in the test environment, add it to wrangler.toml's [env.test.vars]
+# instead, not here.

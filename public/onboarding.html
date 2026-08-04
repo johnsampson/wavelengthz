@@ -4,73 +4,93 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Wavelengthz — Set up your profile</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/tailwind.css" />
 </head>
-<body class="min-h-screen bg-neutral-950 text-neutral-50 p-4" x-data="onboardingApp()" x-init="init()">
-  <form class="max-w-md mx-auto flex flex-col gap-4" @submit.prevent="submit()">
-    <h1 class="text-2xl font-semibold">Tell us about you</h1>
+<body class="min-h-screen bg-base text-neutral-50 p-4" x-data="onboardingApp()" x-init="init()">
+  <div class="mx-auto max-w-md pt-6 pb-2 text-center">
+    <span class="wordmark text-xl">Wavelengthz</span>
+  </div>
+  <form class="card mx-auto flex max-w-md flex-col gap-4 p-5" @submit.prevent="submit()">
+    <h1 class="text-2xl font-bold">Tell us about you</h1>
 
     <label class="flex flex-col gap-1">
-      <span>Bio</span>
-      <textarea class="bg-neutral-900 rounded p-2" x-model="bio" maxlength="500"></textarea>
+      <span class="field-label">Bio</span>
+      <textarea class="field" x-model="bio" maxlength="500"></textarea>
     </label>
 
     <label class="flex flex-col gap-1">
-      <span>Date of birth</span>
-      <input class="bg-neutral-900 rounded p-2" type="date" x-model="dateOfBirth" required />
+      <span class="field-label">Date of birth</span>
+      <input class="field" type="date" x-model="dateOfBirth" required />
     </label>
-    <p x-show="error === 'underage'" class="text-red-400" role="alert">
+    <p x-show="error === 'underage'" class="text-sm text-red-400" role="alert">
       You must be 18 or older to use Wavelengthz.
     </p>
-    <p x-show="error === 'location_missing'" class="text-red-400" role="alert">
+    <p x-show="error === 'location_missing'" class="text-sm text-red-400" role="alert">
       Please share your location or enter one manually below before continuing.
     </p>
-    <p x-show="error === 'submit_failed'" class="text-red-400" role="alert">
+    <p x-show="error === 'submit_failed'" class="text-sm text-red-400" role="alert">
       Something went wrong saving your profile. Please try again.
     </p>
 
     <div class="flex flex-col gap-2">
-      <button type="button" class="bg-neutral-800 rounded p-2" @click="useBrowserLocation()">
-        Use my current location
+      <button type="button" class="btn-secondary" @click="useBrowserLocation()">
+        📍 Use my current location
       </button>
-      <p x-show="locationLabel" x-text="locationLabel" class="text-neutral-400 text-sm"></p>
+      <p x-show="locationLabel" x-text="locationLabel" class="text-sm text-neutral-400"></p>
       <details>
         <summary class="text-sm text-neutral-400">Enter location manually instead</summary>
-        <label class="flex flex-col gap-1 mt-2">
-          <span>City / region</span>
-          <input class="bg-neutral-900 rounded p-2" type="text" x-model="manualLabel" />
+        <label class="mt-2 flex flex-col gap-1">
+          <span class="field-label">City / region</span>
+          <input class="field" type="text" x-model="manualLabel" />
         </label>
-        <div class="flex gap-2 mt-2">
-          <input class="bg-neutral-900 rounded p-2 w-1/2" type="number" step="any" placeholder="Latitude" x-model.number="manualLat" />
-          <input class="bg-neutral-900 rounded p-2 w-1/2" type="number" step="any" placeholder="Longitude" x-model.number="manualLng" />
+        <div class="mt-2 flex gap-2">
+          <input class="field w-1/2" type="number" step="any" placeholder="Latitude" x-model.number="manualLat" />
+          <input class="field w-1/2" type="number" step="any" placeholder="Longitude" x-model.number="manualLng" />
         </div>
       </details>
     </div>
 
     <label class="flex flex-col gap-1">
-      <span>Max distance (km): <span x-text="maxDistanceKm"></span></span>
-      <input type="range" min="5" max="200" x-model.number="maxDistanceKm" />
+      <span class="field-label">Max distance (km): <span x-text="maxDistanceKm" class="text-neutral-200 normal-case"></span></span>
+      <input type="range" min="5" max="200" x-model.number="maxDistanceKm" class="accent-brand-500" />
     </label>
 
     <fieldset class="flex flex-col gap-2">
-      <legend>Photos</legend>
-      <input type="file" accept="image/jpeg,image/png,image/webp" @change="uploadPhoto($event)" aria-label="Upload a profile photo" />
-      <p x-show="photoError" x-text="photoError" class="text-red-400 text-sm" role="alert"></p>
-      <ul>
+      <legend class="field-label mb-1">Photos (<span x-text="photos.length"></span>/<span x-text="maxPhotos"></span>)</legend>
+      <input
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        @change="uploadPhoto($event)"
+        aria-label="Upload a profile photo"
+        class="text-sm"
+        :disabled="photos.length >= maxPhotos"
+      />
+      <p x-show="photoError" x-text="photoError" class="text-sm text-red-400" role="alert"></p>
+      <div class="grid grid-cols-4 gap-2">
         <template x-for="photo in photos" :key="photo.photoId">
-          <li class="flex items-center justify-between">
-            <span x-text="photo.name"></span>
-            <button type="button" class="text-red-400" @click="removePhoto(photo.photoId)">Remove</button>
-          </li>
+          <div class="relative">
+            <img :src="photo.url" alt="" class="aspect-square w-full rounded-lg object-cover" />
+            <button
+              type="button"
+              class="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-xs text-white"
+              @click="removePhoto(photo.photoId)"
+              aria-label="Remove photo"
+            >✕</button>
+          </div>
         </template>
-      </ul>
+      </div>
     </fieldset>
 
-    <button type="submit" class="bg-emerald-600 rounded p-3 font-semibold">Continue</button>
+    <button type="submit" class="btn-primary">Continue</button>
   </form>
 
   <script type="module">
     import { api } from '/app.js';
+    import { requireAuth } from '/auth.js';
+    import { MAX_PHOTOS, uploadPhotoFile } from '/photos.js';
 
     window.onboardingApp = function () {
       return {
@@ -84,10 +104,13 @@
         lng: null,
         maxDistanceKm: 80,
         photos: [],
+        maxPhotos: MAX_PHOTOS,
         error: null,
         photoError: null,
 
-        init() {},
+        async init() {
+          await requireAuth();
+        },
 
         useBrowserLocation() {
           navigator.geolocation.getCurrentPosition(
@@ -104,13 +127,18 @@
 
         async uploadPhoto(event) {
           const file = event.target.files[0];
+          event.target.value = '';
           if (!file) return;
           this.photoError = null;
+          if (this.photos.length >= this.maxPhotos) {
+            this.photoError = `You can upload up to ${this.maxPhotos} photos.`;
+            return;
+          }
           try {
-            const { uploadUrl, photoId } = await api.photoUploadUrl({ contentType: file.type, sizeBytes: file.size });
-            await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
-            this.photos.push({ photoId, name: file.name });
+            const uploaded = await uploadPhotoFile(file);
+            this.photos.push(uploaded);
           } catch (e) {
+            console.error('Photo upload failed:', e);
             this.photoError = 'Could not upload that photo. Please try again.';
           }
         },

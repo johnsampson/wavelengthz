@@ -23,7 +23,10 @@ async function cookieFor(userId: string) {
 beforeEach(async () => {
   // Child rows before parent `users` rows -- D1 enforces FK constraints here.
   // messages -> matches, users; notifications -> users; matches -> users; sessions -> users.
-  await env.DB.exec('DELETE FROM messages; DELETE FROM notifications; DELETE FROM sessions; DELETE FROM matches; DELETE FROM users;');
+  await env.DB.exec(
+    'DELETE FROM messages; DELETE FROM notifications; DELETE FROM sessions; DELETE FROM matches; ' +
+      'DELETE FROM music_swipes; DELETE FROM user_genres; DELETE FROM tracks; DELETE FROM artists; DELETE FROM users;'
+  );
   await makeUser('u1', 'u1@example.com', 'User One');
   await makeUser('u2', 'u2@example.com', 'User Two');
   await makeUser('u3', null);
@@ -74,6 +77,69 @@ describe('GET /api/matches', () => {
 
     const match = await env.DB.prepare('SELECT unmatched_at FROM matches WHERE id = ?').bind('m1').first<any>();
     expect(match.unmatched_at).toBeNull();
+  });
+});
+
+describe('GET /api/matches/:id', () => {
+  it('rejects a non-participant', async () => {
+    const cookie = await cookieFor('u3');
+    const res = await worker.fetch(new Request('http://localhost/api/matches/m1', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect(res.status).toBe(403);
+  });
+
+  it('blocks viewing a match whose other participant has been soft-deleted', async () => {
+    await env.DB.prepare('UPDATE users SET deleted_at = ? WHERE id = ?').bind(2000, 'u2').run();
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/matches/m1', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect(res.status).toBe(403);
+  });
+
+  it('returns the other participant', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/matches/m1', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    expect(body.match.otherUserId).toBe('u2');
+    expect(body.match.otherDisplayName).toBe('User Two');
+  });
+
+  it('returns artists and tracks both participants right-swiped', async () => {
+    await env.DB.prepare(`INSERT INTO artists (id, name, genres, image_url, source, approved, created_at) VALUES ('art1', 'Shared Artist', '[]', 'https://img.example/art1.jpg', 'seed', 1, 1000)`).run();
+    await env.DB.prepare(`INSERT INTO artists (id, name, genres, source, approved, created_at) VALUES ('art2', 'Only Mine', '[]', 'seed', 1, 1000)`).run();
+    await env.DB.prepare(`INSERT INTO tracks (id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('trk1', 'Shared Track', 'art1', 'https://img.example/trk1.jpg', 'seed', 1, 1000)`).run();
+
+    for (const [userId, itemType, itemId] of [
+      ['u1', 'artist', 'art1'],
+      ['u2', 'artist', 'art1'],
+      ['u1', 'artist', 'art2'], // only u1 liked this one -- must not appear
+      ['u1', 'track', 'trk1'],
+      ['u2', 'track', 'trk1'],
+    ] as const) {
+      await env.DB.prepare(
+        `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES (?, ?, ?, ?, 'right', 1000, 1000)`
+      ).bind(`${userId}-${itemType}-${itemId}`, userId, itemType, itemId).run();
+    }
+
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/matches/m1', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.overlap.sharedArtists.map((a: any) => a.id)).toEqual(['art1']);
+    expect(body.overlap.sharedArtists[0].imageUrl).toBe('https://img.example/art1.jpg');
+    expect(body.overlap.sharedTracks.map((t: any) => t.id)).toEqual(['trk1']);
+    expect(body.overlap.sharedTracks[0].imageUrl).toBe('https://img.example/trk1.jpg');
+  });
+
+  it('returns genres both participants have affinity for', async () => {
+    await env.DB.prepare(`INSERT INTO user_genres (user_id, genre, artist_count, track_count, updated_at) VALUES ('u1', 'indie', 3, 0, 1000)`).run();
+    await env.DB.prepare(`INSERT INTO user_genres (user_id, genre, artist_count, track_count, updated_at) VALUES ('u2', 'indie', 5, 0, 1000)`).run();
+    await env.DB.prepare(`INSERT INTO user_genres (user_id, genre, artist_count, track_count, updated_at) VALUES ('u1', 'metal', 2, 0, 1000)`).run(); // u2 has no affinity for this
+
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/matches/m1', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.overlap.sharedGenres).toEqual([{ genre: 'indie', myCount: 3, theirCount: 5 }]);
   });
 });
 

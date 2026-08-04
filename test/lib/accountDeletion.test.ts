@@ -23,7 +23,7 @@ beforeEach(async () => {
   // wiped first. See test/routes/catalog.test.ts for the same pattern.
   await env.DB.exec(`
     DELETE FROM messages; DELETE FROM matches; DELETE FROM user_photos;
-    DELETE FROM people_swipes; DELETE FROM music_swipes; DELETE FROM music_profiles;
+    DELETE FROM people_swipes; DELETE FROM music_swipes; DELETE FROM user_genres; DELETE FROM music_profiles;
     DELETE FROM blocks; DELETE FROM reports; DELETE FROM notifications; DELETE FROM sessions;
     DELETE FROM tracks; DELETE FROM artists;
     DELETE FROM users;
@@ -42,6 +42,7 @@ describe('hardDeleteUser', () => {
     await env.DB.prepare(`INSERT INTO reports (id, reporter_id, reported_id, reason, status, created_at) VALUES ('r1', 'u1', 'u2', 'spam', 'open', 1000)`).run();
     await env.DB.prepare(`INSERT INTO reports (id, reporter_id, reported_id, reason, status, created_at) VALUES ('r2', 'u2', 'u1', 'spam', 'open', 1000)`).run();
     await env.DB.prepare(`INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('msw1', 'u1', 'artist', 'artist-x', 'right', 1000, 1000)`).run();
+    await env.DB.prepare(`INSERT INTO user_genres (user_id, genre, artist_count, track_count, updated_at) VALUES ('u1', 'pop', 3, 0, 1000)`).run();
     await env.DB.prepare(`INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u1', '[]', '[]', '[]', 'medium_term', 1000)`).run();
     await env.DB.prepare(`INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES ('b1', 'u1', 'u2', 1000)`).run();
     await env.DB.prepare(`INSERT INTO notifications (id, user_id, type, related_id, created_at) VALUES ('n1', 'u1', 'match', 'm1', 1000)`).run();
@@ -58,6 +59,7 @@ describe('hardDeleteUser', () => {
     expect(await env.DB.prepare('SELECT * FROM reports WHERE id = ?').bind('r1').first()).toBeNull(); // u1 was reporter
     expect(await env.DB.prepare('SELECT * FROM reports WHERE id = ?').bind('r2').first()).not.toBeNull(); // u1 was reported — kept
     expect(await env.DB.prepare('SELECT * FROM music_swipes WHERE id = ?').bind('msw1').first()).toBeNull();
+    expect(await env.DB.prepare('SELECT * FROM user_genres WHERE user_id = ?').bind('u1').first()).toBeNull();
     expect(await env.DB.prepare('SELECT * FROM music_profiles WHERE user_id = ?').bind('u1').first()).toBeNull();
     expect(await env.DB.prepare('SELECT * FROM blocks WHERE id = ?').bind('b1').first()).toBeNull();
     expect(await env.DB.prepare('SELECT * FROM notifications WHERE id = ?').bind('n1').first()).toBeNull();
@@ -74,7 +76,7 @@ describe('hardDeleteUser and catalog attribution', () => {
     // D1 enforces this FK too.
     await seedFullUser('u1');
     await env.DB.prepare(
-      `INSERT INTO artists (id, name, genres, source, added_by_user_id, approved, created_at) VALUES ('a1', 'User Added Artist', '["pop"]', 'user_added', 'u1', 1, 1000)`
+      `INSERT INTO artists (id, name, genres, source, added_by_user_id, approved, created_at) VALUES ('a1', 'User Added Artist', '{"pop":true}', 'user_added', 'u1', 1, 1000)`
     ).run();
     await env.DB.prepare(
       `INSERT INTO tracks (id, name, artist_id, source, added_by_user_id, approved, created_at) VALUES ('t1', 'User Added Track', 'a1', 'user_added', 'u1', 1, 1000)`

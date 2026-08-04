@@ -161,4 +161,41 @@ describe('GET /api/me', () => {
 
     vi.unstubAllGlobals();
   });
+
+  // Regression: Spotify's top/artists response can include artist objects with
+  // no `genres` field at all (not even an empty array) -- observed against the
+  // real API, not just a documentation assumption. The genre-ranking loop in
+  // this route did `for (const genre of artist.genres)` and crashed with
+  // "artist.genres is not iterable" the first time that happened.
+  it('does not throw when Spotify returns an artist with no genres field', async () => {
+    const encToken = await encrypt('access-tok', env.TOKEN_ENCRYPTION_KEY);
+    await env.DB.prepare(
+      `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
+       VALUES ('u4', 'sp4', ?, ?, ?, 1000, 1000)`
+    ).bind(encToken, encToken, Date.now() + 100000).run();
+    const { cookie } = await createSession(env.DB, 'u4');
+    const sessionId = cookie.split(';')[0].split('=')[1];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('top/artists')) {
+          return new Response(JSON.stringify({ items: [{ id: 'a4', name: 'Artist Four' }] }), { status: 200 });
+        }
+        if (url.includes('top/tracks')) {
+          return new Response(JSON.stringify({ items: [{ id: 't4', name: 'Track Four' }] }), { status: 200 });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      })
+    );
+
+    const req = new Request('http://localhost/api/me', { headers: { Cookie: `wl_session=${sessionId}` } });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    expect(body.musicProfile.top_genres).toBe('[]');
+
+    vi.unstubAllGlobals();
+  });
 });

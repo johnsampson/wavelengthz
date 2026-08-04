@@ -48,6 +48,7 @@ export async function hardDeleteUser(env: Env, userId: string): Promise<void> {
 
   await env.DB.prepare('DELETE FROM people_swipes WHERE swiper_id = ? OR target_id = ?').bind(userId, userId).run();
   await env.DB.prepare('DELETE FROM music_swipes WHERE user_id = ?').bind(userId).run();
+  await env.DB.prepare('DELETE FROM user_genres WHERE user_id = ?').bind(userId).run();
   await env.DB.prepare('DELETE FROM music_profiles WHERE user_id = ?').bind(userId).run();
   await env.DB.prepare('DELETE FROM blocks WHERE blocker_id = ? OR blocked_id = ?').bind(userId, userId).run();
 

@@ -21,43 +21,112 @@ async function cookieFor(userId: string) {
   return `wl_session=${cookie.split(';')[0].split('=')[1]}`;
 }
 
+function postPhoto(cookie: string, contentType: string, bytes: Uint8Array) {
+  return worker.fetch(
+    new Request('http://localhost/api/photos', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': contentType },
+      body: bytes,
+    }),
+    env,
+    {} as ExecutionContext
+  );
+}
+
 describe('POST /api/photos', () => {
   it('rejects an unsupported content type', async () => {
     const cookie = await cookieFor('u1');
-    const req = new Request('http://localhost/api/photos', {
-      method: 'POST',
-      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contentType: 'image/gif', sizeBytes: 1000 }),
-    });
-    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const res = await postPhoto(cookie, 'image/gif', new Uint8Array([1, 2, 3]));
     expect(res.status).toBe(400);
   });
 
   it('rejects a file over the size limit', async () => {
     const cookie = await cookieFor('u1');
-    const req = new Request('http://localhost/api/photos', {
-      method: 'POST',
-      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contentType: 'image/jpeg', sizeBytes: 20 * 1024 * 1024 }),
-    });
-    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const res = await postPhoto(cookie, 'image/jpeg', new Uint8Array(9 * 1024 * 1024));
     expect(res.status).toBe(400);
   });
 
-  it('returns a signed upload URL and creates a photo row', async () => {
+  it('stores the uploaded bytes in R2 and creates a photo row', async () => {
     const cookie = await cookieFor('u1');
-    const req = new Request('http://localhost/api/photos', {
-      method: 'POST',
-      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contentType: 'image/jpeg', sizeBytes: 1000 }),
-    });
-    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const bytes = new TextEncoder().encode('fake-jpeg-bytes');
+    const res = await postPhoto(cookie, 'image/jpeg', bytes);
     expect(res.status).toBe(200);
     const body = await res.json<any>();
-    expect(body.uploadUrl).toContain('X-Amz-Signature');
+    expect(body.photoId).toBeTruthy();
+    expect(body.url).toBe(`/photos/${body.photoId}`);
+
     const row = await env.DB.prepare('SELECT * FROM user_photos WHERE id = ?').bind(body.photoId).first<any>();
     expect(row.user_id).toBe('u1');
     expect(row.position).toBe(0);
+
+    const object = await env.PHOTOS.get(row.r2_key);
+    expect(object).not.toBeNull();
+    expect(new Uint8Array(await object!.arrayBuffer())).toEqual(bytes);
+    expect(object!.httpMetadata?.contentType).toBe('image/jpeg');
+  });
+});
+
+describe('POST /api/photos cap', () => {
+  it('rejects an 11th photo with 400', async () => {
+    const cookie = await cookieFor('u1');
+    for (let i = 0; i < 10; i++) {
+      await env.DB.prepare(
+        `INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES (?, 'u1', ?, ?, 1000)`
+      ).bind(`p${i}`, `users/u1/p${i}.jpg`, i).run();
+    }
+    const res = await postPhoto(cookie, 'image/jpeg', new Uint8Array([1, 2, 3]));
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('too_many_photos');
+
+    const count = await env.DB.prepare('SELECT COUNT(*) as c FROM user_photos WHERE user_id = ?').bind('u1').first<any>();
+    expect(count.c).toBe(10);
+  });
+
+  it('allows exactly the 10th photo', async () => {
+    const cookie = await cookieFor('u1');
+    for (let i = 0; i < 9; i++) {
+      await env.DB.prepare(
+        `INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES (?, 'u1', ?, ?, 1000)`
+      ).bind(`p${i}`, `users/u1/p${i}.jpg`, i).run();
+    }
+    const res = await postPhoto(cookie, 'image/jpeg', new Uint8Array([1, 2, 3]));
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('GET /api/photos', () => {
+  it('lists the caller\'s own photos ordered by position', async () => {
+    const cookie = await cookieFor('u1');
+    await env.DB.prepare(
+      `INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES ('p2', 'u1', 'users/u1/p2.jpg', 1, 2000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES ('p1', 'u1', 'users/u1/p1.jpg', 0, 1000)`
+    ).run();
+
+    const res = await worker.fetch(new Request('http://localhost/api/photos', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    expect(body.photos).toEqual([
+      { photoId: 'p1', url: '/photos/p1', position: 0 },
+      { photoId: 'p2', url: '/photos/p2', position: 1 },
+    ]);
+  });
+
+  it('never lists another user\'s photos', async () => {
+    await env.DB.prepare(
+      `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
+       VALUES ('u2', 'sp2', 'a', 'r', 9999999999999, 1000, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES ('q1', 'u2', 'users/u2/q1.jpg', 0, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(new Request('http://localhost/api/photos', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.photos).toEqual([]);
   });
 });
 
@@ -149,15 +218,7 @@ describe('DELETE /api/photos/:id', () => {
       {} as ExecutionContext
     );
 
-    const uploadRes = await worker.fetch(
-      new Request('http://localhost/api/photos', {
-        method: 'POST',
-        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contentType: 'image/jpeg', sizeBytes: 1000 }),
-      }),
-      env,
-      {} as ExecutionContext
-    );
+    const uploadRes = await postPhoto(cookie, 'image/jpeg', new Uint8Array([1, 2, 3]));
     const uploaded = await uploadRes.json<any>();
 
     const rows = await env.DB.prepare('SELECT position FROM user_photos WHERE user_id = ? ORDER BY position').bind('u1').all<any>();

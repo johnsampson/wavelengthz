@@ -37,7 +37,7 @@ export async function exchangeCodeForToken(
     },
     body,
   });
-  if (!res.ok) throw new Error(`Spotify token exchange failed: ${res.status}`);
+  if (!res.ok) throw new Error(`Spotify token exchange failed: ${res.status} ${await res.text()}`);
   return res.json();
 }
 
@@ -57,18 +57,18 @@ export async function refreshAccessToken(
     },
     body,
   });
-  if (!res.ok) throw new Error(`Spotify token refresh failed: ${res.status}`);
+  if (!res.ok) throw new Error(`Spotify token refresh failed: ${res.status} ${await res.text()}`);
   const data = await res.json<SpotifyTokenResponse>();
   return { ...data, refresh_token: data.refresh_token ?? refreshToken };
 }
 
 export async function fetchSpotifyProfile(
   accessToken: string
-): Promise<{ id: string; email?: string }> {
+): Promise<{ id: string; email?: string; images?: Array<{ url: string }> }> {
   const res = await fetch('https://api.spotify.com/v1/me', {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-  if (!res.ok) throw new Error(`Spotify profile fetch failed: ${res.status}`);
+  if (!res.ok) throw new Error(`Spotify profile fetch failed: ${res.status} ${await res.text()}`);
   return res.json();
 }
 
@@ -80,9 +80,12 @@ export async function fetchTopArtists(
     `https://api.spotify.com/v1/me/top/artists?time_range=${timeRange}&limit=50`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
-  if (!res.ok) throw new Error(`Spotify top artists fetch failed: ${res.status}`);
-  const data = await res.json<{ items: Array<{ id: string; name: string; genres: string[] }> }>();
-  return data.items.map((item, i) => ({ ...item, rank: i + 1 }));
+  if (!res.ok) throw new Error(`Spotify top artists fetch failed: ${res.status} ${await res.text()}`);
+  // Spotify's response sometimes omits `genres` entirely for a given artist
+  // (not even an empty array) despite the documented shape always including
+  // it -- normalize here so every consumer can rely on it being an array.
+  const data = await res.json<{ items: Array<{ id: string; name: string; genres?: string[] }> }>();
+  return data.items.map((item, i) => ({ ...item, genres: item.genres ?? [], rank: i + 1 }));
 }
 
 export async function fetchTopTracks(
@@ -93,7 +96,7 @@ export async function fetchTopTracks(
     `https://api.spotify.com/v1/me/top/tracks?time_range=${timeRange}&limit=50`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
-  if (!res.ok) throw new Error(`Spotify top tracks fetch failed: ${res.status}`);
+  if (!res.ok) throw new Error(`Spotify top tracks fetch failed: ${res.status} ${await res.text()}`);
   const data = await res.json<{ items: Array<{ id: string; name: string }> }>();
   return data.items.map((item, i) => ({ ...item, rank: i + 1 }));
 }
@@ -107,29 +110,37 @@ export async function getClientCredentialsToken(env: Env): Promise<string> {
     },
     body: new URLSearchParams({ grant_type: 'client_credentials' }),
   });
-  if (!res.ok) throw new Error(`Spotify client-credentials fetch failed: ${res.status}`);
+  if (!res.ok) throw new Error(`Spotify client-credentials fetch failed: ${res.status} ${await res.text()}`);
   const data = await res.json<{ access_token: string }>();
   return data.access_token;
 }
 
-export async function searchArtistsByGenre(token: string, genre: string, limit: number) {
+export async function searchArtistsByGenre(token: string, genre: string, limit: number, offset = 0) {
   const res = await fetch(
-    `https://api.spotify.com/v1/search?type=artist&limit=${limit}&q=${encodeURIComponent(`genre:"${genre}"`)}`,
+    `https://api.spotify.com/v1/search?type=artist&limit=${limit}&offset=${offset}&q=${encodeURIComponent(`genre:"${genre}"`)}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
-  if (!res.ok) throw new Error(`Spotify artist search failed: ${res.status}`);
+  if (!res.ok) throw new Error(`Spotify artist search failed: ${res.status} ${await res.text()}`);
   const data = await res.json<{ artists: { items: any[] } }>();
   return data.artists.items;
 }
 
-export async function fetchArtistTopTracks(token: string, artistId: string, market = 'US') {
+// Spotify's dedicated "Get Artist's Top Tracks" endpoint (GET
+// /v1/artists/{id}/top-tracks) now returns a blanket 403 Forbidden for this
+// app -- confirmed directly against the live API (every artist tried, both
+// with a client-credentials token and a real user token), consistent with
+// Spotify having moved that endpoint behind Extended Quota Mode access that
+// this app doesn't have. There is no token or scope that fixes this from our
+// side, so this falls back to the still-open track search endpoint instead,
+// searching by artist name rather than id.
+export async function searchTracksByArtistName(token: string, artistName: string, limit: number) {
   const res = await fetch(
-    `https://api.spotify.com/v1/artists/${artistId}/top-tracks?market=${market}`,
+    `https://api.spotify.com/v1/search?type=track&limit=${limit}&q=${encodeURIComponent(`artist:"${artistName}"`)}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
-  if (!res.ok) throw new Error(`Spotify top tracks (artist) fetch failed: ${res.status}`);
-  const data = await res.json<{ tracks: any[] }>();
-  return data.tracks;
+  if (!res.ok) throw new Error(`Spotify track search (by artist name) failed: ${res.status} ${await res.text()}`);
+  const data = await res.json<{ tracks: { items: any[] } }>();
+  return data.tracks.items;
 }
 
 export async function searchArtistsByName(token: string, query: string, limit: number) {
@@ -137,7 +148,7 @@ export async function searchArtistsByName(token: string, query: string, limit: n
     `https://api.spotify.com/v1/search?type=artist&limit=${limit}&q=${encodeURIComponent(query)}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
-  if (!res.ok) throw new Error(`Spotify artist search failed: ${res.status}`);
+  if (!res.ok) throw new Error(`Spotify artist search failed: ${res.status} ${await res.text()}`);
   const data = await res.json<{ artists: { items: any[] } }>();
   return data.artists.items;
 }
@@ -146,7 +157,7 @@ export async function fetchArtistById(token: string, artistId: string) {
   const res = await fetch(`https://api.spotify.com/v1/artists/${artistId}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error(`Spotify artist fetch failed: ${res.status}`);
+  if (!res.ok) throw new Error(`Spotify artist fetch failed: ${res.status} ${await res.text()}`);
   return res.json<any>();
 }
 
@@ -156,7 +167,7 @@ export async function searchTracksByArtist(token: string, artistName: string, tr
     `https://api.spotify.com/v1/search?type=track&limit=${limit}&q=${encodeURIComponent(q)}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
-  if (!res.ok) throw new Error(`Spotify track search failed: ${res.status}`);
+  if (!res.ok) throw new Error(`Spotify track search failed: ${res.status} ${await res.text()}`);
   const data = await res.json<{ tracks: { items: any[] } }>();
   return data.tracks.items;
 }
@@ -165,6 +176,6 @@ export async function fetchTrackById(token: string, trackId: string) {
   const res = await fetch(`https://api.spotify.com/v1/tracks/${trackId}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error(`Spotify track fetch failed: ${res.status}`);
+  if (!res.ok) throw new Error(`Spotify track fetch failed: ${res.status} ${await res.text()}`);
   return res.json<any>();
 }

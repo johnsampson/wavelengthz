@@ -4,65 +4,54 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Wavelengthz — History</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/tailwind.css" />
 </head>
-<body class="min-h-screen bg-neutral-950 text-neutral-50 p-4" x-data="historyApp()" x-init="init()">
-  <div class="flex gap-2 mb-4">
-    <button class="px-4 py-2 rounded-full" :class="mode === 'people' ? 'bg-white text-black' : 'bg-neutral-800'" @click="setMode('people')">People</button>
-    <button class="px-4 py-2 rounded-full" :class="mode === 'music' ? 'bg-white text-black' : 'bg-neutral-800'" @click="setMode('music')">Music</button>
+<body class="min-h-screen bg-base text-neutral-50 p-4 pb-24" x-data="historyApp()" x-init="init()">
+  <div id="wl-header-root"></div>
+  <h1 class="mx-auto mb-4 max-w-md text-2xl font-bold">Your history</h1>
+  <div class="mx-auto mb-3 flex max-w-md gap-2 rounded-full bg-surface2 p-1">
+    <button class="pill-toggle flex-1" :class="mode === 'people' ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="setMode('people')">People</button>
+    <button class="pill-toggle flex-1" :class="mode === 'music' ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="setMode('music')">Music</button>
   </div>
 
-  <p x-show="error" x-text="error" class="text-red-400 max-w-md mb-4" role="alert"></p>
+  <div class="mx-auto mb-4 flex max-w-md gap-2 rounded-full bg-surface2 p-1">
+    <button class="pill-toggle flex-1" :class="directionFilter === null ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="setDirectionFilter(null)">All</button>
+    <button class="pill-toggle flex-1" :class="directionFilter === 'right' ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="setDirectionFilter('right')">Liked</button>
+    <button class="pill-toggle flex-1" :class="directionFilter === 'left' ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="setDirectionFilter('left')">Passed</button>
+  </div>
 
-  <ul class="flex flex-col gap-2 max-w-md">
+  <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
+
+  <ul class="mx-auto flex max-w-md flex-col gap-2">
     <template x-for="swipe in swipes" :key="swipe.id">
-      <li class="flex items-center justify-between bg-neutral-900 rounded p-3">
+      <li class="card flex items-center justify-between p-3">
         <span x-text="swipe.name || swipe.target_id"></span>
-        <span class="flex items-center gap-2">
-          <span x-text="swipe.direction === 'right' ? '♥ Liked' : '✕ Passed'"></span>
-          <button class="text-sm underline" @click="toggle(swipe)">Change</button>
+        <span class="flex items-center gap-3">
+          <span :class="swipe.direction === 'right' ? 'text-brand-400' : 'text-neutral-400'" x-text="swipe.direction === 'right' ? '♥ Liked' : '✕ Passed'"></span>
+          <button class="btn-ghost" @click="toggle(swipe)">Change</button>
         </span>
       </li>
     </template>
   </ul>
+  <p x-show="swipes.length === 0" class="mx-auto max-w-md text-center text-neutral-400">Nothing here yet.</p>
+
+  <div x-show="swipes.length > 0" class="mx-auto mt-4 flex max-w-md items-center justify-center gap-4">
+    <button class="btn-secondary" :disabled="!hasPrev" @click="prev()">Previous</button>
+    <button class="btn-secondary" :disabled="!hasNext" @click="next()">Next</button>
+  </div>
 
   <script type="module">
-    import { api } from '/app.js';
+    import { mountHeader, mountNav } from '/nav.js';
+    import { createHistoryApp } from '/history.js';
+    mountHeader();
+    mountNav();
 
-    window.historyApp = function () {
-      return {
-        mode: 'people',
-        swipes: [],
-        error: null,
-        init() {
-          this.load();
-        },
-        setMode(mode) {
-          this.mode = mode;
-          this.load();
-        },
-        async load() {
-          this.error = null;
-          try {
-            const res = await api.swipeHistory(this.mode);
-            this.swipes = res.swipes;
-          } catch (e) {
-            this.error = 'Could not load your swipe history. Please try again.';
-          }
-        },
-        async toggle(swipe) {
-          this.error = null;
-          const newDirection = swipe.direction === 'right' ? 'left' : 'right';
-          try {
-            await api.updateSwipe(this.mode, swipe.id, newDirection);
-            swipe.direction = newDirection;
-          } catch (e) {
-            this.error = 'Could not update that swipe. Please try again.';
-          }
-        },
-      };
-    };
+    window.historyApp = createHistoryApp;
   </script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <div id="wl-nav-root"></div>
 </body>
 </html>

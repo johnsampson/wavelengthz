@@ -52,17 +52,18 @@ export function registerAuthRoutes(router: RouterType) {
     // A brand-new insert always has onboarded_at NULL (not set on insert), so this
     // single check naturally covers both the new-user and abandoned-onboarding cases.
     const onboarded = existing?.onboarded_at != null;
+    const avatarUrl = profile.images?.[0]?.url ?? null;
 
     if (existing) {
       await env.DB.prepare(
-        `UPDATE users SET access_token = ?, refresh_token = ?, token_expires_at = ?, updated_at = ?
+        `UPDATE users SET access_token = ?, refresh_token = ?, token_expires_at = ?, spotify_avatar_url = ?, updated_at = ?
          WHERE id = ?`
-      ).bind(encryptedAccess, encryptedRefresh, expiresAt, now, userId).run();
+      ).bind(encryptedAccess, encryptedRefresh, expiresAt, avatarUrl, now, userId).run();
     } else {
       await env.DB.prepare(
-        `INSERT INTO users (id, spotify_id, email, access_token, refresh_token, token_expires_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(userId, profile.id, profile.email ?? null, encryptedAccess, encryptedRefresh, expiresAt, now, now).run();
+        `INSERT INTO users (id, spotify_id, email, spotify_avatar_url, access_token, refresh_token, token_expires_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(userId, profile.id, profile.email ?? null, avatarUrl, encryptedAccess, encryptedRefresh, expiresAt, now, now).run();
     }
 
     const { cookie } = await createSession(env.DB, userId);
@@ -70,7 +71,7 @@ export function registerAuthRoutes(router: RouterType) {
     return new Response(null, {
       status: 302,
       headers: {
-        Location: onboarded ? '/' : '/onboarding.html',
+        Location: onboarded ? '/' : '/onboarding',
         'Set-Cookie': cookie,
       },
     });

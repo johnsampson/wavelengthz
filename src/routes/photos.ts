@@ -1,20 +1,43 @@
 import type { RouterType, IRequest } from 'itty-router';
 import { getSessionUser } from '../lib/session';
-import { createPresignedUploadUrl } from '../lib/r2';
 
 const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_BYTES = 8 * 1024 * 1024;
+const MAX_PHOTOS = 10;
 
 export function registerPhotoRoutes(router: RouterType) {
+  router.get('/api/photos', async (request: Request, env: Env) => {
+    const user = await getSessionUser(request, env.DB);
+    if (!user) return new Response('Unauthorized', { status: 401 });
+
+    const rows = await env.DB.prepare('SELECT id, position FROM user_photos WHERE user_id = ? ORDER BY position ASC')
+      .bind(user.id)
+      .all<{ id: string; position: number }>();
+
+    return Response.json({
+      photos: rows.results.map((r) => ({ photoId: r.id, url: `/photos/${r.id}`, position: r.position })),
+    });
+  });
+
   router.post('/api/photos', async (request: Request, env: Env) => {
     const user = await getSessionUser(request, env.DB);
     if (!user) return new Response('Unauthorized', { status: 401 });
 
-    const { contentType, sizeBytes } = await request.json<{ contentType: string; sizeBytes: number }>();
+    // Uploaded directly to the Worker (not a client-side presigned R2 PUT):
+    // a presigned URL points straight at R2's real S3-compatible endpoint,
+    // which in local dev is an entirely different storage backend from the
+    // `env.PHOTOS` binding this route (and GET /photos/:id) reads through --
+    // an upload could "succeed" and still be invisible to the app that just
+    // wrote it. Routing the bytes through the Worker keeps writes and reads
+    // on the same binding in every environment, and removes the CORS
+    // dependency on the R2 bucket entirely.
+    const contentType = request.headers.get('Content-Type') ?? '';
     if (!ALLOWED_TYPES.has(contentType)) {
       return Response.json({ error: 'unsupported_type' }, { status: 400 });
     }
-    if (sizeBytes > MAX_BYTES) {
+
+    const body = await request.arrayBuffer();
+    if (body.byteLength > MAX_BYTES) {
       return Response.json({ error: 'file_too_large' }, { status: 400 });
     }
 
@@ -22,18 +45,21 @@ export function registerPhotoRoutes(router: RouterType) {
       .bind(user.id)
       .first<{ c: number }>();
     const position = countRow?.c ?? 0;
+    if (position >= MAX_PHOTOS) {
+      return Response.json({ error: 'too_many_photos' }, { status: 400 });
+    }
 
     const photoId = crypto.randomUUID();
     const ext = contentType.split('/')[1];
     const r2Key = `users/${user.id}/${photoId}.${ext}`;
 
+    await env.PHOTOS.put(r2Key, body, { httpMetadata: { contentType } });
+
     await env.DB.prepare(
       `INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES (?, ?, ?, ?, ?)`
     ).bind(photoId, user.id, r2Key, position, Date.now()).run();
 
-    const uploadUrl = await createPresignedUploadUrl(env, r2Key, contentType, 300);
-
-    return Response.json({ photoId, uploadUrl, r2Key });
+    return Response.json({ photoId, url: `/photos/${photoId}` });
   });
 
   router.delete('/api/photos/:id', async (request: IRequest, env: Env) => {
@@ -79,14 +105,12 @@ export function registerPhotoRoutes(router: RouterType) {
     const object = await env.PHOTOS.get(photo.r2_key);
     if (!object) return new Response('Not found', { status: 404 });
 
-    // The presigned upload URL only binds `host` into the SigV4 signature
-    // (src/lib/r2.ts), so the stored `Content-Type` is attacker-controlled
-    // regardless of what was declared to POST /api/photos: a client can claim
-    // an `image/jpeg` slot and then PUT an HTML/JS payload as `text/html`.
-    // Echoing that back would be stored XSS on our own origin with
-    // same-origin access to the victim's session. Whitelist the stored value
-    // against the same set the upload endpoint accepts, and send `nosniff` so
-    // the browser can't content-sniff its way past the fallback either.
+    // Defense in depth: POST /api/photos already validates Content-Type
+    // before storing, so this shouldn't ever see anything outside the
+    // whitelist -- but never trust stored data blindly on the way back out.
+    // Echoing an arbitrary stored type back would risk stored XSS on our own
+    // origin with same-origin access to the victim's session; `nosniff` stops
+    // the browser from content-sniffing its way past the fallback too.
     const storedType = object.httpMetadata?.contentType;
     const contentType = storedType && ALLOWED_TYPES.has(storedType) ? storedType : 'application/octet-stream';
 

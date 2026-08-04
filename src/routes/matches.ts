@@ -1,6 +1,7 @@
 import type { RouterType, IRequest } from 'itty-router';
 import { getSessionUser } from '../lib/session';
 import { notifyMessage } from '../lib/notifications';
+import { computeMusicOverlap } from '../lib/musicOverlap';
 
 // A soft-deleted account must disappear from matches and messaging
 // immediately (docs/PLAN.md §9), not linger until the 7-day grace period
@@ -16,7 +17,7 @@ async function loadActiveMatchForParticipant(db: D1Database, matchId: string, us
          AND ua.deleted_at IS NULL AND ub.deleted_at IS NULL`
     )
     .bind(matchId, userId, userId)
-    .first<{ id: string; user_a_id: string; user_b_id: string }>();
+    .first<{ id: string; user_a_id: string; user_b_id: string; created_at: number }>();
 }
 
 export function registerMatchRoutes(router: RouterType) {
@@ -43,6 +44,31 @@ export function registerMatchRoutes(router: RouterType) {
     }));
 
     return Response.json({ matches });
+  });
+
+  router.get('/api/matches/:id', async (request: IRequest, env: Env) => {
+    const user = await getSessionUser(request, env.DB);
+    if (!user) return new Response('Unauthorized', { status: 401 });
+
+    const match = await loadActiveMatchForParticipant(env.DB, request.params.id, user.id);
+    if (!match) return new Response('Forbidden', { status: 403 });
+
+    const otherUserId = match.user_a_id === user.id ? match.user_b_id : match.user_a_id;
+    const otherUser = await env.DB.prepare('SELECT display_name FROM users WHERE id = ?')
+      .bind(otherUserId)
+      .first<{ display_name: string | null }>();
+
+    const overlap = await computeMusicOverlap(env.DB, user.id, otherUserId);
+
+    return Response.json({
+      match: {
+        id: match.id,
+        otherUserId,
+        otherDisplayName: otherUser?.display_name ?? null,
+        createdAt: match.created_at,
+      },
+      overlap,
+    });
   });
 
   router.post('/api/matches/:id/unmatch', async (request: IRequest, env: Env) => {

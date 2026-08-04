@@ -17,3 +17,39 @@
 @source "./index.html";
 @source "./app.js";
 @source "./swipe.js";
+
+@layer components {
+  .wordmark {
+    @apply bg-gradient-to-r from-brand-400 to-accent-400 bg-clip-text font-extrabold tracking-tight text-transparent;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-accent-500 px-4 py-3 font-semibold text-white shadow-lg shadow-brand-600/30 transition active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-surface2 px-4 py-3 font-semibold text-neutral-100 transition active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-red-600/90 px-4 py-3 font-semibold text-white transition active:scale-[0.98];
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1 rounded-lg px-2 py-1 text-sm font-medium text-neutral-400 transition hover:text-neutral-200;
+  }
+  .field {
+    @apply w-full rounded-xl border border-white/10 bg-surface2 px-3 py-2.5 text-neutral-50 outline-none transition placeholder:text-neutral-500 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30;
+  }
+  .field-label {
+    @apply text-xs font-semibold tracking-wide text-neutral-400 uppercase;
+  }
+  .card {
+    @apply rounded-2xl border border-white/5 bg-surface shadow-lg shadow-black/20;
+  }
+  .pill-toggle {
+    @apply rounded-full px-4 py-2 text-sm font-semibold transition;
+  }
+  .pill-toggle-active {
+    @apply bg-gradient-to-r from-brand-500 to-accent-500 text-white shadow shadow-brand-600/30;
+  }
+  .pill-toggle-inactive {
+    @apply bg-surface2 text-neutral-300;
+  }
+}

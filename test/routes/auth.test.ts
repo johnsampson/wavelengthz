@@ -46,7 +46,11 @@ describe('GET /callback', () => {
         }
         if (url.includes('api.spotify.com/v1/me')) {
           return new Response(
-            JSON.stringify({ id: 'spotify-xyz', email: 'user@example.com' }),
+            JSON.stringify({
+              id: 'spotify-xyz',
+              email: 'user@example.com',
+              images: [{ url: 'https://img.example/avatar.jpg' }],
+            }),
             { status: 200 }
           );
         }
@@ -67,11 +71,67 @@ describe('GET /callback', () => {
     expect(row).toBeTruthy();
     expect(row.email).toBe('user@example.com');
     expect(row.access_token).not.toBe('at'); // encrypted, not plaintext
+    expect(row.spotify_avatar_url).toBe('https://img.example/avatar.jpg');
 
     vi.unstubAllGlobals();
   });
 
-  it('redirects an existing user whose onboarding is incomplete to /onboarding.html', async () => {
+  it('refreshes the stored Spotify avatar URL when an existing user logs in again', async () => {
+    const now = Date.now();
+    await env.DB.prepare(
+      `INSERT INTO users (id, spotify_id, email, spotify_avatar_url, access_token, refresh_token, token_expires_at, onboarded_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        'user-existing-avatar',
+        'spotify-avatar-user',
+        'user@example.com',
+        'https://img.example/old-avatar.jpg',
+        'old-at',
+        'old-rt',
+        now + 3600 * 1000,
+        now,
+        now,
+        now
+      )
+      .run();
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('accounts.spotify.com/api/token')) {
+          return new Response(JSON.stringify({ access_token: 'at4', refresh_token: 'rt4', expires_in: 3600 }), { status: 200 });
+        }
+        if (url.includes('api.spotify.com/v1/me')) {
+          return new Response(
+            JSON.stringify({
+              id: 'spotify-avatar-user',
+              email: 'user@example.com',
+              images: [{ url: 'https://img.example/new-avatar.jpg' }],
+            }),
+            { status: 200 }
+          );
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    const req = new Request('http://localhost/callback?code=abc&state=match', {
+      headers: { Cookie: 'wl_oauth_state=match' },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(302);
+
+    const row = await env.DB.prepare('SELECT spotify_avatar_url FROM users WHERE spotify_id = ?')
+      .bind('spotify-avatar-user')
+      .first<any>();
+    expect(row.spotify_avatar_url).toBe('https://img.example/new-avatar.jpg');
+
+    vi.unstubAllGlobals();
+  });
+
+  it('redirects an existing user whose onboarding is incomplete to /onboarding', async () => {
     const now = Date.now();
     await env.DB.prepare(
       `INSERT INTO users (id, spotify_id, email, access_token, refresh_token, token_expires_at, onboarded_at, created_at, updated_at)
@@ -115,7 +175,7 @@ describe('GET /callback', () => {
     });
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     expect(res.status).toBe(302);
-    expect(res.headers.get('Location')).toBe('/onboarding.html');
+    expect(res.headers.get('Location')).toBe('/onboarding');
 
     vi.unstubAllGlobals();
   });

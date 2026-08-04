@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wavelengthz — Profile</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/tailwind.css" />
+</head>
+<body class="min-h-screen bg-base text-neutral-50 p-4 pb-24" x-data="profileApp()" x-init="init()">
+  <div id="wl-header-root"></div>
+
+  <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
+
+  <template x-if="profile">
+    <div class="mx-auto flex max-w-md flex-col gap-6">
+      <div class="grid grid-cols-2 gap-2">
+        <template x-for="(url, i) in profile.photoUrls" :key="url">
+          <img :src="url" alt="" class="aspect-square w-full rounded-2xl object-cover" :class="i === 0 ? 'col-span-2 aspect-[4/3]' : ''" />
+        </template>
+        <p x-show="profile.photoUrls.length === 0" class="card col-span-2 flex aspect-[4/3] items-center justify-center text-neutral-500">
+          No photos yet
+        </p>
+      </div>
+
+      <div>
+        <h1 class="text-2xl font-bold" x-text="profile.displayName || 'Wavelengthz user'"></h1>
+        <p class="text-neutral-400" x-text="profile.distanceLabel"></p>
+        <p class="mt-2 text-neutral-200" x-text="profile.bio"></p>
+        <div class="mt-2 flex gap-2">
+          <span x-show="profile.isMatch" class="pill-toggle pill-toggle-active">Matched</span>
+          <span x-show="profile.likedYou && !profile.isMatch" class="pill-toggle pill-toggle-inactive text-brand-400">Likes you</span>
+        </div>
+      </div>
+
+      <section x-show="overlap.sharedGenres.length > 0" class="card p-4">
+        <h2 class="mb-3 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Shared genres</h2>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="g in overlap.sharedGenres" :key="g.genre">
+            <span class="pill-toggle pill-toggle-inactive" x-text="g.genre"></span>
+          </template>
+        </div>
+      </section>
+
+      <section x-show="overlap.sharedArtists.length > 0" class="card p-4">
+        <h2 class="mb-3 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Artists you both like</h2>
+        <div class="grid grid-cols-3 gap-3">
+          <template x-for="a in overlap.sharedArtists" :key="a.id">
+            <div class="flex flex-col items-center gap-1 text-center">
+              <img :src="a.imageUrl" :alt="a.name" class="h-16 w-16 rounded-full object-cover" />
+              <span class="text-xs text-neutral-300" x-text="a.name"></span>
+            </div>
+          </template>
+        </div>
+      </section>
+
+      <section x-show="overlap.sharedTracks.length > 0" class="card p-4">
+        <h2 class="mb-3 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Tracks you both like</h2>
+        <ul class="flex flex-col gap-2">
+          <template x-for="t in overlap.sharedTracks" :key="t.id">
+            <li class="flex items-center gap-3">
+              <img :src="t.imageUrl" :alt="t.name" class="h-10 w-10 rounded object-cover" />
+              <div class="min-w-0">
+                <p class="truncate text-sm text-neutral-100" x-text="t.name"></p>
+                <p class="truncate text-xs text-neutral-500" x-text="t.artistName"></p>
+              </div>
+            </li>
+          </template>
+        </ul>
+      </section>
+
+      <p
+        x-show="overlap.sharedGenres.length === 0 && overlap.sharedArtists.length === 0 && overlap.sharedTracks.length === 0"
+        class="text-center text-neutral-400"
+      >
+        No shared music activity yet.
+      </p>
+    </div>
+  </template>
+
+  <script type="module">
+    import { api } from '/app.js';
+    import { mountHeader, mountNav } from '/nav.js';
+    import { requireAuth } from '/auth.js';
+    mountHeader();
+    mountNav();
+
+    window.profileApp = function () {
+      return {
+        userId: new URLSearchParams(window.location.search).get('id'),
+        profile: null,
+        overlap: { sharedArtists: [], sharedTracks: [], sharedGenres: [] },
+        error: null,
+
+        async init() {
+          if (!(await requireAuth())) return;
+          try {
+            const res = await api.personProfile(this.userId);
+            this.profile = res.profile;
+            this.overlap = res.overlap;
+          } catch (e) {
+            this.error = 'Could not load this profile. Please try again.';
+          }
+        },
+      };
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <div id="wl-nav-root"></div>
+</body>
+</html>

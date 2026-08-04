@@ -10,6 +10,7 @@ export interface UserRow {
   lng: number | null;
   max_distance_km: number;
   email: string | null;
+  spotify_avatar_url: string | null;
   access_token: string;
   refresh_token: string;
   token_expires_at: number;

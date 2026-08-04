@@ -11,6 +11,7 @@ CREATE TABLE users (
   lng               REAL,
   max_distance_km   INTEGER DEFAULT 80,  -- candidate search radius, user-adjustable
   email             TEXT,
+  spotify_avatar_url TEXT,           -- imported from Spotify's own profile photo; NEVER a match-facing photo (see user_photos)
   access_token      TEXT NOT NULL,    -- encrypted at rest
   refresh_token     TEXT NOT NULL,    -- encrypted at rest
   token_expires_at  INTEGER NOT NULL,
@@ -150,6 +151,33 @@ CREATE TABLE notifications (
   created_at     INTEGER NOT NULL
 );
 
+-- Catalog-wide genre stats: how many artists/tracks in the WHOLE catalog
+-- carry each genre. Auto-incremented whenever a new artist/track actually
+-- gets inserted into the catalog (seed, catalog refresh, search-and-add, or
+-- an artist-profile view upserting a not-yet-catalogued artist). A track's
+-- genres are its artist's genres, since tracks don't carry their own.
+CREATE TABLE genres (
+  genre         TEXT PRIMARY KEY,
+  artist_count  INTEGER NOT NULL DEFAULT 0,
+  track_count   INTEGER NOT NULL DEFAULT 0,
+  updated_at    INTEGER NOT NULL
+);
+
+-- Per-user genre affinity, built from right-swipes in music mode. Split into
+-- artist_count/track_count (rather than one combined count) so "you both
+-- like indie" can distinguish liking indie ARTISTS from liking indie TRACKS.
+-- Incremented the first time a given item is swiped right, decremented if a
+-- previously-right-swiped item is later changed to left. Feeds the "shared
+-- genres" section of the match/profile pages.
+CREATE TABLE user_genres (
+  user_id       TEXT NOT NULL REFERENCES users(id),
+  genre         TEXT NOT NULL,
+  artist_count  INTEGER NOT NULL DEFAULT 0,
+  track_count   INTEGER NOT NULL DEFAULT 0,
+  updated_at    INTEGER NOT NULL,
+  PRIMARY KEY (user_id, genre)
+);
+
 CREATE INDEX idx_people_swipes_swiper ON people_swipes(swiper_id, created_at DESC);
 CREATE INDEX idx_people_swipes_target ON people_swipes(target_id, direction, created_at DESC);
 CREATE INDEX idx_music_swipes_user ON music_swipes(user_id, created_at DESC);
@@ -160,3 +188,4 @@ CREATE INDEX idx_messages_match ON messages(match_id, created_at);
 CREATE INDEX idx_blocks_blocker ON blocks(blocker_id);
 CREATE INDEX idx_reports_status ON reports(status, created_at);
 CREATE INDEX idx_users_location ON users(lat, lng);
+CREATE INDEX idx_user_genres_user ON user_genres(user_id, (artist_count + track_count) DESC);

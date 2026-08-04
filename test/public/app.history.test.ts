@@ -21,17 +21,6 @@ describe('api client — history and photo methods', () => {
     vi.unstubAllGlobals();
   });
 
-  it('api.photoUploadUrl posts the content type and size', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ uploadUrl: 'https://x', photoId: 'p1' }), { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
-    await api.photoUploadUrl({ contentType: 'image/jpeg', sizeBytes: 1000 });
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/photos',
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ contentType: 'image/jpeg', sizeBytes: 1000 }) })
-    );
-    vi.unstubAllGlobals();
-  });
-
   it('a non-2xx JSON error response attaches status and parsed body to the thrown error', async () => {
     vi.stubGlobal(
       'fetch',

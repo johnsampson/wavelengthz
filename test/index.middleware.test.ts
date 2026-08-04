@@ -98,4 +98,22 @@ describe('global middleware', () => {
     expect(text).not.toContain('downstream Spotify outage');
     vi.unstubAllGlobals();
   });
+
+  it('logs the real error and request path to the console so a local dev session without a real Sentry project can still see what broke', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('downstream Spotify outage'); }));
+    const callbackReq = new Request('http://localhost/callback?code=x&state=y', {
+      headers: { Cookie: 'wl_oauth_state=y', 'CF-Connecting-IP': '9.9.9.7' },
+    });
+
+    await worker.fetch(callbackReq, env, {} as ExecutionContext);
+
+    expect(consoleErrorSpy).toHaveBeenCalled();
+    const loggedText = consoleErrorSpy.mock.calls.map((call) => call.join(' ')).join('\n');
+    expect(loggedText).toContain('downstream Spotify outage');
+    expect(loggedText).toContain('/callback');
+
+    consoleErrorSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
 });

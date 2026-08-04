@@ -22,6 +22,10 @@ export const api = {
   swipe: (mode, body) =>
     request(`/api/swipe/${mode}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   matches: () => request('/api/matches'),
+  matchDetail: (matchId) => request(`/api/matches/${matchId}`),
+  artistProfile: (artistId) => request(`/api/artists/${artistId}`),
+  personProfile: (userId) => request(`/api/people/${userId}/profile`),
+  artistSearch: (q) => request(`/api/artists/search?q=${encodeURIComponent(q)}`),
   messages: (matchId) => request(`/api/matches/${matchId}/messages`),
   sendMessage: (matchId, body) =>
     request(`/api/matches/${matchId}/messages`, {
@@ -41,10 +45,11 @@ export const api = {
     }),
   unmatch: (matchId) => request(`/api/matches/${matchId}/unmatch`, { method: 'POST' }),
   deleteAccount: () => request('/api/account', { method: 'DELETE' }),
-  photoUploadUrl: (payload) =>
-    request('/api/photos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+  myPhotos: () => request('/api/photos'),
   deletePhoto: (photoId) => request(`/api/photos/${photoId}`, { method: 'DELETE' }),
-  swipeHistory: (mode, limit = 20, offset = 0) => request(`/api/swipes/${mode}?limit=${limit}&offset=${offset}`),
+  /** @param {'left'|'right'|null} [direction] */
+  swipeHistory: (mode, limit = 20, offset = 0, direction = null) =>
+    request(`/api/swipes/${mode}?limit=${limit}&offset=${offset}${direction ? `&direction=${direction}` : ''}`),
   updateSwipe: (mode, id, direction) =>
     request(`/api/swipes/${mode}/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }) }),
 };

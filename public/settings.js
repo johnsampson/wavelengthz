@@ -1,4 +1,5 @@
 import { api } from './app.js';
+import { MAX_PHOTOS, uploadPhotoFile } from './photos.js';
 
 // Extracted from settings.html's inline script so the round-tripping logic
 // below is directly testable (same pattern as swipe.js). The page just does
@@ -13,6 +14,10 @@ export function createSettingsApp() {
   return {
     maxDistanceKm: 80,
     bio: null,
+    spotifyAvatarUrl: null,
+    photos: [],
+    maxPhotos: MAX_PHOTOS,
+    photoError: null,
     confirmingDelete: false,
     error: null,
     saved: false,
@@ -20,12 +25,18 @@ export function createSettingsApp() {
 
     async init() {
       try {
-        const me = await api.me();
+        const [me, photosRes] = await Promise.all([api.me(), api.myPhotos()]);
         // Never leave the slider on a hardcoded default: saving would then
         // silently overwrite the user's real radius with 80.
         if (me.user.max_distance_km != null) this.maxDistanceKm = me.user.max_distance_km;
         this.bio = me.user.bio ?? null;
+        this.spotifyAvatarUrl = me.user.spotify_avatar_url ?? null;
+        this.photos = photosRes.photos;
       } catch (e) {
+        if (e.status === 401) {
+          window.location.href = '/login';
+          return;
+        }
         this.error = 'Could not load your settings. Please reload the page.';
       } finally {
         this.loading = false;
@@ -54,12 +65,46 @@ export function createSettingsApp() {
       }
     },
 
+    async uploadPhoto(event) {
+      const file = event.target.files[0];
+      event.target.value = '';
+      if (!file) return;
+      this.photoError = null;
+      if (this.photos.length >= this.maxPhotos) {
+        this.photoError = `You can upload up to ${this.maxPhotos} photos.`;
+        return;
+      }
+      try {
+        const uploaded = await uploadPhotoFile(file);
+        this.photos.push(uploaded);
+      } catch (e) {
+        console.error('Photo upload failed:', e);
+        this.photoError = 'Could not upload that photo. Please try again.';
+      }
+    },
+
+    async removePhoto(photoId) {
+      this.photoError = null;
+      try {
+        await api.deletePhoto(photoId);
+        this.photos = this.photos.filter((p) => p.photoId !== photoId);
+      } catch (e) {
+        this.photoError = 'Could not remove that photo. Please try again.';
+      }
+    },
+
     async logout() {
       this.error = null;
       try {
-        await fetch('/logout', { method: 'POST', credentials: 'include' });
-        window.location.href = '/login';
+        const res = await fetch('/logout', { method: 'POST', credentials: 'include' });
+        if (!res.ok) throw new Error(`Logout failed: ${res.status} ${await res.text()}`);
+        // Land on the deck, not /login -- /login immediately kicks off a new
+        // Spotify OAuth round-trip, and if Spotify still has an active
+        // browser session it re-authenticates the same account with no
+        // visible prompt, making a successful logout look like a no-op.
+        window.location.href = '/';
       } catch (e) {
+        console.error('Logout failed:', e);
         this.error = 'Could not log out. Please try again.';
       }
     },

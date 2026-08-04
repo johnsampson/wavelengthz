@@ -73,6 +73,13 @@ export default {
 
       return await router.fetch(request, env, ctx);
     } catch (error) {
+      // Always log locally first -- reportError only reaches Sentry, which
+      // in local dev is typically an unmonitored placeholder DSN. Without
+      // this, a route throwing is completely invisible in `wrangler dev`'s
+      // own terminal, even though the response correctly still comes back
+      // as a generic 500.
+      console.error(`Unhandled error on ${url.pathname}:`, error);
+
       // Prefer fire-and-forget via ctx.waitUntil (always present on real
       // Workers runtimes) so a slow or unreachable Sentry never delays the
       // client's 500 response. Only fall back to awaiting directly when

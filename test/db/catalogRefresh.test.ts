@@ -8,7 +8,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await env.DB.exec('DELETE FROM music_profiles; DELETE FROM artists; DELETE FROM users;');
+  await env.DB.exec('DELETE FROM genres; DELETE FROM music_profiles; DELETE FROM artists; DELETE FROM users;');
   await env.DB.prepare(
     `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
      VALUES ('u1', 'sp1', 'a', 'r', 9999999999999, 1000, 1000)`
@@ -39,6 +39,9 @@ describe('refreshCatalogFromProfiles', () => {
     const row = await env.DB.prepare('SELECT * FROM artists WHERE id = ?').bind('new-artist').first<any>();
     expect(row.source).toBe('spotify_search');
     expect(fetchMock.mock.calls.some((c) => c[0].toString().includes('/v1/artists/already-known'))).toBe(false);
+
+    const genreRow = await env.DB.prepare('SELECT * FROM genres WHERE genre = ?').bind('indie').first<any>();
+    expect(genreRow.artist_count).toBe(1);
 
     vi.unstubAllGlobals();
   });

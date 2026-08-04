@@ -4,23 +4,31 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Wavelengthz — Messages</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/tailwind.css" />
 </head>
-<body class="min-h-screen bg-neutral-950 text-neutral-50 p-4 flex flex-col" x-data="messagesApp()" x-init="init()">
+<body class="min-h-screen bg-base text-neutral-50 p-4 flex flex-col" x-data="messagesApp()" x-init="init()">
+  <div id="wl-header-root"></div>
   <p x-show="error" x-text="error" class="text-red-400 max-w-md w-full mx-auto mb-2" role="alert"></p>
   <ul class="flex-1 flex flex-col gap-2 overflow-y-auto max-w-md w-full mx-auto">
     <template x-for="message in messages" :key="message.id">
-      <li class="bg-neutral-900 rounded p-2" x-text="message.body"></li>
+      <li class="card px-3 py-2" x-text="message.body"></li>
     </template>
   </ul>
-  <form class="flex gap-2 max-w-md w-full mx-auto mt-4" @submit.prevent="send()">
+  <form class="flex gap-2 max-w-md w-full mx-auto mt-4 mb-20" @submit.prevent="send()">
     <label class="sr-only" for="message-input">Message</label>
-    <input id="message-input" class="flex-1 bg-neutral-900 rounded p-2" x-model="draft" required />
-    <button type="submit" class="bg-emerald-600 rounded px-4">Send</button>
+    <input id="message-input" class="field flex-1" x-model="draft" required />
+    <button type="submit" class="btn-primary px-5">Send</button>
   </form>
 
   <script type="module">
     import { api } from '/app.js';
+    import { mountHeader, mountNav } from '/nav.js';
+    import { requireAuth } from '/auth.js';
+    mountHeader();
+    mountNav();
 
     window.messagesApp = function () {
       return {
@@ -28,7 +36,8 @@
         messages: [],
         draft: '',
         error: null,
-        init() {
+        async init() {
+          if (!(await requireAuth())) return;
           this.load();
         },
         async load() {
@@ -55,5 +64,6 @@
     };
   </script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <div id="wl-nav-root"></div>
 </body>
 </html>

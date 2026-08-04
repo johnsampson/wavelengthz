@@ -1,4 +1,6 @@
 import { getClientCredentialsToken, fetchArtistById } from '../lib/spotify';
+import { genresToObject } from '../lib/genres';
+import { recordCatalogGenres } from '../lib/genreCatalog';
 
 export async function refreshCatalogFromProfiles(
   env: Env
@@ -26,11 +28,13 @@ export async function refreshCatalogFromProfiles(
       if (!token) token = await getClientCredentialsToken(env);
       const artist = await fetchArtistById(token, artistId);
 
+      const now = Date.now();
       await env.DB.prepare(
         `INSERT OR IGNORE INTO artists (id, name, genres, image_url, popularity, source, added_by_user_id, approved, created_at)
          VALUES (?, ?, ?, ?, ?, 'spotify_search', NULL, 1, ?)`
-      ).bind(artist.id, artist.name, JSON.stringify(artist.genres ?? []), artist.images?.[0]?.url ?? null, artist.popularity ?? null, Date.now()).run();
+      ).bind(artist.id, artist.name, JSON.stringify(genresToObject(artist.genres)), artist.images?.[0]?.url ?? null, artist.popularity ?? null, now).run();
       artistsAdded += 1;
+      await recordCatalogGenres(env.DB, artist.genres ?? [], 'artist', now);
     } catch {
       failedArtistIds.push(artistId);
     }

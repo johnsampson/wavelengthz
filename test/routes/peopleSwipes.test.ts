@@ -39,7 +39,7 @@ async function cookieFor(userId: string) {
 beforeEach(async () => {
   // Child rows before parent `users` rows -- D1 enforces FK constraints here.
   await env.DB.exec(
-    'DELETE FROM notifications; DELETE FROM matches; DELETE FROM blocks; DELETE FROM people_swipes; DELETE FROM music_swipes; DELETE FROM music_profiles; DELETE FROM user_photos; DELETE FROM sessions; DELETE FROM users;'
+    'DELETE FROM notifications; DELETE FROM matches; DELETE FROM blocks; DELETE FROM people_swipes; DELETE FROM music_swipes; DELETE FROM user_genres; DELETE FROM music_profiles; DELETE FROM user_photos; DELETE FROM sessions; DELETE FROM users;'
   );
   await makeUser('u1');
   await makeUser('u2');
@@ -381,6 +381,162 @@ describe('GET /api/swipes/people and PATCH', () => {
     expect(patchRes.status).toBe(200);
     const row = await env.DB.prepare('SELECT direction FROM people_swipes WHERE id = ?').bind('ps1').first<any>();
     expect(row.direction).toBe('right');
+  });
+
+  it('creates a match when changing a past decision to right completes a mutual like', async () => {
+    // Regression: u2 already liked u1 (a real prior right-swipe). u1 originally
+    // passed on u2, then later used the History "Change" toggle to flip that
+    // decision to right -- this must complete the mutual like and create a
+    // match, exactly like a fresh right-swipe through the deck would.
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, match_score, created_at, updated_at) VALUES ('ps-u2-u1', 'u2', 'u1', 'right', 0.5, 500, 500)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, match_score, created_at, updated_at) VALUES ('ps-u1-u2', 'u1', 'u2', 'left', 0.4, 1000, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+
+    const patchRes = await worker.fetch(
+      new Request('http://localhost/api/swipes/people/ps-u1-u2', {
+        method: 'PATCH',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ direction: 'right' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(patchRes.status).toBe(200);
+    const body = await patchRes.json<any>();
+    expect(body.matched).toBe(true);
+
+    const [a, b] = ['u1', 'u2'].sort();
+    const match = await env.DB.prepare('SELECT * FROM matches WHERE user_a_id = ? AND user_b_id = ?').bind(a, b).first();
+    expect(match).not.toBeNull();
+  });
+
+  it('does not create a match when changing a decision to left', async () => {
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, match_score, created_at, updated_at) VALUES ('ps-u2-u1', 'u2', 'u1', 'right', 0.5, 500, 500)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, match_score, created_at, updated_at) VALUES ('ps-u1-u2', 'u1', 'u2', 'right', 0.4, 1000, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+
+    const patchRes = await worker.fetch(
+      new Request('http://localhost/api/swipes/people/ps-u1-u2', {
+        method: 'PATCH',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ direction: 'left' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    const body = await patchRes.json<any>();
+    expect(body.matched).toBe(false);
+
+    const [a, b] = ['u1', 'u2'].sort();
+    const match = await env.DB.prepare('SELECT * FROM matches WHERE user_a_id = ? AND user_b_id = ?').bind(a, b).first();
+    expect(match).toBeNull();
+  });
+
+  it('filters history by direction when ?direction= is given', async () => {
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, match_score, created_at, updated_at) VALUES ('ps1', 'u1', 'u2', 'left', 0.4, 1000, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, match_score, created_at, updated_at) VALUES ('ps2', 'u1', 'u3', 'right', 0.6, 2000, 2000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+
+    const rightRes = await worker.fetch(
+      new Request('http://localhost/api/swipes/people?direction=right', { headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    const rightBody = await rightRes.json<any>();
+    expect(rightBody.swipes.map((s: any) => s.id)).toEqual(['ps2']);
+
+    const leftRes = await worker.fetch(
+      new Request('http://localhost/api/swipes/people?direction=left', { headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    const leftBody = await leftRes.json<any>();
+    expect(leftBody.swipes.map((s: any) => s.id)).toEqual(['ps1']);
+  });
+});
+
+describe('GET /api/people/:id/profile', () => {
+  it('returns photos, bio, distance, and overlap for an eligible target', async () => {
+    await env.DB.prepare(`UPDATE users SET bio = 'hi there', display_name = 'U Two' WHERE id = 'u2'`).run();
+    await env.DB.prepare(`INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES ('p1', 'u2', 'users/u2/p1.jpg', 0, 1000)`).run();
+    await env.DB.prepare(`INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES ('p2', 'u2', 'users/u2/p2.jpg', 1, 2000)`).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+
+    expect(body.profile.displayName).toBe('U Two');
+    expect(body.profile.bio).toBe('hi there');
+    expect(body.profile.photoUrls).toEqual(['/photos/p1', '/photos/p2']);
+    expect(body.profile.distanceLabel).toContain('mile');
+    expect(body.profile.likedYou).toBe(false);
+    expect(body.profile.isMatch).toBe(false);
+    expect(body.overlap).toEqual({ sharedArtists: [], sharedTracks: [], sharedGenres: [] });
+  });
+
+  it('reports likedYou when the target already swiped right on the caller', async () => {
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, created_at, updated_at) VALUES ('ps1', 'u2', 'u1', 'right', 1000, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.profile.likedYou).toBe(true);
+  });
+
+  it('reports isMatch when there is an active match', async () => {
+    const [a, b] = ['u1', 'u2'].sort();
+    await env.DB.prepare(`INSERT INTO matches (id, user_a_id, user_b_id, created_at) VALUES ('m1', ?, ?, 1000)`).bind(a, b).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.profile.isMatch).toBe(true);
+  });
+
+  it('returns 403 for a blocked target, in either direction', async () => {
+    await env.DB.prepare(`INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES ('b1', 'u1', 'u2', 1000)`).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 404 for a soft-deleted target', async () => {
+    await env.DB.prepare('UPDATE users SET deleted_at = ? WHERE id = ?').bind(2000, 'u2').run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 400 for the caller\'s own id', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/people/u1/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects when the caller has not completed onboarding', async () => {
+    await makeUnonboardedUser('u4');
+    const cookie = await cookieFor('u4');
+    const res = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('onboarding_incomplete');
   });
 });
 

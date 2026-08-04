@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { buildAuthUrl } from '../../src/lib/spotify';
+import { describe, it, expect, vi } from 'vitest';
+import { buildAuthUrl, fetchSpotifyProfile } from '../../src/lib/spotify';
 
 const env = {
   SPOTIFY_CLIENT_ID: 'client123',
@@ -16,5 +16,29 @@ describe('buildAuthUrl', () => {
     expect(url.searchParams.get('state')).toBe('state-abc');
     expect(url.searchParams.get('scope')).toContain('user-top-read');
     expect(url.searchParams.get('scope')).toContain('user-read-email');
+  });
+});
+
+describe('fetchSpotifyProfile', () => {
+  it('passes through the images array from Spotify\'s /v1/me response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ id: 'sp1', email: 'a@b.com', images: [{ url: 'https://img.example/avatar.jpg' }] }),
+          { status: 200 }
+        )
+      )
+    );
+    const profile = await fetchSpotifyProfile('token');
+    expect(profile.images?.[0]?.url).toBe('https://img.example/avatar.jpg');
+    vi.unstubAllGlobals();
+  });
+
+  it('handles a profile with no images', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ id: 'sp1' }), { status: 200 })));
+    const profile = await fetchSpotifyProfile('token');
+    expect(profile.images).toBeUndefined();
+    vi.unstubAllGlobals();
   });
 });

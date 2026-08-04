@@ -4,33 +4,37 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Wavelengthz — Matches</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/tailwind.css" />
 </head>
-<body class="min-h-screen bg-neutral-950 text-neutral-50 p-4" x-data="matchesApp()" x-init="init()">
-  <h1 class="text-2xl font-semibold mb-4">Your matches</h1>
-  <p x-show="error" x-text="error" class="text-red-400 max-w-md mb-4" role="alert"></p>
-  <ul class="flex flex-col gap-2 max-w-md">
+<body class="min-h-screen bg-base text-neutral-50 p-4 pb-24" x-data="matchesApp()" x-init="init()">
+  <div id="wl-header-root"></div>
+  <h1 class="mx-auto mb-4 max-w-md text-2xl font-bold">Your matches</h1>
+  <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
+  <ul class="mx-auto flex max-w-md flex-col gap-2">
     <template x-for="match in matches" :key="match.id">
-      <li class="flex items-center justify-between bg-neutral-900 rounded p-3">
-        <a class="underline" :href="`/messages.html?matchId=${match.id}`" x-text="match.otherDisplayName || match.otherUserId"></a>
-        <span class="flex gap-2">
-          <button class="text-sm text-red-400" @click="unmatch(match.id)">Unmatch</button>
-          <button class="text-sm text-yellow-400" @click="report(match.otherUserId)">Report</button>
-          <button class="text-sm text-neutral-400" @click="block(match.otherUserId)">Block</button>
-        </span>
+      <li class="card p-3">
+        <a class="font-semibold text-brand-300 hover:text-brand-200" :href="`/match?id=${match.id}`" x-text="match.otherDisplayName || match.otherUserId"></a>
       </li>
     </template>
   </ul>
-  <p x-show="matches.length === 0" class="text-neutral-400">No matches yet — keep swiping!</p>
+  <p x-show="matches.length === 0" class="mx-auto max-w-md text-center text-neutral-400">No matches yet — keep swiping!</p>
 
   <script type="module">
     import { api } from '/app.js';
+    import { mountHeader, mountNav } from '/nav.js';
+    import { requireAuth } from '/auth.js';
+    mountHeader();
+    mountNav();
 
     window.matchesApp = function () {
       return {
         matches: [],
         error: null,
-        init() {
+        async init() {
+          if (!(await requireAuth())) return;
           this.load();
         },
         async load() {
@@ -42,37 +46,10 @@
             this.error = 'Could not load your matches. Please try again.';
           }
         },
-        async unmatch(matchId) {
-          this.error = null;
-          try {
-            await api.unmatch(matchId);
-            await this.load();
-          } catch (e) {
-            this.error = 'Could not unmatch. Please try again.';
-          }
-        },
-        async block(userId) {
-          this.error = null;
-          try {
-            await api.block(userId);
-            await this.load();
-          } catch (e) {
-            this.error = 'Could not block that user. Please try again.';
-          }
-        },
-        async report(userId) {
-          const reason = prompt('Reason (inappropriate_photos, harassment, fake_profile, spam, underage, other):');
-          if (!reason) return;
-          this.error = null;
-          try {
-            await api.report(userId, reason);
-          } catch (e) {
-            this.error = 'Could not submit that report. Please try again.';
-          }
-        },
       };
     };
   </script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <div id="wl-nav-root"></div>
 </body>
 </html>

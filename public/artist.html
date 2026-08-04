@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wavelengthz — Artist</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/tailwind.css" />
+</head>
+<body class="min-h-screen bg-base text-neutral-50 p-4 pb-24" x-data="artistApp()" x-init="init()">
+  <div id="wl-header-root"></div>
+
+  <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
+
+  <template x-if="artist">
+    <div class="mx-auto flex max-w-md flex-col gap-6">
+      <div class="flex items-center gap-4">
+        <img :src="artist.imageUrl" :alt="artist.name" class="h-20 w-20 rounded-full object-cover" />
+        <div>
+          <h1 class="text-2xl font-bold" x-text="artist.name"></h1>
+          <div class="mt-1 flex flex-wrap gap-1" x-show="artist.genres.length > 0">
+            <template x-for="g in artist.genres" :key="g">
+              <span class="pill-toggle pill-toggle-inactive px-2 py-0.5 text-xs" x-text="g"></span>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <ul class="flex flex-col gap-2">
+        <template x-for="track in tracks" :key="track.id">
+          <li class="card flex items-center gap-3 p-3">
+            <img :src="track.imageUrl" :alt="track.name" class="h-12 w-12 rounded object-cover" />
+            <p class="min-w-0 flex-1 truncate text-sm text-neutral-100" x-text="track.name"></p>
+            <button
+              class="btn-secondary h-9 w-9 rounded-full text-sm"
+              :class="track.direction === 'left' ? 'ring-2 ring-neutral-400' : ''"
+              @click="swipeTrack(track, 'left')"
+              aria-label="Pass"
+            >✕</button>
+            <button
+              class="btn-primary h-9 w-9 rounded-full text-sm"
+              :class="track.direction === 'right' ? 'ring-2 ring-white' : ''"
+              @click="swipeTrack(track, 'right')"
+              aria-label="Like"
+            >♥</button>
+          </li>
+        </template>
+      </ul>
+
+      <p x-show="tracks.length === 0" class="text-center text-neutral-400">No tracks found for this artist.</p>
+    </div>
+  </template>
+
+  <script type="module">
+    import { api } from '/app.js';
+    import { mountHeader, mountNav } from '/nav.js';
+    import { requireAuth } from '/auth.js';
+    mountHeader();
+    mountNav();
+
+    window.artistApp = function () {
+      return {
+        artistId: new URLSearchParams(window.location.search).get('id'),
+        artist: null,
+        tracks: [],
+        error: null,
+
+        async init() {
+          if (!(await requireAuth())) return;
+          try {
+            const res = await api.artistProfile(this.artistId);
+            this.artist = res.artist;
+            this.tracks = res.tracks;
+          } catch (e) {
+            this.error = 'Could not load this artist. Please try again.';
+          }
+        },
+
+        async swipeTrack(track, direction) {
+          this.error = null;
+          const previous = track.direction;
+          track.direction = direction; // optimistic
+          try {
+            await api.swipe('music', { item_type: 'track', item_id: track.id, direction });
+          } catch (e) {
+            track.direction = previous;
+            this.error = 'Could not save that. Please try again.';
+          }
+        },
+      };
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <div id="wl-nav-root"></div>
+</body>
+</html>
