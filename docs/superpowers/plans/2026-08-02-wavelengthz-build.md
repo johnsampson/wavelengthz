@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status:** Tasks 1-19 below are the original plan and are fully implemented and merged. Substantial work has continued since via direct iteration against real usage (not the formal task loop) — see **Post-Launch Changes** at the end of this document for everything built or fixed after Task 19, including schema changes and one correction to a Global Constraint below (photo uploads).
+
 **Goal:** Build the Wavelengthz v1 app end-to-end per `docs/PLAN.md` — Spotify OAuth login, two swipe modes (people + music), a growing searchable artist/track catalog, blended match scoring with like-priority, messaging, trust & safety, transactional notifications, and a mobile-first PWA — on Cloudflare Workers + D1 + R2.
 
 **Architecture:** Single Cloudflare Worker (`src/index.ts`) routing via `itty-router` to per-domain route modules under `src/routes/`, backed by D1 (SQLite) for all relational data and R2 for photo blobs. Server-rendered-free static frontend (`public/`) using Alpine.js for reactivity, plain CSS (mobile-first, Tailwind CLI build), no SPA framework, per the plan's performance budget (§11).
@@ -14,7 +16,7 @@
 - Session cookies are `HttpOnly`, `Secure`, `SameSite=Lax` (docs/PLAN.md §13).
 - OAuth login uses a `state` param stored in a short-lived cookie and verified on callback, for CSRF protection (docs/PLAN.md §13).
 - Spotify Client Secret and the token-encryption key live only in Worker Secrets (`wrangler secret put`), never in `wrangler.toml` or committed files (docs/PLAN.md §13).
-- Photo uploads go through signed, short-lived R2 upload URLs issued by the Worker — photo bytes never route through the Worker body (docs/PLAN.md §13).
+- ~~Photo uploads go through signed, short-lived R2 upload URLs issued by the Worker — photo bytes never route through the Worker body (docs/PLAN.md §13).~~ **Superseded post-launch:** photo bytes now route through the Worker body (`POST /api/photos` writes via the `env.PHOTOS` binding directly). A presigned-URL upload hits R2's real endpoint directly, which is a different storage backend from the `env.PHOTOS` binding in local dev — uploads "succeeded" into a bucket the app's own read path could never see. See Post-Launch Changes.
 - Never expose a user's precise `lat`/`lng` to any other user via API response or UI — only a rounded, bucketed distance string (docs/PLAN.md §7.2).
 - `notifications.type` is constrained to `'match' | 'message'` only — no engagement-bait notification types, ever (docs/PLAN.md §10).
 - Every mutation to `people_swipes`/`music_swipes` uses the table's `UNIQUE` constraint as an upsert (`INSERT ... ON CONFLICT ... DO UPDATE`), never a delete-then-insert (docs/PLAN.md §3).
@@ -5629,3 +5631,55 @@ These require human action outside the codebase and are listed here so nothing f
 - Supply real PWA icon artwork.
 - Have `legal/privacy-policy.md` and `legal/terms-of-service.md` reviewed by counsel.
 - Verify D1 point-in-time recovery is enabled in the Cloudflare dashboard.
+
+---
+
+## Post-Launch Changes
+
+Everything below happened after Task 19 merged, driven by real local-dev usage and bug reports rather than the formal subagent-driven-development task loop. Organized by theme, not chronologically. File paths are the current, post-change locations.
+
+### Local-dev environment fixes
+
+- **Spotify OAuth `redirect_uri`**: must be `http://127.0.0.1:8787/callback` — Spotify allows plain HTTP only for the literal loopback IP, not the `localhost` hostname. Set in `wrangler.toml`'s `[vars]`.
+- **Service worker was breaking OAuth login** ("Invalid OAuth state" with nothing logged server-side): `public/sw.js` intercepted the `/login` navigation and re-issued it via `fetch()`, which follows the Spotify redirect *internally* instead of letting the browser perform a real top-level navigation — this silently broke the state-cookie round-trip. Fixed by excluding `/login`, `/callback`, `/logout` from the service worker's fetch handler entirely (a service worker has no legitimate role in a third-party OAuth handshake — nothing to cache).
+- **Seed catalog pagination**: Spotify's real `/v1/search` max `limit` is 10, not 50 — `SEARCH_PAGE_SIZE` in `src/db/seed.ts`.
+- **Spotify's "Get Artist's Top Tracks" endpoint now 403s** for this app (moved behind Extended Quota Mode access, verified directly against the live API with both a client-credentials and a real user token). `src/db/seed.ts` and the artist-profile route (`src/routes/catalog.ts`) now use track search by artist name instead (`searchTracksByArtistName` in `src/lib/spotify.ts`) — this was silently broken all along, producing 0 tracks despite artists seeding successfully.
+- **Music-mode candidate images**: `GET /api/candidates/music` now selects and returns `imageUrl` (previously omitted entirely).
+- **Artist candidates with no photo** are excluded from `/api/candidates/music` (broken-looking swipe cards otherwise).
+- **Global unhandled-error logging**: `src/index.ts`'s catch-all now `console.error`s before reporting to Sentry, since local dev's Sentry DSN is an unmonitored placeholder — errors were previously invisible in the `wrangler dev` terminal.
+- **All 12 Spotify API wrapper functions** (`src/lib/spotify.ts`) now include the response body in thrown errors, not just the HTTP status.
+- **R2 CORS**: a CORS policy was added to the `wavelengthz-photos` bucket during initial photo-upload debugging. It's no longer load-bearing (see "Photo upload architecture rewrite" below) but was left in place as harmless.
+
+### Design system and navigation
+
+- Full visual identity: coral-to-violet brand gradient, Manrope type, consistent buttons/cards/inputs (`public/styles.css`, `tailwind.config.js`) — the app previously had no styling beyond raw Tailwind utility classes.
+- Shared bottom tab nav (Deck/History/Matches/Settings) + gradient wordmark header (`public/nav.js`), injected client-side into every page except onboarding (a one-time gate, not a nav destination).
+- Redesigned swipe deck card (photo with gradient text scrim), action buttons, and every page's layout to match.
+
+### Auth-aware UI
+
+- `public/auth.js`: `getAuthedUser()` (checks `/api/me`, treats 401 as logged-out) and `requireAuth()` (redirects to `/login` if logged out).
+- The deck (`/`) shows a login card instead of a broken deck when logged out; every other protected page (history, matches, settings, messages, artist, match, profile, onboarding) redirects to `/login` via `requireAuth()`.
+- **Logout fixed**: redirects to `/` instead of `/login` — redirecting to `/login` immediately re-triggers Spotify OAuth, which silently re-authenticates the same account if Spotify still has an active browser session, making a successful logout look like a no-op. Also now checks `res.ok` before declaring success (the fetch itself doesn't throw on a non-2xx response).
+
+### Schema changes since Task 1
+
+- `users.spotify_avatar_url` (nullable `TEXT`) — imported from Spotify's own profile photo on every login (insert and refresh). Shown only in Settings as an account-identity indicator; **never** copied into `user_photos` or used as a match-facing photo.
+- `artists.genres` changed from a JSON array (`["indie","rock"]`) to a JSON object map (`{"indie":true,"rock":true}`) for O(1) genre-membership checks. Conversion helpers in `src/lib/genres.ts` (`genresToObject`/`genresFromRow`); API responses still expose genres as a plain array, only the DB storage format changed.
+- `user_genre_affinity` (single `like_count` column) replaced by **`user_genres`** (`artist_count`/`track_count` split), same auto-increment-on-right-swipe/decrement-on-change-to-left semantics, now also triggered by the History "Change" toggle (see Bug fixes).
+- New **`genres`** table: catalog-wide `artist_count`/`track_count` per genre, auto-incremented whenever a new artist/track actually lands in the catalog (`src/lib/genreCatalog.ts`), wired into every catalog-write site: seeding, the weekly catalog-refresh cron, catalog search-and-add, and the artist-profile upsert path.
+- **Known limitation:** Spotify's API no longer returns genre data on artist objects at all, on either `/v1/search` or `/v1/artists/{id}` (verified directly against the live API). Both genre tables are correctly wired but will stay effectively empty until Spotify restores this data or a different genre source is added — this is a platform limitation, not a bug here.
+
+### New features
+
+- **History pagination and filtering** — Previous/Next controls plus a liked/passed filter on `/history`, backed by a `?direction=` param on `GET /api/swipes/:mode`. Logic extracted into a testable `public/history.js`.
+- **Match detail page** (`/match?id=`) — the other participant plus music overlap (shared right-swiped artists/tracks, shared genres), computed by the shared `computeMusicOverlap` helper (`src/lib/musicOverlap.ts`) and served by `GET /api/matches/:id`.
+- **Person profile pages** (`/profile?id=`) — full photo set, bio, distance, "Likes you"/"Matched" badges, and the same music overlap. Viewable for a current candidate *or* an active match (not gated to matches only — the point of a music-first dating app is surfacing "why you might match" before someone decides to swipe). Safety-scoped via `isBlockedEitherDirection` (`src/lib/blocks.ts`) and soft-delete/onboarding checks, served by `GET /api/people/:id/profile`. Reachable from an info icon in the deck's People-mode action row and a "View full profile" link on the match page.
+- **Artist profile pages** (`/artist?id=`) — an artist's top tracks (via the track-search fallback above) with per-track like/pass, backed by `GET /api/artists/:id` (upserts the artist and its tracks into the catalog on first view). Reachable via a magnifying-glass search modal on the music deck (debounced, 3+ characters, `public/search.js`) using the existing merged local+Spotify `GET /api/artists/search`.
+- **Photo management in Settings** — up to 10 photos (enforced client- and server-side), not just during onboarding. Shared upload/remove module (`public/photos.js`) used by both onboarding and Settings.
+- **Hard-delete admin endpoint** — `POST /internal/users/:id/delete` (same `X-Seed-Secret` header gate as `/internal/seed`), looks up by internal id or Spotify id, reuses the existing `hardDeleteUser`. For wiping a local test account and its full history to re-test onboarding from scratch.
+
+### Bug fixes
+
+- **Photo upload architecture rewrite**: uploads previously went straight from the browser to R2's real S3-compatible endpoint via a Worker-issued presigned URL (the original Task 7 design, and a stated Global Constraint above), while reads (`GET /photos/:id`) went through the `env.PHOTOS` Workers binding — in local dev, two entirely separate storage backends. An upload could "succeed" into the real bucket and still 404 when the app tried to display it. Fixed by routing upload bytes directly through the Worker: `POST /api/photos` now accepts the raw file body and calls `env.PHOTOS.put()` itself, so writes and reads always use the same binding in every environment. This also removes the R2 CORS dependency entirely (no more direct cross-origin browser-to-R2 request). `src/lib/r2.ts` (SigV4 presigned-URL signing) was removed as dead code.
+- **Matches silently not created after a mutual like via History**: `PATCH /api/swipes/people/:id` (the History "Change" toggle) updated a swipe's direction but never checked whether that completed a mutual right-swipe, so changing a past decision to "right" (as opposed to a fresh right-swipe through the deck) silently skipped match creation. Fixed, with regression tests. The identical bug existed in the music-swipe toggle (`PATCH /api/swipes/music/:id` never updated genre affinity) — fixed the same way.
