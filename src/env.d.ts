@@ -43,6 +43,9 @@ interface Env {
   // account exists.
   SIGHTENGINE_API_USER?: string;
   SIGHTENGINE_API_SECRET?: string;
+  TWILIO_ACCOUNT_SID: string;
+  TWILIO_AUTH_TOKEN: string;
+  TWILIO_VERIFY_SERVICE_SID: string;
 }
 
 // `cloudflare:test`'s `env` export is typed as `Cloudflare.Env` (a separate
@@ -70,5 +73,8 @@ declare namespace Cloudflare {
     SITE_BASIC_AUTH_PASSWORD?: string;
     SIGHTENGINE_API_USER?: string;
     SIGHTENGINE_API_SECRET?: string;
+    TWILIO_ACCOUNT_SID: string;
+    TWILIO_AUTH_TOKEN: string;
+    TWILIO_VERIFY_SERVICE_SID: string;
   }
 }
