@@ -25,6 +25,9 @@ interface Env {
   RESEND_API_KEY: string;
   RESEND_FROM_ADDRESS: string;
   SENTRY_DSN: string;
+  TWILIO_ACCOUNT_SID: string;
+  TWILIO_AUTH_TOKEN: string;
+  TWILIO_VERIFY_SERVICE_SID: string;
 }
 
 // `cloudflare:test`'s `env` export is typed as `Cloudflare.Env` (a separate
@@ -44,5 +47,8 @@ declare namespace Cloudflare {
     RESEND_API_KEY: string;
     RESEND_FROM_ADDRESS: string;
     SENTRY_DSN: string;
+    TWILIO_ACCOUNT_SID: string;
+    TWILIO_AUTH_TOKEN: string;
+    TWILIO_VERIFY_SERVICE_SID: string;
   }
 }
