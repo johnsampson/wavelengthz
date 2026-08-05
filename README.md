@@ -23,8 +23,8 @@ email — built on Cloudflare Workers + D1 + R2. Full design in `docs/PLAN.md`.
    `wrangler d1 migrations create wavelengthz-db <name>`, applied the same
    way to both targets — never a hand-run `wrangler d1 execute --command=...`
    against either database, which leaves no record of what changed or when.
-6. Set secrets. All eleven are required — the list must stay in sync with the
-   `Env` interface in `src/env.d.ts`. Note that `R2_BUCKET_NAME` and
+6. Set secrets. All fourteen are required — the list must stay in sync with
+   the `Env` interface in `src/env.d.ts`. Note that `R2_BUCKET_NAME` and
    `RESEND_FROM_ADDRESS` fail *silently* when missing: photo uploads and every
    transactional email respectively just stop working, with no startup error.
    ```
@@ -39,7 +39,16 @@ email — built on Cloudflare Workers + D1 + R2. Full design in `docs/PLAN.md`.
    wrangler secret put RESEND_API_KEY
    wrangler secret put RESEND_FROM_ADDRESS    # verified Resend sender, e.g. matches@wavelengthz.app
    wrangler secret put SENTRY_DSN
+   wrangler secret put TWILIO_ACCOUNT_SID
+   wrangler secret put TWILIO_AUTH_TOKEN
+   wrangler secret put TWILIO_VERIFY_SERVICE_SID  # from a Verify Service you create in the Twilio console
    ```
+   Phone verification (`src/routes/phone.ts`) uses two separate Twilio
+   products: **Verify** (send/check the OTP) and **Lookup**'s Line Type
+   Intelligence add-on (rejects VOIP numbers *before* an OTP is sent, so a
+   rejected number never costs an SMS). Both bill against the same
+   Account SID/Auth Token; Lookup's line-type add-on may need enabling
+   separately in the Twilio console depending on your account.
 7. `npm run build:css` to build Tailwind's output before first run/deploy.
 8. `wrangler dev` for local development.
 9. Seed the catalog once, locally or after deploy: `curl -X POST https://<your-worker>/internal/seed -H "X-Seed-Secret: <value>"`.
