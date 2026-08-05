@@ -8,11 +8,23 @@ beforeAll(async () => {
   await applySchema(env.DB);
 });
 
+// gender/seeking default to the same value ('female'/'female') for every
+// fixture user so mutual-compatibility filtering (added in
+// GET /api/candidates/people) never excludes any pair of default test users --
+// tests that specifically exercise gender/seeking filtering override these via
+// makeUserWithGender.
 async function makeUser(id: string) {
   await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, onboarded_at, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES (?, ?, 30.27, -97.74, 80, 1000, 'a', 'r', 9999999999999, 1000, 1000)`
+    `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, onboarded_at, gender, seeking, access_token, refresh_token, token_expires_at, created_at, updated_at)
+     VALUES (?, ?, 30.27, -97.74, 80, 1000, 'female', 'female', 'a', 'r', 9999999999999, 1000, 1000)`
   ).bind(id, `sp-${id}`).run();
+}
+
+async function makeUserWithGender(id: string, gender: string, seeking: string) {
+  await env.DB.prepare(
+    `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, onboarded_at, gender, seeking, access_token, refresh_token, token_expires_at, created_at, updated_at)
+     VALUES (?, ?, 30.27, -97.74, 80, 1000, ?, ?, 'a', 'r', 9999999999999, 1000, 1000)`
+  ).bind(id, `sp-${id}`, gender, seeking).run();
 }
 
 async function makeUnonboardedUser(id: string) {
@@ -26,8 +38,8 @@ async function makeUnonboardedUser(id: string) {
 
 async function makeUserWithEmail(id: string, email: string) {
   await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, onboarded_at, email, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES (?, ?, 30.27, -97.74, 80, 1000, ?, 'a', 'r', 9999999999999, 1000, 1000)`
+    `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, onboarded_at, gender, seeking, email, access_token, refresh_token, token_expires_at, created_at, updated_at)
+     VALUES (?, ?, 30.27, -97.74, 80, 1000, 'female', 'female', ?, 'a', 'r', 9999999999999, 1000, 1000)`
   ).bind(id, `sp-${id}`, email).run();
 }
 
@@ -44,6 +56,43 @@ beforeEach(async () => {
   await makeUser('u1');
   await makeUser('u2');
   await makeUser('u3');
+});
+
+describe('GET /api/candidates/people gender/seeking filtering', () => {
+  it('excludes a candidate whose gender does not match what the caller is seeking', async () => {
+    await makeUserWithGender('viewer', 'male', 'female'); // male, seeking female
+    await makeUserWithGender('male-seeking-female', 'male', 'female'); // wrong gender for viewer's seeking
+    // Right gender for the viewer's seeking, but this candidate doesn't seek
+    // male back -- one-directional gender match isn't enough, it must be mutual.
+    await makeUserWithGender('female-seeking-female', 'female', 'female');
+
+    const cookie = await cookieFor('viewer');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.candidates.find((c: any) => c.id === 'male-seeking-female')).toBeUndefined();
+    expect(body.candidates.find((c: any) => c.id === 'female-seeking-female')).toBeUndefined();
+  });
+
+  it('includes a candidate only when gender/seeking match in both directions', async () => {
+    await makeUserWithGender('viewer', 'male', 'female');
+    await makeUserWithGender('mutual', 'female', 'male');
+
+    const cookie = await cookieFor('viewer');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.candidates.find((c: any) => c.id === 'mutual')).toBeDefined();
+  });
+
+  it('returns onboarding_incomplete for a caller with no gender/seeking set yet', async () => {
+    await env.DB.prepare('UPDATE users SET gender = NULL, seeking = NULL WHERE id = ?').bind('u1').run();
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('onboarding_incomplete');
+  });
 });
 
 describe('GET /api/candidates/people', () => {
@@ -116,8 +165,8 @@ describe('GET /api/candidates/people', () => {
 describe('max_distance_km is enforced as a filter, not just a scoring weight', () => {
   async function makeUserAt(id: string, lat: number, lng: number) {
     await env.DB.prepare(
-      `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, onboarded_at, access_token, refresh_token, token_expires_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 80, 1000, 'a', 'r', 9999999999999, 1000, 1000)`
+      `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, onboarded_at, gender, seeking, access_token, refresh_token, token_expires_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 80, 1000, 'female', 'female', 'a', 'r', 9999999999999, 1000, 1000)`
     ).bind(id, `sp-${id}`, lat, lng).run();
   }
 
@@ -268,10 +317,62 @@ describe('POST /api/swipe/people', () => {
     const swipeRow = await env.DB.prepare('SELECT match_score FROM people_swipes WHERE swiper_id = ? AND target_id = ?').bind('u1', 'u2').first<any>();
     expect(swipeRow.match_score).not.toBeNull();
   });
+
+  it('returns matchId in the response so the deck can show a celebration', async () => {
+    const cookie1 = await cookieFor('u1');
+    const cookie2 = await cookieFor('u2');
+
+    await worker.fetch(
+      new Request('http://localhost/api/swipe/people', {
+        method: 'POST',
+        headers: { Cookie: cookie1, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_id: 'u2', direction: 'right' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/swipe/people', {
+        method: 'POST',
+        headers: { Cookie: cookie2, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_id: 'u1', direction: 'right' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    const body = await res.json<any>();
+    expect(body.matched).toBe(true);
+    expect(body.matchId).toBeTruthy();
+
+    const match = await env.DB.prepare('SELECT id FROM matches').first<any>();
+    expect(body.matchId).toBe(match.id);
+  });
+
+  it('omits matchId when the swipe does not complete a match', async () => {
+    const cookie1 = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/swipe/people', {
+        method: 'POST',
+        headers: { Cookie: cookie1, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_id: 'u2', direction: 'right' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    const body = await res.json<any>();
+    expect(body.matched).toBe(false);
+    expect(body.matchId).toBeUndefined();
+  });
 });
 
-describe('match creation dispatches a transactional email', () => {
-  it('calls the Resend API for a matched user who has an email on file', async () => {
+describe('match creation defers the transactional email', () => {
+  // Match-notification emails are no longer sent synchronously on match
+  // creation -- they're deferred 15 minutes (src/lib/notifications.ts's
+  // MATCH_NOTIFICATION_DELAY_MS, swept by the scheduled() cron) so the person
+  // who just matched has a window to unmatch before anyone is emailed. See
+  // test/lib/notifications.test.ts for the sweep's own behavior.
+  it('creates notification rows but does not call the Resend API immediately', async () => {
     await makeUserWithEmail('e1', 'e1@example.com');
     await makeUserWithEmail('e2', 'e2@example.com');
     const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
@@ -301,11 +402,11 @@ describe('match creation dispatches a transactional email', () => {
       {} as ExecutionContext
     );
 
-    expect(fetchMock).toHaveBeenCalledWith('https://api.resend.com/emails', expect.objectContaining({ method: 'POST' }));
-    expect(fetchMock).toHaveBeenCalledTimes(2); // one email per matched participant
+    expect(fetchMock).not.toHaveBeenCalled(); // still deferred, even after the match completes
 
     const notifications = await env.DB.prepare("SELECT * FROM notifications WHERE type = 'match'").all<any>();
-    expect(notifications.results.every((n: any) => n.email_sent_at !== null)).toBe(true);
+    expect(notifications.results.length).toBe(2); // one row per matched participant
+    expect(notifications.results.every((n: any) => n.email_sent_at === null)).toBe(true);
 
     vi.unstubAllGlobals();
   });
@@ -367,7 +468,12 @@ describe('GET /api/swipes/people and PATCH', () => {
     const historyRes = await worker.fetch(new Request('http://localhost/api/swipes/people', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
     const history = await historyRes.json<any>();
     expect(history.swipes[0].direction).toBe('left');
-    expect(history.swipes[0].displayName).toBe('U Two');
+    // `name`, not `displayName` -- matches the field music-mode history already
+    // uses (src/routes/musicSwipes.ts), so the shared history.html/history.js
+    // frontend doesn't need mode-specific field mapping. Regression: this used
+    // to be `displayName`, which the frontend never read, silently falling
+    // back to the raw target_id UUID for every people-mode history row.
+    expect(history.swipes[0].name).toBe('U Two');
 
     const patchRes = await worker.fetch(
       new Request('http://localhost/api/swipes/people/ps1', {
@@ -410,8 +516,9 @@ describe('GET /api/swipes/people and PATCH', () => {
     expect(body.matched).toBe(true);
 
     const [a, b] = ['u1', 'u2'].sort();
-    const match = await env.DB.prepare('SELECT * FROM matches WHERE user_a_id = ? AND user_b_id = ?').bind(a, b).first();
+    const match = await env.DB.prepare('SELECT * FROM matches WHERE user_a_id = ? AND user_b_id = ?').bind(a, b).first<any>();
     expect(match).not.toBeNull();
+    expect(body.matchId).toBe(match.id);
   });
 
   it('does not create a match when changing a decision to left', async () => {
@@ -487,6 +594,36 @@ describe('GET /api/people/:id/profile', () => {
     expect(body.overlap).toEqual({ sharedArtists: [], sharedTracks: [], sharedGenres: [] });
   });
 
+  it('includes the target\'s own top Spotify genres/artists/tracks (not overlap) on a cross-view', async () => {
+    const topArtists = JSON.stringify([{ artist_id: 'sp-a1', rank: 1, name: 'Their Fave Artist', imageUrl: 'https://img/a1.jpg' }]);
+    const topTracks = JSON.stringify([{ track_id: 'sp-t1', rank: 1, name: 'Their Fave Track', imageUrl: 'https://img/t1.jpg' }]);
+    await env.DB.prepare(
+      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u2', ?, ?, '["indie","pop"]', 'medium_term', 1000)`
+    ).bind(topArtists, topTracks).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.profile.topGenres).toEqual(['indie', 'pop']);
+    expect(body.profile.topArtists).toEqual([{ id: 'sp-a1', name: 'Their Fave Artist', imageUrl: 'https://img/a1.jpg' }]);
+    expect(body.profile.topTracks).toEqual([{ id: 'sp-t1', spotifyId: 'sp-t1', name: 'Their Fave Track', imageUrl: 'https://img/t1.jpg' }]);
+  });
+
+  it('includes the caller\'s own top Spotify genres/artists/tracks on self-preview', async () => {
+    const topArtists = JSON.stringify([{ artist_id: 'sp-a2', rank: 1, name: 'My Fave Artist', imageUrl: 'https://img/a2.jpg' }]);
+    await env.DB.prepare(
+      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u1', ?, '[]', '["rock"]', 'medium_term', 1000)`
+    ).bind(topArtists).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(new Request('http://localhost/api/people/u1/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.profile.topGenres).toEqual(['rock']);
+    expect(body.profile.topArtists).toEqual([{ id: 'sp-a2', name: 'My Fave Artist', imageUrl: 'https://img/a2.jpg' }]);
+  });
+
   it('reports likedYou when the target already swiped right on the caller', async () => {
     await env.DB.prepare(
       `INSERT INTO people_swipes (id, swiper_id, target_id, direction, created_at, updated_at) VALUES ('ps1', 'u2', 'u1', 'right', 1000, 1000)`
@@ -506,6 +643,38 @@ describe('GET /api/people/:id/profile', () => {
     const res = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
     const body = await res.json<any>();
     expect(body.profile.isMatch).toBe(true);
+    expect(body.profile.matchId).toBe('m1');
+  });
+
+  it('hides isMatch/matchId for a match less than 15 minutes old -- passive discovery only', async () => {
+    const [a, b] = ['u1', 'u2'].sort();
+    await env.DB.prepare(`INSERT INTO matches (id, user_a_id, user_b_id, created_at) VALUES ('m1', ?, ?, ?)`).bind(a, b, Date.now() - 60 * 1000).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.profile.isMatch).toBe(false);
+    expect(body.profile.matchId).toBeNull();
+  });
+
+  it('reveals isMatch/matchId once 15 minutes have passed', async () => {
+    const [a, b] = ['u1', 'u2'].sort();
+    await env.DB.prepare(`INSERT INTO matches (id, user_a_id, user_b_id, created_at) VALUES ('m1', ?, ?, ?)`).bind(a, b, Date.now() - 16 * 60 * 1000).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.profile.isMatch).toBe(true);
+    expect(body.profile.matchId).toBe('m1');
+  });
+
+  it('omits matchId when there is no active match', async () => {
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.profile.isMatch).toBe(false);
+    expect(body.profile.matchId).toBeNull();
   });
 
   it('returns 403 for a blocked target, in either direction', async () => {
@@ -524,10 +693,79 @@ describe('GET /api/people/:id/profile', () => {
     expect(res.status).toBe(404);
   });
 
-  it('returns 400 for the caller\'s own id', async () => {
+  it('allows previewing your own profile, flagged isSelf, with no overlap/likedYou/isMatch computed', async () => {
+    await env.DB.prepare(`UPDATE users SET bio = 'my bio', display_name = 'U One' WHERE id = 'u1'`).run();
+    await env.DB.prepare(`INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES ('p1', 'u1', 'users/u1/p1.jpg', 0, 1000)`).run();
     const cookie = await cookieFor('u1');
+
     const res = await worker.fetch(new Request('http://localhost/api/people/u1/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+
+    expect(body.profile.isSelf).toBe(true);
+    expect(body.profile.displayName).toBe('U One');
+    expect(body.profile.bio).toBe('my bio');
+    expect(body.profile.photoUrls).toEqual(['/photos/p1']);
+    expect(body.profile.likedYou).toBe(false);
+    expect(body.profile.isMatch).toBe(false);
+    expect(body.profile.matchId).toBeNull();
+    expect(body.overlap).toEqual({ sharedArtists: [], sharedTracks: [], sharedGenres: [] });
+    expect(body.profile.recentArtists).toEqual([]);
+    expect(body.profile.recentTracks).toEqual([]);
+  });
+
+  it('includes the caller\'s own recent right-swiped artists/tracks in self-preview, most recent first', async () => {
+    await env.DB.prepare(
+      `INSERT INTO artists (id, name, genres, image_url, source, approved, created_at) VALUES ('art1', 'Older Artist', '{}', '/a1.jpg', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO artists (id, name, genres, image_url, source, approved, created_at) VALUES ('art2', 'Newer Artist', '{}', '/a2.jpg', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('trk1', 'A Track', 'art1', '/t1.jpg', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('ms1', 'u1', 'artist', 'art1', 'right', 1000, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('ms2', 'u1', 'artist', 'art2', 'right', 2000, 2000)`
+    ).run();
+    // A left-swipe (pass) must not show up as "recent taste".
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('ms3', 'u1', 'track', 'trk1', 'left', 3000, 3000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(new Request('http://localhost/api/people/u1/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.profile.recentArtists).toEqual([
+      { id: 'art2', name: 'Newer Artist', imageUrl: '/a2.jpg' },
+      { id: 'art1', name: 'Older Artist', imageUrl: '/a1.jpg' },
+    ]);
+    expect(body.profile.recentTracks).toEqual([]);
+  });
+
+  it('includes spotifyId on recentTracks, for the embed player -- but not on recentArtists', async () => {
+    await env.DB.prepare(
+      `INSERT INTO artists (id, name, genres, source, approved, created_at) VALUES ('art-recent-1', 'An Artist', '{}', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('trk-recent-1', 'sp-trk-recent-1', 'A Track', 'art-recent-1', '/t1.jpg', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('ms1', 'u1', 'artist', 'art-recent-1', 'right', 1000, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('ms2', 'u1', 'track', 'trk-recent-1', 'right', 2000, 2000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(new Request('http://localhost/api/people/u1/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.profile.recentTracks).toEqual([{ id: 'trk-recent-1', spotifyId: 'sp-trk-recent-1', name: 'A Track', imageUrl: '/t1.jpg' }]);
+    expect(body.profile.recentArtists).toEqual([{ id: 'art-recent-1', name: 'An Artist', imageUrl: null }]);
   });
 
   it('rejects when the caller has not completed onboarding', async () => {

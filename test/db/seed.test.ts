@@ -55,12 +55,14 @@ describe('seedCatalog', () => {
     expect(result.artistsInserted).toBe(1); // deduped across all SEED_GENRES
     expect(result.tracksInserted).toBe(2);
 
-    const artist = await env.DB.prepare('SELECT * FROM artists WHERE id = ?').bind('artist-1').first<any>();
+    // The catalog's own id is now an app-generated UUID, not the Spotify id
+    // directly -- spotify_id is the one to look this row up by.
+    const artist = await env.DB.prepare('SELECT * FROM artists WHERE spotify_id = ?').bind('artist-1').first<any>();
     expect(artist.source).toBe('seed');
     expect(artist.approved).toBe(1);
     expect(artist.added_by_user_id).toBeNull();
 
-    const trackCount = await env.DB.prepare('SELECT COUNT(*) as c FROM tracks WHERE artist_id = ?').bind('artist-1').first<any>();
+    const trackCount = await env.DB.prepare('SELECT COUNT(*) as c FROM tracks WHERE artist_id = ?').bind(artist.id).first<any>();
     expect(trackCount.c).toBe(2);
 
     // The catalog-wide genres table should reflect this run too: one artist
@@ -129,11 +131,11 @@ describe('seedCatalog', () => {
     expect(result.tracksInserted).toBe(2);
     expect(result.failedArtistIds).toEqual(['artist-fail']);
 
-    const failedArtist = await env.DB.prepare('SELECT * FROM artists WHERE id = ?').bind('artist-fail').first<any>();
+    const failedArtist = await env.DB.prepare('SELECT * FROM artists WHERE spotify_id = ?').bind('artist-fail').first<any>();
     expect(failedArtist).not.toBeNull();
 
     const failedArtistTrackCount = await env.DB.prepare('SELECT COUNT(*) as c FROM tracks WHERE artist_id = ?')
-      .bind('artist-fail')
+      .bind(failedArtist.id)
       .first<any>();
     expect(failedArtistTrackCount.c).toBe(0);
 
@@ -268,10 +270,12 @@ describe('seedCatalog', () => {
 
     // Since each page returns only `limit` items, reaching 60 requires more
     // than one page — confirm an artist beyond the first page's worth (i.e.
-    // one whose id encodes a nonzero offset) actually made it into the DB,
-    // rather than hardcoding a specific offset value tied to the page size.
+    // one whose Spotify id encodes a nonzero offset) actually made it into
+    // the DB, rather than hardcoding a specific offset value tied to the
+    // page size. Checked against spotify_id -- the catalog's own id is now
+    // an unrelated generated UUID.
     const artistsFromLaterPages = await env.DB.prepare(
-      `SELECT COUNT(*) as c FROM artists WHERE id NOT LIKE 'pop-0-%'`
+      `SELECT COUNT(*) as c FROM artists WHERE spotify_id NOT LIKE 'pop-0-%'`
     ).first<any>();
     expect(artistsFromLaterPages.c).toBeGreaterThan(0);
 

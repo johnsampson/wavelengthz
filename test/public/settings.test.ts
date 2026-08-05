@@ -20,12 +20,17 @@ function stubApi(user: Record<string, unknown>, photos: Array<Record<string, unk
 
 const ONBOARDED_USER = {
   id: 'u1',
+  display_name: 'Jordan',
   bio: 'I like loud guitars',
   date_of_birth: '1995-01-01',
   location_label: 'Austin, TX',
   lat: 30.27,
   lng: -97.74,
+  location_updated_at: null,
   max_distance_km: 25,
+  gender: 'male',
+  seeking: 'female',
+  intent: 'dating_around',
   spotify_avatar_url: 'https://img.example/avatar.jpg',
 };
 
@@ -74,6 +79,155 @@ describe('settings page', () => {
     expect(body.date_of_birth).toBe('1995-01-01');
     expect(body.location_label).toBe('Austin, TX');
     expect(app.saved).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it('loads the existing display name and lets it be changed', async () => {
+    const api = stubApi(ONBOARDED_USER);
+    const app = createSettingsApp();
+    await app.init();
+    expect(app.displayName).toBe('Jordan');
+
+    app.displayName = 'Jordan Two';
+    await app.updateDistance();
+
+    const body = api.onboardBody();
+    expect(body.display_name).toBe('Jordan Two');
+    expect(app.saved).toBe(true);
+  });
+
+  it('loads the caller\'s own id so a preview-profile link can use it', async () => {
+    stubApi(ONBOARDED_USER);
+    const app = createSettingsApp();
+    expect(app.userId).toBeNull();
+
+    await app.init();
+
+    expect(app.userId).toBe('u1');
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects saving a blank display name without a network call', async () => {
+    const api = stubApi(ONBOARDED_USER);
+    const app = createSettingsApp();
+    await app.init();
+
+    app.displayName = '   ';
+    await app.updateDistance();
+
+    expect(app.error).toBeTruthy();
+    expect(app.saved).toBe(false);
+    expect(api.calls.some((c) => c.path === '/api/onboarding')).toBe(false);
+  });
+
+  it('rejects saving a display name with disallowed characters without a network call', async () => {
+    const api = stubApi(ONBOARDED_USER);
+    const app = createSettingsApp();
+    await app.init();
+
+    app.displayName = 'Jordan!!';
+    await app.updateDistance();
+
+    expect(app.error).toBeTruthy();
+    expect(app.saved).toBe(false);
+    expect(api.calls.some((c) => c.path === '/api/onboarding')).toBe(false);
+  });
+
+  it('loads gender, seeking, and intent on init and round-trips them on save', async () => {
+    const api = stubApi(ONBOARDED_USER);
+    const app = createSettingsApp();
+    await app.init();
+
+    expect(app.gender).toBe('male');
+    expect(app.seeking).toBe('female');
+    expect(app.intent).toBe('dating_around');
+
+    await app.updateDistance();
+    const body = api.onboardBody();
+    expect(body.gender).toBe('male');
+    expect(body.seeking).toBe('female');
+    expect(body.intent).toBe('dating_around');
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects saving without a gender selected', async () => {
+    const api = stubApi(ONBOARDED_USER);
+    const app = createSettingsApp();
+    await app.init();
+    app.gender = '';
+
+    await app.updateDistance();
+
+    expect(app.error).toBeTruthy();
+    expect(app.saved).toBe(false);
+    expect(api.calls.some((c) => c.path === '/api/onboarding')).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects saving without seeking selected', async () => {
+    const api = stubApi(ONBOARDED_USER);
+    const app = createSettingsApp();
+    await app.init();
+    app.seeking = '';
+
+    await app.updateDistance();
+
+    expect(app.error).toBeTruthy();
+    expect(api.calls.some((c) => c.path === '/api/onboarding')).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects saving without intent selected', async () => {
+    const api = stubApi(ONBOARDED_USER);
+    const app = createSettingsApp();
+    await app.init();
+    app.intent = '';
+
+    await app.updateDistance();
+
+    expect(app.error).toBeTruthy();
+    expect(api.calls.some((c) => c.path === '/api/onboarding')).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it('has no cooldown when location_updated_at is null', async () => {
+    stubApi(ONBOARDED_USER);
+    const app = createSettingsApp();
+    await app.init();
+
+    expect(app.locationCooldownRemainingMs).toBe(0);
+    vi.unstubAllGlobals();
+  });
+
+  it('reports the remaining cooldown when location was changed recently', async () => {
+    const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+    stubApi({ ...ONBOARDED_USER, location_updated_at: threeDaysAgo });
+    const app = createSettingsApp();
+    await app.init();
+
+    expect(app.locationCooldownRemainingMs).toBeGreaterThan(0);
+    expect(app.locationCooldownRemainingDays).toBe(4);
+    vi.unstubAllGlobals();
+  });
+
+  it('shows a friendly cooldown message when the server rejects a location change', async () => {
+    const fetchMock = vi.fn(async (path: string, options: any = {}) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: ONBOARDED_USER }), { status: 200 });
+      if (path === '/api/photos') return new Response(JSON.stringify({ photos: [] }), { status: 200 });
+      if (path === '/api/onboarding') {
+        return new Response(JSON.stringify({ error: 'location_change_cooldown', retryAfterMs: 2 * 24 * 60 * 60 * 1000 }), { status: 429 });
+      }
+      throw new Error(`unexpected ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createSettingsApp();
+    await app.init();
+
+    await app.updateDistance();
+
+    expect(app.error).toContain('7 days');
+    expect(app.error).toContain('2 days');
+    expect(app.saved).toBe(false);
     vi.unstubAllGlobals();
   });
 

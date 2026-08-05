@@ -66,6 +66,22 @@ describe('GET /api/matches', () => {
     expect(body.matches.length).toBe(0);
   });
 
+  it('hides a match less than 15 minutes old -- passive discovery only, per MATCH_NOTIFICATION_DELAY_MS', async () => {
+    await env.DB.prepare('UPDATE matches SET created_at = ? WHERE id = ?').bind(Date.now() - 60 * 1000, 'm1').run(); // 1 minute ago
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/matches', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.matches.length).toBe(0);
+  });
+
+  it('includes a match once 15 minutes have passed', async () => {
+    await env.DB.prepare('UPDATE matches SET created_at = ? WHERE id = ?').bind(Date.now() - 16 * 60 * 1000, 'm1').run();
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/matches', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.matches.length).toBe(1);
+  });
+
   it('rejects an unmatch attempt from a non-participant and leaves the match active', async () => {
     const cookie = await cookieFor('u3');
     const res = await worker.fetch(
@@ -106,7 +122,7 @@ describe('GET /api/matches/:id', () => {
   it('returns artists and tracks both participants right-swiped', async () => {
     await env.DB.prepare(`INSERT INTO artists (id, name, genres, image_url, source, approved, created_at) VALUES ('art1', 'Shared Artist', '[]', 'https://img.example/art1.jpg', 'seed', 1, 1000)`).run();
     await env.DB.prepare(`INSERT INTO artists (id, name, genres, source, approved, created_at) VALUES ('art2', 'Only Mine', '[]', 'seed', 1, 1000)`).run();
-    await env.DB.prepare(`INSERT INTO tracks (id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('trk1', 'Shared Track', 'art1', 'https://img.example/trk1.jpg', 'seed', 1, 1000)`).run();
+    await env.DB.prepare(`INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('trk1', 'sp-trk1', 'Shared Track', 'art1', 'https://img.example/trk1.jpg', 'seed', 1, 1000)`).run();
 
     for (const [userId, itemType, itemId] of [
       ['u1', 'artist', 'art1'],
@@ -128,6 +144,9 @@ describe('GET /api/matches/:id', () => {
     expect(body.overlap.sharedArtists[0].imageUrl).toBe('https://img.example/art1.jpg');
     expect(body.overlap.sharedTracks.map((t: any) => t.id)).toEqual(['trk1']);
     expect(body.overlap.sharedTracks[0].imageUrl).toBe('https://img.example/trk1.jpg');
+    // The real Spotify id, for profile.html's embed player -- distinct from
+    // `id` (our internal catalog UUID) since migrations/0002 obfuscated it.
+    expect(body.overlap.sharedTracks[0].spotifyId).toBe('sp-trk1');
   });
 
   it('returns genres both participants have affinity for', async () => {
@@ -226,6 +245,72 @@ describe('messages', () => {
     expect(fetch).not.toHaveBeenCalled(); // no email to a deleted user's address
   });
 
+  it('rejects a blank message body and writes nothing', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: '   ' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_message');
+    const messages = await env.DB.prepare('SELECT * FROM messages WHERE match_id = ?').bind('m1').all<any>();
+    expect(messages.results.length).toBe(0);
+  });
+
+  it('rejects a message containing disallowed characters and writes nothing', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: 'check this out: http://evil.example' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_message');
+  });
+
+  it('rejects a message containing a blocked word and writes nothing', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: 'you are a fucking idiot' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_message');
+    const messages = await env.DB.prepare('SELECT * FROM messages WHERE match_id = ?').bind('m1').all<any>();
+    expect(messages.results.length).toBe(0);
+  });
+
+  it('accepts a message with normal punctuation', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: "Hey, what's up?" }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(200);
+  });
+
   it('blocks reading messages when the other participant has been soft-deleted', async () => {
     await env.DB.prepare('UPDATE users SET deleted_at = ? WHERE id = ?').bind(2000, 'u2').run();
     const cookie = await cookieFor('u1');
@@ -257,6 +342,106 @@ describe('messages', () => {
         headers: { Cookie: cookie, 'Content-Type': 'application/json' },
         body: JSON.stringify({ body: 'hi' }),
       }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('POST /api/matches/:id/messages/:messageId/recall', () => {
+  async function insertMessage(id: string, senderId: string, createdAt: number) {
+    await env.DB.prepare('INSERT INTO messages (id, match_id, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?)')
+      .bind(id, 'm1', senderId, 'oops', createdAt)
+      .run();
+  }
+
+  it('recalls the sender\'s own message within the window, nulling body on subsequent reads', async () => {
+    await insertMessage('msg1', 'u1', Date.now() - 5000);
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages/msg1/recall', { method: 'POST', headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(200);
+
+    // The raw row is untouched -- only marked, never deleted.
+    const row = await env.DB.prepare('SELECT body, recalled_at FROM messages WHERE id = ?').bind('msg1').first<any>();
+    expect(row.body).toBe('oops');
+    expect(row.recalled_at).not.toBeNull();
+
+    const listRes = await worker.fetch(new Request('http://localhost/api/matches/m1/messages', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await listRes.json<any>();
+    expect(body.messages[0].body).toBeNull();
+    expect(body.messages[0].recalledAt).not.toBeNull();
+  });
+
+  it('rejects recalling after the 15s window has passed', async () => {
+    await insertMessage('msg1', 'u1', Date.now() - 16000);
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages/msg1/recall', { method: 'POST', headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('recall_window_expired');
+  });
+
+  it('rejects recalling someone else\'s message', async () => {
+    await insertMessage('msg1', 'u2', Date.now() - 1000);
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages/msg1/recall', { method: 'POST', headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(403);
+    const body = await res.json<any>();
+    expect(body.error).toBe('not_sender');
+  });
+
+  it('rejects recalling a message twice', async () => {
+    await insertMessage('msg1', 'u1', Date.now() - 1000);
+    const cookie = await cookieFor('u1');
+    await worker.fetch(new Request('http://localhost/api/matches/m1/messages/msg1/recall', { method: 'POST', headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages/msg1/recall', { method: 'POST', headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('already_recalled');
+  });
+
+  it('returns 404 for a message that does not belong to this match', async () => {
+    await env.DB.prepare(`INSERT INTO matches (id, user_a_id, user_b_id, created_at) VALUES ('m2', 'u1', 'u3', 1000)`).run();
+    await env.DB.prepare('INSERT INTO messages (id, match_id, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?)')
+      .bind('msg-other', 'm2', 'u1', 'hi', Date.now())
+      .run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages/msg-other/recall', { method: 'POST', headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it('rejects a non-participant outright', async () => {
+    await insertMessage('msg1', 'u1', Date.now() - 1000);
+    const cookie = await cookieFor('u3');
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages/msg1/recall', { method: 'POST', headers: { Cookie: cookie } }),
       env,
       {} as ExecutionContext
     );

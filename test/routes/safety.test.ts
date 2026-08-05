@@ -22,8 +22,8 @@ async function cookieFor(userId: string) {
 
 beforeEach(async () => {
   // Child rows before parent `users` rows -- D1 enforces FK constraints here.
-  // blocks, reports, matches, and sessions all reference users(id).
-  await env.DB.exec('DELETE FROM blocks; DELETE FROM reports; DELETE FROM matches; DELETE FROM sessions; DELETE FROM users;');
+  // blocks, reports, matches, sessions, and people_swipes all reference users(id).
+  await env.DB.exec('DELETE FROM blocks; DELETE FROM reports; DELETE FROM matches; DELETE FROM people_swipes; DELETE FROM sessions; DELETE FROM users;');
   await makeUser('u1');
   await makeUser('u2');
 });
@@ -89,6 +89,86 @@ describe('POST /api/block', () => {
     expect(res.status).toBe(200);
     const rows = await env.DB.prepare('SELECT * FROM blocks WHERE blocker_id = ? AND blocked_id = ?').bind('u1', 'u2').all();
     expect(rows.results.length).toBe(1);
+  });
+});
+
+describe('GET /api/blocks', () => {
+  it('lists only the caller\'s own blocks, joined with the blocked user\'s display name', async () => {
+    await env.DB.prepare('UPDATE users SET display_name = ? WHERE id = ?').bind('U Two', 'u2').run();
+    await env.DB.prepare(`INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES ('b1', 'u1', 'u2', 1000)`).run();
+    await makeUser('u3');
+    await env.DB.prepare(`INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES ('b2', 'u3', 'u1', 2000)`).run(); // someone else's block
+
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/blocks', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+
+    expect(body.blocks.length).toBe(1);
+    expect(body.blocks[0].userId).toBe('u2');
+    expect(body.blocks[0].displayName).toBe('U Two');
+  });
+
+  it('returns an empty list when the caller has blocked no one', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/blocks', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.blocks).toEqual([]);
+  });
+});
+
+describe('POST /api/blocks/:id/unblock', () => {
+  it('removes the block and sets the underlying swipe to passed (left)', async () => {
+    await env.DB.prepare(`INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES ('b1', 'u1', 'u2', 1000)`).run();
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, created_at, updated_at) VALUES ('ps1', 'u1', 'u2', 'right', 1000, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/blocks/u2/unblock', { method: 'POST', headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(200);
+
+    const block = await env.DB.prepare('SELECT * FROM blocks WHERE blocker_id = ? AND blocked_id = ?').bind('u1', 'u2').first();
+    expect(block).toBeNull();
+
+    const swipe = await env.DB.prepare('SELECT direction FROM people_swipes WHERE swiper_id = ? AND target_id = ?').bind('u1', 'u2').first<any>();
+    expect(swipe.direction).toBe('left');
+  });
+
+  it('does not touch someone else\'s swipe on the target', async () => {
+    await env.DB.prepare(`INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES ('b1', 'u1', 'u2', 1000)`).run();
+    await makeUser('u3');
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, created_at, updated_at) VALUES ('ps1', 'u1', 'u2', 'right', 1000, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, created_at, updated_at) VALUES ('ps2', 'u3', 'u2', 'right', 1000, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+
+    await worker.fetch(new Request('http://localhost/api/blocks/u2/unblock', { method: 'POST', headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+
+    const othersSwipe = await env.DB.prepare('SELECT direction FROM people_swipes WHERE swiper_id = ? AND target_id = ?').bind('u3', 'u2').first<any>();
+    expect(othersSwipe.direction).toBe('right'); // unaffected
+  });
+
+  it('returns 404 when there is no block between the caller and the target', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/blocks/u2/unblock', { method: 'POST', headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 401 when not logged in', async () => {
+    const res = await worker.fetch(new Request('http://localhost/api/blocks/u2/unblock', { method: 'POST' }), env, {} as ExecutionContext);
+    expect(res.status).toBe(401);
   });
 });
 

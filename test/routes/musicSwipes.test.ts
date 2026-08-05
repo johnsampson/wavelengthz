@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
 import { genresToObject } from '../../src/lib/genres';
@@ -30,6 +30,13 @@ async function cookieFor(userId: string) {
   return `wl_session=${cookie.split(';')[0].split('=')[1]}`;
 }
 
+// GET /api/candidates/music now calls ctx.waitUntil for the background
+// artist top-up (src/routes/musicSwipes.ts), so a bare `{}` throws
+// "ctx.waitUntil is not a function". This no-op stands in for real routes
+// that don't care about the background work's outcome; the one test that
+// does care builds its own ctx that captures the promise instead.
+const ctx = { waitUntil: () => {} } as unknown as ExecutionContext;
+
 describe('GET /api/candidates/music', () => {
   it('excludes artists the user has already swiped on', async () => {
     const cookie = await cookieFor('u1');
@@ -37,7 +44,7 @@ describe('GET /api/candidates/music', () => {
       `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s1', 'u1', 'artist', 'a1', 'right', 1000, 1000)`
     ).run();
     const req = new Request('http://localhost/api/candidates/music', { headers: { Cookie: cookie } });
-    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const res = await worker.fetch(req, env, ctx);
     const body = await res.json<any>();
     expect(body.candidates.map((c: any) => c.itemId)).toEqual(['a2']);
   });
@@ -48,7 +55,7 @@ describe('GET /api/candidates/music', () => {
     ).run();
     const cookie = await cookieFor('u1');
     const req = new Request('http://localhost/api/candidates/music?limit=10', { headers: { Cookie: cookie } });
-    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const res = await worker.fetch(req, env, ctx);
     const body = await res.json<any>();
     expect(body.candidates.map((c: any) => c.itemId)).not.toContain('a3');
   });
@@ -57,7 +64,7 @@ describe('GET /api/candidates/music', () => {
     await env.DB.prepare(`UPDATE artists SET image_url = 'https://img.example/a1.jpg' WHERE id = 'a1'`).run();
     const cookie = await cookieFor('u1');
     const req = new Request('http://localhost/api/candidates/music?limit=1', { headers: { Cookie: cookie } });
-    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const res = await worker.fetch(req, env, ctx);
     const body = await res.json<any>();
     expect(body.candidates[0].imageUrl).toBe('https://img.example/a1.jpg');
   });
@@ -69,9 +76,122 @@ describe('GET /api/candidates/music', () => {
     ).run();
     const cookie = await cookieFor('u1');
     const req = new Request('http://localhost/api/candidates/music?item_type=track', { headers: { Cookie: cookie } });
-    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const res = await worker.fetch(req, env, ctx);
     const body = await res.json<any>();
     expect(body.candidates[0].imageUrl).toBe('https://img.example/t1.jpg');
+  });
+
+  it('tops up the catalog from Spotify and returns fresh candidates once the local pool is exhausted', async () => {
+    // Exhaust both seeded artists.
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s1', 'u1', 'artist', 'a1', 'right', 1000, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s2', 'u1', 'artist', 'a2', 'left', 1000, 1000)`
+    ).run();
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+        if (url.includes('type=artist')) {
+          return new Response(
+            JSON.stringify({ artists: { items: [{ id: 'fresh1', name: 'Fresh Artist', genres: ['pop'], images: [{ url: 'https://img.example/fresh1.jpg' }], popularity: 50 }] } }),
+            { status: 200 }
+          );
+        }
+        if (url.includes('type=track')) {
+          return new Response(JSON.stringify({ tracks: { items: [] } }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/candidates/music', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, ctx);
+    const body = await res.json<any>();
+
+    // itemId is now the internal UUID, not the Spotify id -- resolve it via
+    // spotify_id first, then confirm it showed up as a candidate.
+    const row = await env.DB.prepare('SELECT * FROM artists WHERE spotify_id = ?').bind('fresh1').first<any>();
+    expect(row).toBeTruthy();
+    expect(body.candidates.map((c: any) => c.itemId)).toContain(row.id);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('tops up in the background (ctx.waitUntil) once the pool is low but not yet empty, without delaying the response', async () => {
+    // Seed up to 16 total artists (a1/a2 from beforeEach + 14 more), then
+    // swipe all but one -- 1 remaining is well under LOW_ARTIST_POOL_THRESHOLD
+    // (15), but not zero, so this should hit the background path, not the
+    // synchronous one.
+    for (let i = 0; i < 14; i++) {
+      await env.DB.prepare(
+        `INSERT INTO artists (id, name, genres, image_url, source, approved, created_at) VALUES (?, ?, '{}', ?, 'seed', 1, 1000)`
+      ).bind(`extra${i}`, `Extra ${i}`, `https://img.example/extra${i}.jpg`).run();
+    }
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s1', 'u1', 'artist', 'a1', 'right', 1000, 1000)`
+    ).run();
+    for (let i = 0; i < 14; i++) {
+      await env.DB.prepare(
+        `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES (?, 'u1', 'artist', ?, 'right', 1000, 1000)`
+      ).bind(`s-extra${i}`, `extra${i}`).run();
+    }
+    // Only 'a2' remains unswiped.
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+        if (url.includes('type=artist')) {
+          return new Response(
+            JSON.stringify({ artists: { items: [{ id: 'bg-fresh', name: 'Background Fresh Artist', genres: ['pop'], images: [{ url: 'https://img.example/bg-fresh.jpg' }], popularity: 50 }] } }),
+            { status: 200 }
+          );
+        }
+        if (url.includes('type=track')) return new Response(JSON.stringify({ tracks: { items: [] } }), { status: 200 });
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+
+    const pending: Promise<any>[] = [];
+    const capturingCtx = { waitUntil: (p: Promise<any>) => pending.push(p) } as unknown as ExecutionContext;
+
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/candidates/music?limit=50', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, capturingCtx);
+    const body = await res.json<any>();
+
+    // Response comes back immediately with what's already there -- no
+    // 'bg-fresh' yet, since the top-up hasn't been awaited.
+    expect(body.candidates.map((c: any) => c.itemId)).toEqual(['a2']);
+    expect(pending.length).toBe(1); // background top-up was scheduled, not awaited inline
+
+    await Promise.all(pending);
+
+    const row = await env.DB.prepare('SELECT * FROM artists WHERE spotify_id = ?').bind('bg-fresh').first<any>();
+    expect(row).toBeTruthy(); // ...but it's there once the background work finishes
+
+    vi.unstubAllGlobals();
+  });
+
+  it('does not top up when browsing tracks, only artists', async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error('fetch should not be called for track candidates');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/candidates/music?item_type=track', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, ctx);
+    expect(res.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
   });
 });
 
@@ -86,7 +206,7 @@ describe('POST /api/swipe/music', () => {
           body: JSON.stringify({ item_type: 'artist', item_id: 'a1', direction }),
         }),
         env,
-        {} as ExecutionContext
+        ctx
       );
 
     await swipe('left');
@@ -123,7 +243,7 @@ describe('genre affinity tracking on POST /api/swipe/music', () => {
         body: JSON.stringify({ item_type: itemType, item_id: itemId, direction }),
       }),
       env,
-      {} as ExecutionContext
+      ctx
     );
 
   it('increments the swiped artist\'s genres on a right-swipe', async () => {
@@ -139,7 +259,7 @@ describe('genre affinity tracking on POST /api/swipe/music', () => {
     expect(await artistTrackCountsFor('u1', 'indie')).toEqual({ artistCount: 1, trackCount: 0 });
   });
 
-  it('increments via the artist\'s genres when swiping right on a track', async () => {
+  it('increments via the artist\'s genres when swiping right on a track, and also counts the auto-liked artist', async () => {
     await env.DB.prepare(`UPDATE artists SET genres = ? WHERE id = 'a1'`).bind(JSON.stringify(genresToObject(['jazz']))).run();
     await env.DB.prepare(
       `INSERT INTO tracks (id, name, artist_id, source, approved, created_at) VALUES ('t1', 'Track One', 'a1', 'seed', 1, 1000)`
@@ -148,10 +268,10 @@ describe('genre affinity tracking on POST /api/swipe/music', () => {
 
     await swipe(cookie, 'track', 't1', 'right');
 
-    expect(await affinityFor('u1', 'jazz')).toBe(1);
-    // Confirms the split: a track right-swipe must land in track_count, not
-    // artist_count, even though the genre came from the track's artist.
-    expect(await artistTrackCountsFor('u1', 'jazz')).toEqual({ artistCount: 0, trackCount: 1 });
+    expect(await affinityFor('u1', 'jazz')).toBe(2);
+    // Liking a track now also likes its artist (see 'auto-likes the artist'
+    // tests below), so both counts land for the same genre.
+    expect(await artistTrackCountsFor('u1', 'jazz')).toEqual({ artistCount: 1, trackCount: 1 });
   });
 
   it('does not double-increment when the same item is right-swiped again', async () => {
@@ -185,6 +305,112 @@ describe('genre affinity tracking on POST /api/swipe/music', () => {
   });
 });
 
+describe('liking a track auto-likes its artist', () => {
+  const swipe = (cookie: string, itemType: string, itemId: string, direction: string) =>
+    worker.fetch(
+      new Request('http://localhost/api/swipe/music', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_type: itemType, item_id: itemId, direction }),
+      }),
+      env,
+      ctx
+    );
+
+  async function artistDirection(userId: string, artistId: string): Promise<string | null> {
+    const row = await env.DB.prepare(`SELECT direction FROM music_swipes WHERE user_id = ? AND item_type = 'artist' AND item_id = ?`)
+      .bind(userId, artistId)
+      .first<{ direction: string }>();
+    return row?.direction ?? null;
+  }
+
+  it('right-swiping a track creates a right-swipe on its artist too', async () => {
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, source, approved, created_at) VALUES ('t1', 'Track One', 'a1', 'seed', 1, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+
+    await swipe(cookie, 'track', 't1', 'right');
+
+    expect(await artistDirection('u1', 'a1')).toBe('right');
+  });
+
+  it('does not touch the artist swipe again once already liked (no duplicate row, no double genre count)', async () => {
+    await env.DB.prepare(`UPDATE artists SET genres = ? WHERE id = 'a1'`).bind(JSON.stringify(genresToObject(['pop']))).run();
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, source, approved, created_at) VALUES ('t1', 'Track One', 'a1', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, source, approved, created_at) VALUES ('t2', 'Track Two', 'a1', 'seed', 1, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+
+    await swipe(cookie, 'track', 't1', 'right');
+    await swipe(cookie, 'track', 't2', 'right');
+
+    const rows = await env.DB.prepare(`SELECT * FROM music_swipes WHERE user_id = ? AND item_type = 'artist' AND item_id = ?`).bind('u1', 'a1').all();
+    expect(rows.results.length).toBe(1); // still one row, not two
+    const row = await env.DB.prepare('SELECT (artist_count + track_count) as total FROM user_genres WHERE user_id = ? AND genre = ?').bind('u1', 'pop').first<any>();
+    expect(row.total).toBe(3); // artist +1 (from the first track's auto-like) + track +1 + track +1, not +2 for the artist
+  });
+
+  it('upgrades a previously passed-on artist to liked when a track of theirs is liked', async () => {
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, source, approved, created_at) VALUES ('t1', 'Track One', 'a1', 'seed', 1, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+    await swipe(cookie, 'artist', 'a1', 'left');
+    expect(await artistDirection('u1', 'a1')).toBe('left');
+
+    await swipe(cookie, 'track', 't1', 'right');
+
+    expect(await artistDirection('u1', 'a1')).toBe('right');
+  });
+
+  it('does not auto-unlike the artist when the track is later passed on', async () => {
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, source, approved, created_at) VALUES ('t1', 'Track One', 'a1', 'seed', 1, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+    await swipe(cookie, 'track', 't1', 'right');
+    expect(await artistDirection('u1', 'a1')).toBe('right');
+
+    await swipe(cookie, 'track', 't1', 'left');
+
+    expect(await artistDirection('u1', 'a1')).toBe('right'); // unchanged
+  });
+
+  it('does not affect anything when swiping right on an artist directly', async () => {
+    const cookie = await cookieFor('u1');
+
+    await swipe(cookie, 'artist', 'a1', 'right');
+
+    const rows = await env.DB.prepare(`SELECT * FROM music_swipes WHERE user_id = ?`).bind('u1').all();
+    expect(rows.results.length).toBe(1); // just the one artist swipe, nothing extra
+  });
+
+  it('also auto-likes the artist via PATCH /api/swipes/music/:id (the History "Change" toggle)', async () => {
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, source, approved, created_at) VALUES ('t1', 'Track One', 'a1', 'seed', 1, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+    await swipe(cookie, 'track', 't1', 'left');
+    const trackSwipe = await env.DB.prepare(`SELECT id FROM music_swipes WHERE user_id = ? AND item_id = 't1'`).bind('u1').first<{ id: string }>();
+
+    await worker.fetch(
+      new Request(`http://localhost/api/swipes/music/${trackSwipe!.id}`, {
+        method: 'PATCH',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ direction: 'right' }),
+      }),
+      env,
+      ctx
+    );
+
+    expect(await artistDirection('u1', 'a1')).toBe('right');
+  });
+});
+
 describe('GET /api/swipes/music and PATCH', () => {
   it('lists history and allows changing a past decision', async () => {
     const cookie = await cookieFor('u1');
@@ -192,7 +418,7 @@ describe('GET /api/swipes/music and PATCH', () => {
       `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s1', 'u1', 'artist', 'a1', 'left', 1000, 1000)`
     ).run();
 
-    const historyRes = await worker.fetch(new Request('http://localhost/api/swipes/music', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const historyRes = await worker.fetch(new Request('http://localhost/api/swipes/music', { headers: { Cookie: cookie } }), env, ctx);
     const history = await historyRes.json<any>();
     expect(history.swipes[0].direction).toBe('left');
     expect(history.swipes[0].name).toBe('Artist One');
@@ -204,11 +430,29 @@ describe('GET /api/swipes/music and PATCH', () => {
         body: JSON.stringify({ direction: 'right' }),
       }),
       env,
-      {} as ExecutionContext
+      ctx
     );
     expect(patchRes.status).toBe(200);
     const row = await env.DB.prepare('SELECT direction FROM music_swipes WHERE id = ?').bind('s1').first<any>();
     expect(row.direction).toBe('right');
+  });
+
+  it('resolves artist_id for both artist and track history rows, for linking to the artist page', async () => {
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, source, approved, created_at) VALUES ('t1', 'Track One', 'a2', 'seed', 1, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s1', 'u1', 'artist', 'a1', 'right', 1000, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s2', 'u1', 'track', 't1', 'right', 1000, 1000)`
+    ).run();
+
+    const res = await worker.fetch(new Request('http://localhost/api/swipes/music', { headers: { Cookie: cookie } }), env, ctx);
+    const body = await res.json<any>();
+    expect(body.swipes.find((s: any) => s.id === 's1').artist_id).toBe('a1');
+    expect(body.swipes.find((s: any) => s.id === 's2').artist_id).toBe('a2');
   });
 
   it('updates genre affinity when changing a past decision to right', async () => {
@@ -228,7 +472,7 @@ describe('GET /api/swipes/music and PATCH', () => {
         body: JSON.stringify({ direction: 'right' }),
       }),
       env,
-      {} as ExecutionContext
+      ctx
     );
 
     const affinity = await env.DB.prepare('SELECT artist_count FROM user_genres WHERE user_id = ? AND genre = ?').bind('u1', 'indie').first<any>();
@@ -250,7 +494,7 @@ describe('GET /api/swipes/music and PATCH', () => {
         body: JSON.stringify({ direction: 'right' }),
       }),
       env,
-      {} as ExecutionContext
+      ctx
     );
 
     const affinity = await env.DB.prepare('SELECT artist_count FROM user_genres WHERE user_id = ? AND genre = ?').bind('u1', 'pop').first<any>();
@@ -269,7 +513,7 @@ describe('GET /api/swipes/music and PATCH', () => {
     const rightRes = await worker.fetch(
       new Request('http://localhost/api/swipes/music?direction=right', { headers: { Cookie: cookie } }),
       env,
-      {} as ExecutionContext
+      ctx
     );
     const rightBody = await rightRes.json<any>();
     expect(rightBody.swipes.map((s: any) => s.id)).toEqual(['s2']);
@@ -277,7 +521,7 @@ describe('GET /api/swipes/music and PATCH', () => {
     const leftRes = await worker.fetch(
       new Request('http://localhost/api/swipes/music?direction=left', { headers: { Cookie: cookie } }),
       env,
-      {} as ExecutionContext
+      ctx
     );
     const leftBody = await leftRes.json<any>();
     expect(leftBody.swipes.map((s: any) => s.id)).toEqual(['s1']);
@@ -301,7 +545,7 @@ describe('GET /api/swipes/music and PATCH', () => {
         body: JSON.stringify({ direction: 'right' }),
       }),
       env,
-      {} as ExecutionContext
+      ctx
     );
     expect(patchRes.status).toBe(404);
 

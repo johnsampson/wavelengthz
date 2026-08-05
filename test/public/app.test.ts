@@ -65,11 +65,110 @@ describe('api client', () => {
     vi.unstubAllGlobals();
   });
 
+  it('api.createArtist(spotifyArtistId) POSTs to /api/artists', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, artistId: 'internal-uuid' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.createArtist('spotify-artist-1');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/artists',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ spotifyArtistId: 'spotify-artist-1' }) })
+    );
+    vi.unstubAllGlobals();
+  });
+
   it('api.personProfile(userId) hits the people-profile endpoint', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ profile: {}, overlap: {} }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     await api.personProfile('u2');
     expect(fetchMock).toHaveBeenCalledWith('/api/people/u2/profile', expect.anything());
+    vi.unstubAllGlobals();
+  });
+
+  it('api.notifications() hits the notifications list endpoint', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ notifications: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.notifications();
+    expect(fetchMock).toHaveBeenCalledWith('/api/notifications', expect.anything());
+    vi.unstubAllGlobals();
+  });
+
+  it('api.markNotificationRead(id) POSTs to the read endpoint', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.markNotificationRead('n1');
+    expect(fetchMock).toHaveBeenCalledWith('/api/notifications/n1/read', expect.objectContaining({ method: 'POST' }));
+    vi.unstubAllGlobals();
+  });
+
+  it('api.blocks() hits the blocks list endpoint', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ blocks: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.blocks();
+    expect(fetchMock).toHaveBeenCalledWith('/api/blocks', expect.anything());
+    vi.unstubAllGlobals();
+  });
+
+  it('api.unblock(userId) POSTs to the unblock endpoint', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.unblock('u2');
+    expect(fetchMock).toHaveBeenCalledWith('/api/blocks/u2/unblock', expect.objectContaining({ method: 'POST' }));
+    vi.unstubAllGlobals();
+  });
+
+  it('api.groups() hits the groups list endpoint', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ groups: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.groups();
+    expect(fetchMock).toHaveBeenCalledWith('/api/groups', expect.anything());
+    vi.unstubAllGlobals();
+  });
+
+  it('api.createGroup(name, topic) POSTs name and topic', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, groupId: 'g1' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.createGroup('Indie Fans', 'indie rock');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/groups',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ name: 'Indie Fans', topic: 'indie rock' }) })
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it('api.joinGroup/leaveGroup hit the right endpoints', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.joinGroup('g1');
+    expect(fetchMock).toHaveBeenCalledWith('/api/groups/g1/join', expect.objectContaining({ method: 'POST' }));
+    await api.leaveGroup('g1');
+    expect(fetchMock).toHaveBeenCalledWith('/api/groups/g1/leave', expect.objectContaining({ method: 'POST' }));
+    vi.unstubAllGlobals();
+  });
+
+  it('api.sendGroupMessage(groupId, body) POSTs to the group messages endpoint', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.sendGroupMessage('g1', 'hello');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/groups/g1/messages',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ body: 'hello' }) })
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it('api.recallMessage(matchId, messageId) POSTs to the recall endpoint', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.recallMessage('m1', 'msg1');
+    expect(fetchMock).toHaveBeenCalledWith('/api/matches/m1/messages/msg1/recall', expect.objectContaining({ method: 'POST' }));
+    vi.unstubAllGlobals();
+  });
+
+  it('api.recallGroupMessage(groupId, messageId) POSTs to the group recall endpoint', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.recallGroupMessage('g1', 'msg1');
+    expect(fetchMock).toHaveBeenCalledWith('/api/groups/g1/messages/msg1/recall', expect.objectContaining({ method: 'POST' }));
     vi.unstubAllGlobals();
   });
 

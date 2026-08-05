@@ -10,13 +10,19 @@ email — built on Cloudflare Workers + D1 + R2. Full design in `docs/PLAN.md`.
 2. `wrangler d1 create wavelengthz-db` — copy the returned `database_id` into `wrangler.toml`
 3. `wrangler kv namespace create RATE_LIMIT_KV` — copy the returned `id` into `wrangler.toml`
 4. `wrangler r2 bucket create wavelengthz-photos`
-5. Apply the schema. `wrangler d1 execute` defaults to the **local** dev
-   database, so the target has to be stated explicitly — running the local
-   form and assuming production was updated is the easy mistake here:
+5. Apply the schema via migrations (`migrations/*.sql`, applied in filename
+   order — see `migrations/README.md`). `wrangler d1 migrations apply`
+   defaults to the **local** dev database, so the target has to be stated
+   explicitly — running the local form and assuming production was updated
+   is the easy mistake here:
    ```
-   wrangler d1 execute wavelengthz-db --local  --file=src/db/schema.sql   # local dev DB
-   wrangler d1 execute wavelengthz-db --remote --file=src/db/schema.sql   # production DB
+   wrangler d1 migrations apply wavelengthz-db --local   # local dev DB
+   wrangler d1 migrations apply wavelengthz-db --remote  # production DB
    ```
+   Any future schema change is a new file created with
+   `wrangler d1 migrations create wavelengthz-db <name>`, applied the same
+   way to both targets — never a hand-run `wrangler d1 execute --command=...`
+   against either database, which leaves no record of what changed or when.
 6. Set secrets. All eleven are required — the list must stay in sync with the
    `Env` interface in `src/env.d.ts`. Note that `R2_BUCKET_NAME` and
    `RESEND_FROM_ADDRESS` fail *silently* when missing: photo uploads and every

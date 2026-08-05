@@ -1,6 +1,6 @@
 import { getClientCredentialsToken, searchArtistsByGenre, searchTracksByArtistName } from '../lib/spotify';
-import { genresToObject } from '../lib/genres';
 import { recordCatalogGenres } from '../lib/genreCatalog';
+import { upsertArtist, upsertTrack } from '../lib/catalogUpsert';
 
 export const SEED_GENRES = [
   'pop', 'hip-hop', 'indie', 'r-n-b', 'country', 'electronic',
@@ -104,7 +104,7 @@ export async function seedCatalog(
         if (seen.has(artist.id)) continue;
         seen.add(artist.id);
 
-        const existing = await env.DB.prepare('SELECT 1 FROM artists WHERE id = ?').bind(artist.id).first();
+        const existing = await env.DB.prepare('SELECT 1 FROM artists WHERE spotify_id = ?').bind(artist.id).first();
         if (existing) continue; // already in the catalog -- skip the expensive top-tracks fetch entirely
 
         try {
@@ -112,26 +112,16 @@ export async function seedCatalog(
           // search + track inserts) so a failure anywhere in it -- most likely
           // a transient error from the track search, but also possible on
           // the insert itself -- only drops this one artist, not the run.
-          const artistResult = await env.DB.prepare(
-            `INSERT OR IGNORE INTO artists (id, name, genres, image_url, popularity, source, added_by_user_id, approved, created_at)
-             VALUES (?, ?, ?, ?, ?, 'seed', NULL, 1, ?)`
-          )
-            .bind(artist.id, artist.name, JSON.stringify(genresToObject(artist.genres)), artist.images?.[0]?.url ?? null, artist.popularity ?? null, now)
-            .run();
-          if (artistResult.meta.changes > 0) {
+          const artistResult = await upsertArtist(env.DB, artist, 'seed', null, now);
+          if (artistResult.inserted) {
             artistsInserted += 1;
             await recordCatalogGenres(env.DB, artist.genres ?? [], 'artist', now);
           }
 
           const tracks = await searchTracksByArtistName(token, artist.name, TRACKS_PER_ARTIST);
           for (const track of tracks) {
-            const trackResult = await env.DB.prepare(
-              `INSERT OR IGNORE INTO tracks (id, name, artist_id, album_image_url, preview_url, source, added_by_user_id, approved, created_at)
-               VALUES (?, ?, ?, ?, ?, 'seed', NULL, 1, ?)`
-            )
-              .bind(track.id, track.name, artist.id, track.album?.images?.[0]?.url ?? null, track.preview_url ?? null, now)
-              .run();
-            if (trackResult.meta.changes > 0) {
+            const trackResult = await upsertTrack(env.DB, track, artistResult.id, 'seed', null, now);
+            if (trackResult.inserted) {
               tracksInserted += 1;
               await recordCatalogGenres(env.DB, artist.genres ?? [], 'track', now);
             }

@@ -1,5 +1,53 @@
 import type { MusicProfile } from './scoring';
 
+const DISPLAY_LIMIT = 10;
+
+export interface DisplayMusicItem {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+}
+
+// spotifyId is the real Spotify track id, for the embed player -- for
+// topTracks it happens to equal `id` (this data is the user's raw cached
+// Spotify "top tracks", never touching the artists/tracks catalog tables),
+// but exposing it uniformly lets profile.html's player use one field name
+// across every track list on the page.
+export interface DisplayMusicTrack extends DisplayMusicItem {
+  spotifyId: string;
+}
+
+export interface DisplayMusicProfile {
+  topGenres: string[];
+  topArtists: DisplayMusicItem[];
+  topTracks: DisplayMusicTrack[];
+}
+
+/**
+ * The user-facing counterpart to getMusicProfile/getMusicProfiles below,
+ * which strip everything down to {id, rank} for scoring. This keeps
+ * name/imageUrl (stored on the row since src/routes/me.ts's first fetch) so
+ * profile pages can show "top on Spotify" without any extra Spotify calls or
+ * shared-catalog lookup.
+ */
+export async function getDisplayMusicProfile(db: D1Database, userId: string): Promise<DisplayMusicProfile> {
+  const row = await db.prepare('SELECT top_artists, top_tracks, top_genres FROM music_profiles WHERE user_id = ?')
+    .bind(userId)
+    .first<{ top_artists: string; top_tracks: string; top_genres: string }>();
+  if (!row) return { topGenres: [], topArtists: [], topTracks: [] };
+
+  const byRank = (a: { rank: number }, b: { rank: number }) => a.rank - b.rank;
+
+  const artists: Array<{ artist_id: string; rank: number; name: string; imageUrl: string | null }> = JSON.parse(row.top_artists);
+  const tracks: Array<{ track_id: string; rank: number; name: string; imageUrl: string | null }> = JSON.parse(row.top_tracks);
+
+  return {
+    topGenres: JSON.parse(row.top_genres),
+    topArtists: [...artists].sort(byRank).slice(0, DISPLAY_LIMIT).map((a) => ({ id: a.artist_id, name: a.name, imageUrl: a.imageUrl })),
+    topTracks: [...tracks].sort(byRank).slice(0, DISPLAY_LIMIT).map((t) => ({ id: t.track_id, spotifyId: t.track_id, name: t.name, imageUrl: t.imageUrl })),
+  };
+}
+
 export async function getMusicProfile(db: D1Database, userId: string): Promise<MusicProfile> {
   const row = await db.prepare('SELECT top_artists, top_genres FROM music_profiles WHERE user_id = ?')
     .bind(userId)

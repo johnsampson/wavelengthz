@@ -35,10 +35,16 @@ describe('GET /api/me', () => {
       vi.fn(async (input: RequestInfo) => {
         const url = input.toString();
         if (url.includes('top/artists')) {
-          return new Response(JSON.stringify({ items: [{ id: 'a1', name: 'Artist One', genres: ['pop'] }] }), { status: 200 });
+          return new Response(
+            JSON.stringify({ items: [{ id: 'a1', name: 'Artist One', genres: ['pop'], images: [{ url: 'https://img.example/a1.jpg' }] }] }),
+            { status: 200 }
+          );
         }
         if (url.includes('top/tracks')) {
-          return new Response(JSON.stringify({ items: [{ id: 't1', name: 'Track One' }] }), { status: 200 });
+          return new Response(
+            JSON.stringify({ items: [{ id: 't1', name: 'Track One', album: { images: [{ url: 'https://img.example/t1.jpg' }] } }] }),
+            { status: 200 }
+          );
         }
         throw new Error(`unexpected fetch ${url}`);
       })
@@ -53,6 +59,10 @@ describe('GET /api/me', () => {
 
     const row = await env.DB.prepare('SELECT * FROM music_profiles WHERE user_id = ?').bind('u1').first<any>();
     expect(row).toBeTruthy();
+    const topArtists = JSON.parse(row.top_artists);
+    expect(topArtists[0]).toEqual({ artist_id: 'a1', rank: 1, name: 'Artist One', imageUrl: 'https://img.example/a1.jpg' });
+    const topTracks = JSON.parse(row.top_tracks);
+    expect(topTracks[0]).toEqual({ track_id: 't1', rank: 1, name: 'Track One', imageUrl: 'https://img.example/t1.jpg' });
 
     vi.unstubAllGlobals();
   });

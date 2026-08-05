@@ -5,7 +5,9 @@ import { getMusicProfiles, getRightSwipedItemIdsFor } from '../lib/profile';
 import type { MusicProfile } from '../lib/scoring';
 import { bucketedDistanceLabel, haversineKm } from '../lib/scoring';
 import { isBlockedEitherDirection } from '../lib/blocks';
-import { computeMusicOverlap } from '../lib/musicOverlap';
+import { computeMusicOverlap, MusicOverlap } from '../lib/musicOverlap';
+import { getDisplayMusicProfile } from '../lib/profile';
+import { MATCH_NOTIFICATION_DELAY_MS } from '../lib/notifications';
 
 // Hard cap on the like-priority queue. It previously had no LIMIT at all, so a
 // popular account's deck request grew without bound.
@@ -19,6 +21,51 @@ const POOL_LIMIT = 200;
 // factor varies with cos(latitude) and the band wraps incorrectly across the
 // antimeridian, which would silently drop valid candidates.
 const KM_PER_DEGREE_LATITUDE = 111;
+
+const RECENT_MUSIC_LIMIT = 10;
+
+interface RecentMusicItem {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+  // Only present for tracks -- the real Spotify id, for the embed player.
+  // Distinct from `id` (our internal catalog UUID) since migrations/0002
+  // obfuscated it. Artists have no player, so it's omitted there.
+  spotifyId?: string;
+}
+
+/**
+ * A profile owner's own most-recently right-swiped artists/tracks, for the
+ * self-preview view. Unlike computeMusicOverlap this isn't comparing two
+ * users -- just the one user's own recent taste.
+ */
+async function recentRightSwipedItems(
+  db: D1Database,
+  userId: string,
+  itemType: 'artist' | 'track',
+  limit: number
+): Promise<RecentMusicItem[]> {
+  const imageColumn = itemType === 'track' ? 't.album_image_url' : 'a.image_url';
+  const rows = await db
+    .prepare(
+      `SELECT ms.item_id as id, COALESCE(a.name, t.name) as name, ${imageColumn} as image_url,
+              COALESCE(a.spotify_id, t.spotify_id) as spotify_id
+       FROM music_swipes ms
+       LEFT JOIN artists a ON ms.item_type = 'artist' AND a.id = ms.item_id
+       LEFT JOIN tracks t ON ms.item_type = 'track' AND t.id = ms.item_id
+       WHERE ms.user_id = ? AND ms.item_type = ? AND ms.direction = 'right'
+       ORDER BY ms.created_at DESC
+       LIMIT ?`
+    )
+    .bind(userId, itemType, limit)
+    .all<{ id: string; name: string; image_url: string | null; spotify_id: string | null }>();
+
+  return rows.results.map((r) =>
+    itemType === 'track'
+      ? { id: r.id, name: r.name, imageUrl: r.image_url, spotifyId: r.spotify_id! }
+      : { id: r.id, name: r.name, imageUrl: r.image_url }
+  );
+}
 
 /**
  * Batched form of the old per-candidate primary-photo lookup: one query for
@@ -67,7 +114,11 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
     const me = await getSessionUser(request, env.DB);
     if (!me) return new Response('Unauthorized', { status: 401 });
 
-    if (!hasCompletedOnboarding(me)) {
+    // gender/seeking are required at onboarding going forward, but existing
+    // accounts that onboarded before that migration may still have them
+    // null -- mutual matching is undefined without both sides set, so treat
+    // it the same as an incomplete profile rather than showing a broken pool.
+    if (!hasCompletedOnboarding(me) || me.gender == null || me.seeking == null) {
       return Response.json({ error: 'onboarding_incomplete' }, { status: 400 });
     }
 
@@ -91,9 +142,10 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
          AND u.deleted_at IS NULL AND u.onboarded_at IS NOT NULL
          AND u.lat IS NOT NULL AND u.lng IS NOT NULL
          AND u.lat BETWEEN ? AND ?
+         AND u.gender = ? AND u.seeking = ?
        ORDER BY ps.match_score DESC
        LIMIT ?`
-    ).bind(me.id, me.id, me.id, me.id, minLat, maxLat, LIKE_PRIORITY_LIMIT).all<UserRow & { match_score: number }>();
+    ).bind(me.id, me.id, me.id, me.id, minLat, maxLat, me.seeking, me.gender, LIKE_PRIORITY_LIMIT).all<UserRow & { match_score: number }>();
 
     const likePriorityIds = new Set(likePriorityRows.results.map((r) => r.id));
 
@@ -102,12 +154,13 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
        WHERE u.id != ? AND u.deleted_at IS NULL AND u.onboarded_at IS NOT NULL
          AND u.lat IS NOT NULL AND u.lng IS NOT NULL
          AND u.lat BETWEEN ? AND ?
+         AND u.gender = ? AND u.seeking = ?
          AND NOT EXISTS (SELECT 1 FROM people_swipes ps WHERE ps.swiper_id = ? AND ps.target_id = u.id)
          AND NOT EXISTS (
            SELECT 1 FROM blocks b WHERE (b.blocker_id = ? AND b.blocked_id = u.id) OR (b.blocker_id = u.id AND b.blocked_id = ?)
          )
        LIMIT ?`
-    ).bind(me.id, minLat, maxLat, me.id, me.id, me.id, POOL_LIMIT).all<UserRow>();
+    ).bind(me.id, minLat, maxLat, me.seeking, me.gender, me.id, me.id, me.id, POOL_LIMIT).all<UserRow>();
 
     const pool = poolRows.results.filter((u) => !likePriorityIds.has(u.id));
 
@@ -177,16 +230,14 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
     }
 
     const targetId = request.params.id;
-    if (targetId === me.id) {
-      return Response.json({ error: 'cannot_view_self' }, { status: 400 });
-    }
+    const isSelf = targetId === me.id;
 
     const target = await env.DB.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL AND onboarded_at IS NOT NULL')
       .bind(targetId)
       .first<UserRow>();
     if (!target) return new Response('Not found', { status: 404 });
 
-    if (await isBlockedEitherDirection(env.DB, me.id, targetId)) {
+    if (!isSelf && (await isBlockedEitherDirection(env.DB, me.id, targetId))) {
       return new Response('Forbidden', { status: 403 });
     }
 
@@ -194,25 +245,56 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
       .bind(targetId)
       .all<{ id: string }>();
 
-    const likedYouRow = await env.DB
-      .prepare(`SELECT 1 FROM people_swipes WHERE swiper_id = ? AND target_id = ? AND direction = 'right'`)
-      .bind(targetId, me.id)
-      .first();
+    let likedYou = false;
+    let isMatch = false;
+    let matchId: string | null = null;
+    let distanceLabel: string | null = null;
+    let overlap: MusicOverlap = { sharedArtists: [], sharedTracks: [], sharedGenres: [] };
+    let recentArtists: RecentMusicItem[] = [];
+    let recentTracks: RecentMusicItem[] = [];
 
-    const matchRow = await env.DB
-      .prepare(
-        `SELECT 1 FROM matches WHERE unmatched_at IS NULL AND
-         ((user_a_id = ? AND user_b_id = ?) OR (user_a_id = ? AND user_b_id = ?))`
-      )
-      .bind(me.id, targetId, targetId, me.id)
-      .first();
+    if (!isSelf) {
+      const likedYouRow = await env.DB
+        .prepare(`SELECT 1 FROM people_swipes WHERE swiper_id = ? AND target_id = ? AND direction = 'right'`)
+        .bind(targetId, me.id)
+        .first();
 
-    const distanceLabel =
-      target.lat != null && target.lng != null
-        ? bucketedDistanceLabel(haversineKm(me.lat!, me.lng!, target.lat, target.lng))
-        : null;
+      // Passive discovery only, per MATCH_NOTIFICATION_DELAY_MS (see
+      // GET /api/matches for the fuller reasoning) -- a match younger than
+      // the delay simply isn't found here, so this profile badge stays
+      // "not matched" until it ages past the window. Whoever already knows
+      // the matchId (from the celebration modal) can still message right
+      // away via GET /api/matches/:id, which isn't gated.
+      const matchRow = await env.DB
+        .prepare(
+          `SELECT id FROM matches WHERE unmatched_at IS NULL AND created_at <= ? AND
+           ((user_a_id = ? AND user_b_id = ?) OR (user_a_id = ? AND user_b_id = ?))`
+        )
+        .bind(Date.now() - MATCH_NOTIFICATION_DELAY_MS, me.id, targetId, targetId, me.id)
+        .first<{ id: string }>();
 
-    const overlap = await computeMusicOverlap(env.DB, me.id, targetId);
+      likedYou = !!likedYouRow;
+      isMatch = !!matchRow;
+      matchId = matchRow?.id ?? null;
+      distanceLabel =
+        target.lat != null && target.lng != null
+          ? bucketedDistanceLabel(haversineKm(me.lat!, me.lng!, target.lat, target.lng))
+          : null;
+      overlap = await computeMusicOverlap(env.DB, me.id, targetId);
+    } else {
+      const [artists, tracks] = await Promise.all([
+        recentRightSwipedItems(env.DB, me.id, 'artist', RECENT_MUSIC_LIMIT),
+        recentRightSwipedItems(env.DB, me.id, 'track', RECENT_MUSIC_LIMIT),
+      ]);
+      recentArtists = artists;
+      recentTracks = tracks;
+    }
+
+    // The target's own baseline Spotify taste -- distinct from `overlap`
+    // (the intersection) and from recentArtists/recentTracks (in-app swipe
+    // activity, self-only). Shown for both self and cross-view: seeing a
+    // candidate's actual taste up front fits a music-first dating app.
+    const { topGenres, topArtists, topTracks } = await getDisplayMusicProfile(env.DB, targetId);
 
     return Response.json({
       profile: {
@@ -221,8 +303,15 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
         bio: target.bio,
         photoUrls: photoRows.results.map((r) => `/photos/${r.id}`),
         distanceLabel,
-        likedYou: !!likedYouRow,
-        isMatch: !!matchRow,
+        likedYou,
+        isMatch,
+        matchId,
+        isSelf,
+        recentArtists,
+        recentTracks,
+        topGenres,
+        topArtists,
+        topTracks,
       },
       overlap,
     });
@@ -261,23 +350,18 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
        ON CONFLICT(swiper_id, target_id) DO UPDATE SET direction = excluded.direction, match_score = excluded.match_score, updated_at = excluded.updated_at`
     ).bind(crypto.randomUUID(), me.id, target_id, direction, score, now, now).run();
 
+    // Match-notification emails are NOT sent here -- they're deferred 15
+    // minutes (src/lib/notifications.ts's MATCH_NOTIFICATION_DELAY_MS, swept
+    // by the scheduled() cron) so the person who just matched has a window to
+    // unmatch before the other side is ever emailed or sees a bell badge.
+    // createMatchIfMutual already inserted both participants' notification
+    // rows; only the immediate email send is skipped here.
     let match = null;
     if (direction === 'right') {
       match = await createMatchIfMutual(env.DB, me.id, target_id);
-      if (match) {
-        const { notifyMatch } = await import('../lib/notifications');
-        try {
-          await notifyMatch(env.DB, env, match.matchId);
-        } catch (err) {
-          // Email delivery failures must never turn a successful match into
-          // a failed request for the caller -- the match row is already
-          // committed. Log and move on.
-          console.error('notifyMatch failed', err);
-        }
-      }
     }
 
-    return Response.json({ ok: true, matched: !!match });
+    return Response.json({ ok: true, matched: !!match, ...(match ? { matchId: match.matchId } : {}) });
   });
 
   router.get('/api/swipes/people', async (request: Request, env: Env) => {
@@ -291,7 +375,7 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
     const directionFilter = direction === 'left' || direction === 'right' ? 'AND ps.direction = ?' : '';
 
     const rows = await env.DB.prepare(
-      `SELECT ps.id, ps.target_id, ps.direction, ps.match_score, ps.created_at, u.display_name as displayName
+      `SELECT ps.id, ps.target_id, ps.direction, ps.match_score, ps.created_at, u.display_name as name
        FROM people_swipes ps
        JOIN users u ON u.id = ps.target_id
        WHERE ps.swiper_id = ? ${directionFilter}
@@ -320,19 +404,13 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
     // Changing a past decision to right can complete a mutual like exactly
     // like a fresh right-swipe through the deck would -- this must create the
     // match too, not just record the direction.
+    // See the identical comment in POST /api/swipe/people above -- the
+    // match-notification email is deferred to the cron sweep, not sent here.
     let match = null;
     if (direction === 'right') {
       match = await createMatchIfMutual(env.DB, me.id, swipe.target_id);
-      if (match) {
-        const { notifyMatch } = await import('../lib/notifications');
-        try {
-          await notifyMatch(env.DB, env, match.matchId);
-        } catch (err) {
-          console.error('notifyMatch failed', err);
-        }
-      }
     }
 
-    return Response.json({ ok: true, matched: !!match });
+    return Response.json({ ok: true, matched: !!match, ...(match ? { matchId: match.matchId } : {}) });
   });
 }

@@ -24,7 +24,9 @@ binding = "ASSETS"
 SPOTIFY_REDIRECT_URI = "http://127.0.0.1:8787/callback"
 
 [triggers]
-crons = ["0 3 * * *", "0 4 * * 0"]
+# "0 3 * * *": nightly purgeExpiredDeletions. "0 4 * * 0": weekly catalog refresh.
+# "*/5 * * * *": sweeps deferred match-notification emails (MATCH_NOTIFICATION_DELAY_MS).
+crons = ["0 3 * * *", "0 4 * * 0", "*/5 * * * *"]
 
 [env.test]
 [[env.test.d1_databases]]

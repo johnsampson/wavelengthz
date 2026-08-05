@@ -26,8 +26,13 @@ export function registerMeRoutes(router: RouterType) {
           if (!genreRank.has(genre)) genreRank.set(genre, genreRank.size + 1);
         }
       }
-      const topArtists = JSON.stringify(artists.map((a) => ({ artist_id: a.id, rank: a.rank })));
-      const topTracks = JSON.stringify(tracks.map((t) => ({ track_id: t.id, rank: t.rank })));
+      // name/imageUrl are stored here (not just id/rank) so profile pages can
+      // display "top on Spotify" directly from this row -- no extra Spotify
+      // calls or shared-catalog upsert needed just to show a name and photo.
+      // Existing scoring code (src/lib/profile.ts) only ever re-maps this back
+      // down to {id, rank}, so the extra fields are invisible to it.
+      const topArtists = JSON.stringify(artists.map((a) => ({ artist_id: a.id, rank: a.rank, name: a.name, imageUrl: a.imageUrl })));
+      const topTracks = JSON.stringify(tracks.map((t) => ({ track_id: t.id, rank: t.rank, name: t.name, imageUrl: t.imageUrl })));
       const topGenres = JSON.stringify([...genreRank.keys()]);
       const now = Date.now();
 

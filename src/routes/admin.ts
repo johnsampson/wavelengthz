@@ -1,10 +1,11 @@
 import type { IRequest, RouterType } from 'itty-router';
 import { seedCatalog } from '../db/seed';
 import { hardDeleteUser } from '../lib/accountDeletion';
+import { constantTimeEqual } from '../lib/crypto';
 
 export function registerAdminRoutes(router: RouterType) {
   router.post('/internal/seed', async (request: Request, env: Env) => {
-    if (request.headers.get('X-Seed-Secret') !== env.SEED_SECRET) {
+    if (!constantTimeEqual(request.headers.get('X-Seed-Secret') ?? '', env.SEED_SECRET)) {
       return new Response('Forbidden', { status: 403 });
     }
 
@@ -24,7 +25,7 @@ export function registerAdminRoutes(router: RouterType) {
   // by either our internal id or the Spotify id, since after a login you
   // may only know the latter.
   router.post('/internal/users/:id/delete', async (request: IRequest, env: Env) => {
-    if (request.headers.get('X-Seed-Secret') !== env.SEED_SECRET) {
+    if (!constantTimeEqual(request.headers.get('X-Seed-Secret') ?? '', env.SEED_SECRET)) {
       return new Response('Forbidden', { status: 403 });
     }
 

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wavelengthz — Groups</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/tailwind.css" />
+</head>
+<body class="min-h-screen bg-base text-neutral-50 p-4 pb-24" x-data="groupsApp()" x-init="init()">
+  <div id="wl-header-root"></div>
+  <h1 class="mx-auto mb-4 max-w-md text-2xl font-bold">Groups near you</h1>
+
+  <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
+
+  <div class="mx-auto mb-4 max-w-md">
+    <button type="button" class="btn-primary w-full" @click="showCreate = !showCreate">
+      <span x-text="showCreate ? 'Cancel' : '+ Start a group'"></span>
+    </button>
+  </div>
+
+  <form x-show="showCreate" class="card mx-auto mb-4 flex max-w-md flex-col gap-3 p-4" @submit.prevent="create()">
+    <label class="flex flex-col gap-1">
+      <span class="field-label">Group name</span>
+      <input class="field" type="text" x-model="newName" maxlength="60" required />
+    </label>
+    <label class="flex flex-col gap-1">
+      <span class="field-label">Topic (optional)</span>
+      <input class="field" type="text" x-model="newTopic" maxlength="100" placeholder="e.g. indie rock, 90s hip-hop..." />
+    </label>
+    <button type="submit" class="btn-primary">Create</button>
+  </form>
+
+  <ul class="mx-auto flex max-w-md flex-col gap-2">
+    <template x-for="g in groups" :key="g.id">
+      <li class="card flex items-center justify-between gap-3 p-3">
+        <div class="min-w-0">
+          <a :href="`/group?id=${g.id}`" class="block truncate font-semibold text-neutral-100" x-text="g.name"></a>
+          <p class="truncate text-sm text-neutral-400" x-text="g.topic || g.locationLabel"></p>
+          <p class="text-xs text-neutral-500"><span x-text="g.memberCount"></span>/8 members</p>
+        </div>
+        <button type="button" class="btn-secondary shrink-0" x-show="!g.isMember" @click="join(g)">Join</button>
+        <a :href="`/group?id=${g.id}`" class="btn-ghost shrink-0" x-show="g.isMember">Open</a>
+      </li>
+    </template>
+  </ul>
+  <p x-show="groups.length === 0" class="mx-auto max-w-md text-center text-neutral-400">No groups near you yet — start one!</p>
+
+  <script type="module">
+    import { api } from '/app.js';
+    import { mountHeader, mountNav } from '/nav.js';
+    import { requireAuth } from '/auth.js';
+    mountHeader();
+    mountNav();
+
+    window.groupsApp = function () {
+      return {
+        groups: [],
+        error: null,
+        showCreate: false,
+        newName: '',
+        newTopic: '',
+
+        async init() {
+          if (!(await requireAuth())) return;
+          await this.load();
+        },
+
+        async load() {
+          this.error = null;
+          try {
+            const res = await api.groups();
+            this.groups = res.groups;
+          } catch (e) {
+            this.error = 'Could not load groups. Please try again.';
+          }
+        },
+
+        async create() {
+          if (!this.newName.trim()) return;
+          this.error = null;
+          try {
+            await api.createGroup(this.newName.trim(), this.newTopic.trim() || null);
+            this.newName = '';
+            this.newTopic = '';
+            this.showCreate = false;
+            await this.load();
+          } catch (e) {
+            this.error = 'Could not create that group. Please try again.';
+          }
+        },
+
+        async join(g) {
+          this.error = null;
+          try {
+            await api.joinGroup(g.id);
+            window.location.href = `/group?id=${g.id}`;
+          } catch (e) {
+            if (e.status === 403 && e.body?.error === 'group_full') {
+              this.error = 'That group is full.';
+            } else if (e.status === 403 && e.body?.error === 'blocked') {
+              this.error = 'Could not join that group.';
+            } else {
+              this.error = 'Could not join that group. Please try again.';
+            }
+          }
+        },
+      };
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <div id="wl-nav-root"></div>
+</body>
+</html>

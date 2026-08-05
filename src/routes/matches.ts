@@ -1,7 +1,9 @@
 import type { RouterType, IRequest } from 'itty-router';
 import { getSessionUser } from '../lib/session';
-import { notifyMessage } from '../lib/notifications';
+import { notifyMessage, MATCH_NOTIFICATION_DELAY_MS } from '../lib/notifications';
+import { canRecall } from '../lib/messageRecall';
 import { computeMusicOverlap } from '../lib/musicOverlap';
+import { isValidMessageBody } from '../lib/messageFilter';
 
 // A soft-deleted account must disappear from matches and messaging
 // immediately (docs/PLAN.md §9), not linger until the 7-day grace period
@@ -25,6 +27,12 @@ export function registerMatchRoutes(router: RouterType) {
     const user = await getSessionUser(request, env.DB);
     if (!user) return new Response('Unauthorized', { status: 401 });
 
+    // Passive discovery only: this list (and the isMatch badge on
+    // GET /api/people/:id/profile) is exactly the "before anything happens"
+    // window MATCH_NOTIFICATION_DELAY_MS exists for -- someone who
+    // deliberately already knows the matchId (from the celebration modal, or
+    // a message link) can still open the match detail/message it right away;
+    // see src/lib/notifications.ts.
     const rows = await env.DB.prepare(
       `SELECT m.id, m.user_a_id, m.user_b_id, m.created_at,
               ua.display_name as user_a_display_name, ub.display_name as user_b_display_name
@@ -33,8 +41,9 @@ export function registerMatchRoutes(router: RouterType) {
        JOIN users ub ON ub.id = m.user_b_id
        WHERE m.unmatched_at IS NULL AND (m.user_a_id = ? OR m.user_b_id = ?)
          AND ua.deleted_at IS NULL AND ub.deleted_at IS NULL
+         AND m.created_at <= ?
        ORDER BY m.created_at DESC`
-    ).bind(user.id, user.id).all<any>();
+    ).bind(user.id, user.id, Date.now() - MATCH_NOTIFICATION_DELAY_MS).all<any>();
 
     const matches = rows.results.map((m) => ({
       id: m.id,
@@ -93,10 +102,42 @@ export function registerMatchRoutes(router: RouterType) {
     if (!match) return new Response('Forbidden', { status: 403 });
 
     const rows = await env.DB.prepare(
-      `SELECT id, sender_id, body, read_at, created_at FROM messages WHERE match_id = ? ORDER BY created_at ASC`
+      `SELECT id, sender_id, body, read_at, created_at, recalled_at FROM messages WHERE match_id = ? ORDER BY created_at ASC`
     ).bind(match.id).all<any>();
 
-    return Response.json({ messages: rows.results });
+    // The row (and its real body) stays in D1 either way -- recalled_at is
+    // only ever set via POST .../recall below. Nulling `body` here, rather
+    // than trusting the client to hide it, is what actually keeps recalled
+    // content from reaching anyone once it's set.
+    return Response.json({
+      messages: rows.results.map((m) => ({
+        id: m.id,
+        sender_id: m.sender_id,
+        body: m.recalled_at ? null : m.body,
+        read_at: m.read_at,
+        created_at: m.created_at,
+        recalledAt: m.recalled_at,
+      })),
+    });
+  });
+
+  router.post('/api/matches/:id/messages/:messageId/recall', async (request: IRequest, env: Env) => {
+    const user = await getSessionUser(request, env.DB);
+    if (!user) return new Response('Unauthorized', { status: 401 });
+
+    const match = await loadActiveMatchForParticipant(env.DB, request.params.id, user.id);
+    if (!match) return new Response('Forbidden', { status: 403 });
+
+    const message = await env.DB.prepare('SELECT sender_id, created_at, recalled_at FROM messages WHERE id = ? AND match_id = ?')
+      .bind(request.params.messageId, match.id)
+      .first<{ sender_id: string; created_at: number; recalled_at: number | null }>();
+    if (!message) return new Response('Not found', { status: 404 });
+
+    const check = canRecall(message, user.id, Date.now());
+    if (!check.ok) return Response.json({ error: check.error }, { status: check.error === 'not_sender' ? 403 : 400 });
+
+    await env.DB.prepare('UPDATE messages SET recalled_at = ? WHERE id = ?').bind(Date.now(), request.params.messageId).run();
+    return Response.json({ ok: true });
   });
 
   router.post('/api/matches/:id/messages', async (request: IRequest, env: Env) => {
@@ -107,6 +148,9 @@ export function registerMatchRoutes(router: RouterType) {
     if (!match) return new Response('Forbidden', { status: 403 });
 
     const { body } = await request.json<{ body: string }>();
+    if (!isValidMessageBody(body)) {
+      return Response.json({ error: 'invalid_message' }, { status: 400 });
+    }
     const messageId = crypto.randomUUID();
     const now = Date.now();
     const recipientId = match.user_a_id === user.id ? match.user_b_id : match.user_a_id;

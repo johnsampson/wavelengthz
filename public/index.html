@@ -11,8 +11,8 @@
   <link rel="manifest" href="/manifest.json" />
 </head>
 <body class="min-h-screen bg-base text-neutral-50 pb-24" x-data="deckApp()" x-init="init()">
-  <header class="flex flex-col items-center gap-3 p-4">
-    <span class="wordmark text-2xl">Wavelengthz</span>
+  <div id="wl-header-root"></div>
+  <header class="flex flex-col items-center gap-3 pb-3">
     <div class="flex items-center gap-2 rounded-full bg-surface2 p-1" x-show="authed === true">
       <button
         class="pill-toggle"
@@ -30,6 +30,8 @@
   </header>
 
   <main class="flex flex-col items-center gap-8 px-4">
+    <p x-show="error" x-text="error" class="mx-auto max-w-sm text-center text-red-400" role="alert"></p>
+
     <div x-show="authed === false" class="card flex w-full max-w-sm flex-col items-center gap-3 px-6 py-12 text-center">
       <span class="text-3xl">🎧</span>
       <p class="font-semibold text-neutral-100">Find your wavelength</p>
@@ -58,7 +60,7 @@
       <p class="text-sm text-neutral-400">Check back later for more matches.</p>
     </div>
 
-    <div class="flex items-center gap-8" x-show="authed === true && current">
+    <div class="flex items-center gap-8" x-show="authed === true && current && !matchModal">
       <button
         class="btn-secondary h-16 w-16 rounded-full text-2xl"
         @click="decide('left')"
@@ -119,9 +121,9 @@
     </div>
     <p x-show="searchError" x-text="searchError" class="mx-auto mt-4 w-full max-w-md text-red-400" role="alert"></p>
     <ul class="mx-auto mt-4 flex w-full max-w-md flex-col gap-2 overflow-y-auto">
-      <template x-for="result in searchResults" :key="result.id">
+      <template x-for="result in searchResults" :key="result.id || result.spotifyArtistId">
         <li>
-          <button class="card flex w-full items-center gap-3 p-3 text-left" @click="selectArtist(result.id)">
+          <button class="card flex w-full items-center gap-3 p-3 text-left" @click="selectArtist(result)">
             <img :src="result.imageUrl" :alt="result.name" class="h-10 w-10 rounded-full object-cover" />
             <span class="text-neutral-100" x-text="result.name"></span>
           </button>
@@ -133,12 +135,29 @@
     </p>
   </div>
 
+  <div
+    x-show="matchModal"
+    class="fixed inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-base/95 p-6 text-center backdrop-blur-sm"
+    role="dialog"
+    aria-modal="true"
+    aria-label="It's a match"
+  >
+    <img :src="matchModal?.photoUrl" :alt="matchModal?.name" class="h-32 w-32 rounded-full object-cover ring-4 ring-brand-500" />
+    <h2 class="wordmark text-3xl">It's a match!</h2>
+    <p class="text-neutral-300">You and <span x-text="matchModal?.name" class="font-semibold text-neutral-100"></span> liked each other.</p>
+    <div class="mt-2 flex w-full max-w-xs flex-col gap-2">
+      <a :href="`/messages?matchId=${matchModal?.matchId}`" class="btn-primary">Send a Message</a>
+      <button class="btn-secondary" @click="dismissMatch()">Keep Swiping</button>
+    </div>
+  </div>
+
   <script type="module">
     import { api } from '/app.js';
     import { attachSwipeDeck } from '/swipe.js';
-    import { mountNav } from '/nav.js';
+    import { mountHeader, mountNav } from '/nav.js';
     import { getAuthedUser } from '/auth.js';
     import { shouldSearch, debounce } from '/search.js';
+    mountHeader();
     mountNav();
 
     window.deckApp = function () {
@@ -154,6 +173,8 @@
         searching: false,
         searchError: null,
         debouncedSearch: null,
+        matchModal: null,
+        error: null,
 
         async init() {
           const user = await getAuthedUser();
@@ -188,11 +209,37 @@
 
         async decide(direction) {
           if (!this.current) return;
-          if (this.mode === 'people') {
-            await api.swipe('people', { target_id: this.current.id, direction });
-          } else {
-            await api.swipe('music', { item_type: this.current.itemType, item_id: this.current.itemId, direction });
+          const swiped = this.current;
+          this.error = null;
+          try {
+            if (this.mode === 'people') {
+              const res = await api.swipe('people', { target_id: swiped.id, direction });
+              if (res.matched) {
+                // Hold on the celebration instead of immediately advancing --
+                // dismissMatch() (or the deck's own showNext/loadQueue logic)
+                // moves to the next candidate once the user is ready.
+                this.matchModal = { name: swiped.displayName, photoUrl: swiped.primaryPhotoUrl, matchId: res.matchId };
+                return;
+              }
+            } else {
+              await api.swipe('music', { item_type: swiped.itemType, item_id: swiped.itemId, direction });
+            }
+          } catch (e) {
+            // Leave `current` in place either way -- the swipe didn't save,
+            // so advancing would silently drop it instead of letting the
+            // user retry.
+            this.error =
+              e.status === 429
+                ? "You're swiping too fast -- wait a moment and try again."
+                : 'Could not save that. Please try again.';
+            return;
           }
+          if (this.queue.length === 0) await this.loadQueue();
+          else this.showNext();
+        },
+
+        async dismissMatch() {
+          this.matchModal = null;
           if (this.queue.length === 0) await this.loadQueue();
           else this.showNext();
         },
@@ -229,8 +276,22 @@
           }
         },
 
-        selectArtist(artistId) {
-          window.location.href = `/artist?id=${artistId}`;
+        async selectArtist(result) {
+          // Already cataloged -- result.id is our internal artist UUID.
+          if (result.inCatalog) {
+            window.location.href = `/artist?id=${result.id}`;
+            return;
+          }
+          // A live Spotify result has no internal id yet (see GET
+          // /api/artists/search's `inCatalog: false` shape) -- persist it
+          // first so there's a real artist row (and UUID) to navigate to.
+          this.searchError = null;
+          try {
+            const res = await api.createArtist(result.spotifyArtistId);
+            window.location.href = `/artist?id=${res.artistId}`;
+          } catch (e) {
+            this.searchError = 'Could not add that artist. Please try again.';
+          }
         },
 
         viewProfile() {

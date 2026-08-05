@@ -16,6 +16,16 @@ async function request(path, options = {}) {
   return res.status === 204 ? null : res.json();
 }
 
+// Shared with onboarding.html and settings.html so the option list can't drift
+// between the two places it's picked.
+export const INTENT_OPTIONS = [
+  { value: 'long_term_relationship', label: 'Long-term relationship' },
+  { value: 'something_casual', label: 'Something casual' },
+  { value: 'dating_around', label: 'Dating around' },
+  { value: 'making_friends', label: 'Making new friends' },
+  { value: 'not_sure_yet', label: 'Not sure yet' },
+];
+
 export const api = {
   me: () => request('/api/me'),
   candidates: (mode, limit = 10) => request(`/api/candidates/${mode}?limit=${limit}`),
@@ -26,6 +36,10 @@ export const api = {
   artistProfile: (artistId) => request(`/api/artists/${artistId}`),
   personProfile: (userId) => request(`/api/people/${userId}/profile`),
   artistSearch: (q) => request(`/api/artists/search?q=${encodeURIComponent(q)}`),
+  // Persists a live (not-yet-cataloged) Spotify search result into the
+  // artists table -- see GET /api/artists/search's `inCatalog: false` shape.
+  createArtist: (spotifyArtistId) =>
+    request('/api/artists', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ spotifyArtistId }) }),
   messages: (matchId) => request(`/api/matches/${matchId}/messages`),
   sendMessage: (matchId, body) =>
     request(`/api/matches/${matchId}/messages`, {
@@ -33,10 +47,13 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ body }),
     }),
+  recallMessage: (matchId, messageId) => request(`/api/matches/${matchId}/messages/${messageId}/recall`, { method: 'POST' }),
   onboard: (payload) =>
     request('/api/onboarding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
   block: (userId) =>
     request('/api/block', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: userId }) }),
+  blocks: () => request('/api/blocks'),
+  unblock: (userId) => request(`/api/blocks/${userId}/unblock`, { method: 'POST' }),
   report: (userId, reason, details) =>
     request('/api/report', {
       method: 'POST',
@@ -52,4 +69,20 @@ export const api = {
     request(`/api/swipes/${mode}?limit=${limit}&offset=${offset}${direction ? `&direction=${direction}` : ''}`),
   updateSwipe: (mode, id, direction) =>
     request(`/api/swipes/${mode}/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }) }),
+  notifications: () => request('/api/notifications'),
+  markNotificationRead: (id) => request(`/api/notifications/${id}/read`, { method: 'POST' }),
+  groups: () => request('/api/groups'),
+  groupDetail: (groupId) => request(`/api/groups/${groupId}`),
+  createGroup: (name, topic) =>
+    request('/api/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, topic }) }),
+  joinGroup: (groupId) => request(`/api/groups/${groupId}/join`, { method: 'POST' }),
+  leaveGroup: (groupId) => request(`/api/groups/${groupId}/leave`, { method: 'POST' }),
+  groupMessages: (groupId) => request(`/api/groups/${groupId}/messages`),
+  sendGroupMessage: (groupId, body) =>
+    request(`/api/groups/${groupId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    }),
+  recallGroupMessage: (groupId, messageId) => request(`/api/groups/${groupId}/messages/${messageId}/recall`, { method: 'POST' }),
 };

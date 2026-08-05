@@ -13,7 +13,7 @@ beforeEach(async () => {
     `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
      VALUES ('u1', 'sp1', 'a', 'r', 9999999999999, 1000, 1000)`
   ).run();
-  await env.DB.prepare(`INSERT INTO artists (id, name, genres, source, approved, created_at) VALUES ('already-known', 'Known Artist', '[]', 'seed', 1, 1000)`).run();
+  await env.DB.prepare(`INSERT INTO artists (id, spotify_id, name, genres, source, approved, created_at) VALUES ('already-known', 'already-known', 'Known Artist', '[]', 'seed', 1, 1000)`).run();
 });
 
 describe('refreshCatalogFromProfiles', () => {
@@ -36,7 +36,7 @@ describe('refreshCatalogFromProfiles', () => {
     const result = await refreshCatalogFromProfiles(env as any);
 
     expect(result.artistsAdded).toBe(1);
-    const row = await env.DB.prepare('SELECT * FROM artists WHERE id = ?').bind('new-artist').first<any>();
+    const row = await env.DB.prepare('SELECT * FROM artists WHERE spotify_id = ?').bind('new-artist').first<any>();
     expect(row.source).toBe('spotify_search');
     expect(fetchMock.mock.calls.some((c) => c[0].toString().includes('/v1/artists/already-known'))).toBe(false);
 
@@ -79,10 +79,10 @@ describe('refreshCatalogFromProfiles', () => {
     expect(result.artistsAdded).toBe(1);
     expect(result.failedArtistIds).toEqual(['artist-fail']);
 
-    const okRow = await env.DB.prepare('SELECT * FROM artists WHERE id = ?').bind('artist-ok').first<any>();
+    const okRow = await env.DB.prepare('SELECT * FROM artists WHERE spotify_id = ?').bind('artist-ok').first<any>();
     expect(okRow).not.toBeNull();
 
-    const failedRow = await env.DB.prepare('SELECT * FROM artists WHERE id = ?').bind('artist-fail').first<any>();
+    const failedRow = await env.DB.prepare('SELECT * FROM artists WHERE spotify_id = ?').bind('artist-fail').first<any>();
     expect(failedRow).toBeNull();
 
     vi.unstubAllGlobals();

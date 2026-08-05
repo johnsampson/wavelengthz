@@ -17,6 +17,14 @@
     <h1 class="text-2xl font-bold">Tell us about you</h1>
 
     <label class="flex flex-col gap-1">
+      <span class="field-label">Display name</span>
+      <input class="field" type="text" x-model="displayName" maxlength="50" pattern="[-A-Za-z0-9 ]+" required />
+    </label>
+    <p x-show="error === 'invalid_display_name'" class="text-sm text-red-400" role="alert">
+      Display name can only contain letters, numbers, dashes, and spaces.
+    </p>
+
+    <label class="flex flex-col gap-1">
       <span class="field-label">Bio</span>
       <textarea class="field" x-model="bio" maxlength="500"></textarea>
     </label>
@@ -53,6 +61,40 @@
       </details>
     </div>
 
+    <div class="flex flex-col gap-1">
+      <span class="field-label">Gender</span>
+      <div class="flex gap-2 rounded-full bg-surface2 p-1">
+        <button type="button" class="pill-toggle flex-1" :class="gender === 'male' ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="gender = 'male'">Male</button>
+        <button type="button" class="pill-toggle flex-1" :class="gender === 'female' ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="gender = 'female'">Female</button>
+      </div>
+    </div>
+    <p x-show="error === 'invalid_gender'" class="text-sm text-red-400" role="alert">Please select a gender.</p>
+
+    <div class="flex flex-col gap-1">
+      <span class="field-label">Seeking</span>
+      <div class="flex gap-2 rounded-full bg-surface2 p-1">
+        <button type="button" class="pill-toggle flex-1" :class="seeking === 'male' ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="seeking = 'male'">Male</button>
+        <button type="button" class="pill-toggle flex-1" :class="seeking === 'female' ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="seeking = 'female'">Female</button>
+      </div>
+    </div>
+    <p x-show="error === 'invalid_seeking'" class="text-sm text-red-400" role="alert">Please select who you're seeking.</p>
+
+    <div class="flex flex-col gap-1">
+      <span class="field-label">I'm interested in</span>
+      <div class="flex flex-wrap gap-2">
+        <template x-for="opt in intentOptions" :key="opt.value">
+          <button
+            type="button"
+            class="pill-toggle"
+            :class="intent === opt.value ? 'pill-toggle-active' : 'pill-toggle-inactive'"
+            @click="intent = opt.value"
+            x-text="opt.label"
+          ></button>
+        </template>
+      </div>
+    </div>
+    <p x-show="error === 'invalid_intent'" class="text-sm text-red-400" role="alert">Please select what you're interested in.</p>
+
     <label class="flex flex-col gap-1">
       <span class="field-label">Max distance (km): <span x-text="maxDistanceKm" class="text-neutral-200 normal-case"></span></span>
       <input type="range" min="5" max="200" x-model.number="maxDistanceKm" class="accent-brand-500" />
@@ -60,14 +102,20 @@
 
     <fieldset class="flex flex-col gap-2">
       <legend class="field-label mb-1">Photos (<span x-text="photos.length"></span>/<span x-text="maxPhotos"></span>)</legend>
-      <input
-        type="file"
-        accept="image/jpeg,image/png,image/webp"
-        @change="uploadPhoto($event)"
-        aria-label="Upload a profile photo"
-        class="text-sm"
-        :disabled="photos.length >= maxPhotos"
-      />
+      <label
+        class="btn-secondary inline-flex w-fit cursor-pointer items-center"
+        :class="photos.length >= maxPhotos ? 'pointer-events-none opacity-50' : ''"
+      >
+        Choose file
+        <input
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          @change="uploadPhoto($event)"
+          aria-label="Upload a profile photo"
+          class="sr-only"
+          :disabled="photos.length >= maxPhotos"
+        />
+      </label>
       <p x-show="photoError" x-text="photoError" class="text-sm text-red-400" role="alert"></p>
       <div class="grid grid-cols-4 gap-2">
         <template x-for="photo in photos" :key="photo.photoId">
@@ -88,12 +136,13 @@
   </form>
 
   <script type="module">
-    import { api } from '/app.js';
+    import { api, INTENT_OPTIONS } from '/app.js';
     import { requireAuth } from '/auth.js';
     import { MAX_PHOTOS, uploadPhotoFile } from '/photos.js';
 
     window.onboardingApp = function () {
       return {
+        displayName: '',
         bio: '',
         dateOfBirth: '',
         locationLabel: '',
@@ -103,6 +152,10 @@
         lat: null,
         lng: null,
         maxDistanceKm: 80,
+        gender: '',
+        seeking: '',
+        intent: '',
+        intentOptions: INTENT_OPTIONS,
         photos: [],
         maxPhotos: MAX_PHOTOS,
         error: null,
@@ -164,12 +217,16 @@
           const locationLabel = this.locationLabel === 'Current location' ? this.locationLabel : this.manualLabel;
           try {
             await api.onboard({
+              display_name: this.displayName,
               bio: this.bio,
               date_of_birth: this.dateOfBirth,
               location_label: locationLabel,
               lat,
               lng,
               max_distance_km: this.maxDistanceKm,
+              gender: this.gender,
+              seeking: this.seeking,
+              intent: this.intent,
             });
             window.location.href = '/';
           } catch (e) {
@@ -177,6 +234,14 @@
               this.error = 'underage';
             } else if (e.status === 400 && e.body?.error === 'location_required') {
               this.error = 'location_missing';
+            } else if (e.status === 400 && e.body?.error === 'invalid_display_name') {
+              this.error = 'invalid_display_name';
+            } else if (e.status === 400 && e.body?.error === 'invalid_gender') {
+              this.error = 'invalid_gender';
+            } else if (e.status === 400 && e.body?.error === 'invalid_seeking') {
+              this.error = 'invalid_seeking';
+            } else if (e.status === 400 && e.body?.error === 'invalid_intent') {
+              this.error = 'invalid_intent';
             } else {
               this.error = 'submit_failed';
             }

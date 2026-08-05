@@ -21,6 +21,12 @@
     <button class="pill-toggle flex-1" :class="directionFilter === null ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="setDirectionFilter(null)">All</button>
     <button class="pill-toggle flex-1" :class="directionFilter === 'right' ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="setDirectionFilter('right')">Liked</button>
     <button class="pill-toggle flex-1" :class="directionFilter === 'left' ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="setDirectionFilter('left')">Passed</button>
+    <button
+      x-show="mode === 'people'"
+      class="pill-toggle flex-1"
+      :class="directionFilter === 'blocked' ? 'pill-toggle-active' : 'pill-toggle-inactive'"
+      @click="setDirectionFilter('blocked')"
+    >Blocked</button>
   </div>
 
   <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
@@ -28,17 +34,29 @@
   <ul class="mx-auto flex max-w-md flex-col gap-2">
     <template x-for="swipe in swipes" :key="swipe.id">
       <li class="card flex items-center justify-between p-3">
-        <span x-text="swipe.name || swipe.target_id"></span>
+        <span x-show="swipe.direction === 'blocked'" x-text="swipe.name || swipe.target_id"></span>
+        <a
+          x-show="swipe.direction !== 'blocked'"
+          :href="mode === 'people' ? `/profile?id=${swipe.target_id}` : `/artist?id=${swipe.artist_id}`"
+          class="min-w-0 truncate font-medium text-neutral-100 hover:underline"
+          x-text="swipe.name || swipe.target_id"
+        ></a>
         <span class="flex items-center gap-3">
-          <span :class="swipe.direction === 'right' ? 'text-brand-400' : 'text-neutral-400'" x-text="swipe.direction === 'right' ? '♥ Liked' : '✕ Passed'"></span>
-          <button class="btn-ghost" @click="toggle(swipe)">Change</button>
+          <span
+            x-show="swipe.direction !== 'blocked'"
+            :class="swipe.direction === 'right' ? 'text-brand-400' : 'text-neutral-400'"
+            x-text="swipe.direction === 'right' ? '♥ Liked' : '✕ Passed'"
+          ></span>
+          <span x-show="swipe.direction === 'blocked'" class="text-red-400">🚫 Blocked</span>
+          <button class="btn-ghost" x-show="swipe.direction !== 'blocked'" @click="toggle(swipe)">Change</button>
+          <button class="btn-ghost" x-show="swipe.direction === 'blocked'" @click="unblock(swipe)">Unblock</button>
         </span>
       </li>
     </template>
   </ul>
   <p x-show="swipes.length === 0" class="mx-auto max-w-md text-center text-neutral-400">Nothing here yet.</p>
 
-  <div x-show="swipes.length > 0" class="mx-auto mt-4 flex max-w-md items-center justify-center gap-4">
+  <div x-show="swipes.length > 0 && directionFilter !== 'blocked'" class="mx-auto mt-4 flex max-w-md items-center justify-center gap-4">
     <button class="btn-secondary" :disabled="!hasPrev" @click="prev()">Previous</button>
     <button class="btn-secondary" :disabled="!hasNext" @click="next()">Next</button>
   </div>

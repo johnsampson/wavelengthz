@@ -1,5 +1,7 @@
-import { api } from './app.js';
+import { api, INTENT_OPTIONS } from './app.js';
 import { MAX_PHOTOS, uploadPhotoFile } from './photos.js';
+
+const LOCATION_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Extracted from settings.html's inline script so the round-tripping logic
 // below is directly testable (same pattern as swipe.js). The page just does
@@ -13,8 +15,18 @@ import { MAX_PHOTOS, uploadPhotoFile } from './photos.js';
 export function createSettingsApp() {
   return {
     maxDistanceKm: 80,
+    displayName: '',
     bio: null,
+    userId: null,
     spotifyAvatarUrl: null,
+    gender: '',
+    seeking: '',
+    intent: '',
+    intentOptions: INTENT_OPTIONS,
+    lat: null,
+    lng: null,
+    locationLabel: '',
+    locationUpdatedAt: null,
     photos: [],
     maxPhotos: MAX_PHOTOS,
     photoError: null,
@@ -23,14 +35,32 @@ export function createSettingsApp() {
     saved: false,
     loading: true,
 
+    get locationCooldownRemainingMs() {
+      if (this.locationUpdatedAt == null) return 0;
+      return Math.max(0, LOCATION_COOLDOWN_MS - (Date.now() - this.locationUpdatedAt));
+    },
+
+    get locationCooldownRemainingDays() {
+      return Math.ceil(this.locationCooldownRemainingMs / (24 * 60 * 60 * 1000));
+    },
+
     async init() {
       try {
         const [me, photosRes] = await Promise.all([api.me(), api.myPhotos()]);
         // Never leave the slider on a hardcoded default: saving would then
         // silently overwrite the user's real radius with 80.
         if (me.user.max_distance_km != null) this.maxDistanceKm = me.user.max_distance_km;
+        this.userId = me.user.id;
+        this.displayName = me.user.display_name ?? '';
         this.bio = me.user.bio ?? null;
         this.spotifyAvatarUrl = me.user.spotify_avatar_url ?? null;
+        this.gender = me.user.gender ?? '';
+        this.seeking = me.user.seeking ?? '';
+        this.intent = me.user.intent ?? '';
+        this.lat = me.user.lat;
+        this.lng = me.user.lng;
+        this.locationLabel = me.user.location_label;
+        this.locationUpdatedAt = me.user.location_updated_at;
         this.photos = photosRes.photos;
       } catch (e) {
         if (e.status === 401) {
@@ -43,25 +73,70 @@ export function createSettingsApp() {
       }
     },
 
+    useBrowserLocation() {
+      if (this.locationCooldownRemainingMs > 0) return;
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          this.lat = pos.coords.latitude;
+          this.lng = pos.coords.longitude;
+          this.locationLabel = 'Current location';
+        },
+        () => {
+          this.error = 'Location permission denied.';
+        }
+      );
+    },
+
     async updateDistance() {
       this.error = null;
       this.saved = false;
+      if (!this.displayName.trim()) {
+        this.error = 'Please enter a display name.';
+        return;
+      }
+      if (!/^[-A-Za-z0-9 ]+$/.test(this.displayName.trim())) {
+        this.error = 'Display name can only contain letters, numbers, dashes, and spaces.';
+        return;
+      }
+      if (!this.gender) {
+        this.error = 'Please select a gender.';
+        return;
+      }
+      if (!this.seeking) {
+        this.error = "Please select who you're seeking.";
+        return;
+      }
+      if (!this.intent) {
+        this.error = "Please select what you're interested in.";
+        return;
+      }
       try {
         const me = await api.me();
         await api.onboard({
+          display_name: this.displayName.trim(),
           // bio is re-sent because /api/onboarding unconditionally writes it;
           // omitting it wipes the user's bio to NULL on every settings save.
           bio: me.user.bio ?? null,
           date_of_birth: me.user.date_of_birth,
-          location_label: me.user.location_label,
-          lat: me.user.lat,
-          lng: me.user.lng,
+          location_label: this.locationLabel,
+          lat: this.lat,
+          lng: this.lng,
           max_distance_km: this.maxDistanceKm,
+          gender: this.gender,
+          seeking: this.seeking,
+          intent: this.intent,
         });
+        this.displayName = this.displayName.trim();
         this.bio = me.user.bio ?? null;
         this.saved = true;
       } catch (e) {
-        this.error = 'Could not save your settings. Please try again.';
+        if (e.status === 429 && e.body?.error === 'location_change_cooldown') {
+          this.locationUpdatedAt = Date.now() - LOCATION_COOLDOWN_MS + e.body.retryAfterMs;
+          const days = this.locationCooldownRemainingDays;
+          this.error = `You can only change your location once every 7 days. Try again in ${days} day${days === 1 ? '' : 's'}.`;
+        } else {
+          this.error = 'Could not save your settings. Please try again.';
+        }
       }
     },
 

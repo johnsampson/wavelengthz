@@ -64,18 +64,22 @@ export async function refreshAccessToken(
 
 export async function fetchSpotifyProfile(
   accessToken: string
-): Promise<{ id: string; email?: string; images?: Array<{ url: string }> }> {
+): Promise<{ id: string; email?: string; images?: Array<{ url: string }>; product?: string }> {
   const res = await fetch('https://api.spotify.com/v1/me', {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) throw new Error(`Spotify profile fetch failed: ${res.status} ${await res.text()}`);
+  // `product` is Spotify's own subscription-tier field: "premium" | "free" |
+  // occasionally "open" (a legacy ad-supported tier in some regions,
+  // functionally equivalent to free). Refreshed on every login (not just
+  // once) since it can genuinely change over time as a user upgrades/downgrades.
   return res.json();
 }
 
 export async function fetchTopArtists(
   accessToken: string,
   timeRange: string
-): Promise<Array<{ id: string; name: string; genres: string[]; rank: number }>> {
+): Promise<Array<{ id: string; name: string; genres: string[]; imageUrl: string | null; rank: number }>> {
   const res = await fetch(
     `https://api.spotify.com/v1/me/top/artists?time_range=${timeRange}&limit=50`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
@@ -84,21 +88,32 @@ export async function fetchTopArtists(
   // Spotify's response sometimes omits `genres` entirely for a given artist
   // (not even an empty array) despite the documented shape always including
   // it -- normalize here so every consumer can rely on it being an array.
-  const data = await res.json<{ items: Array<{ id: string; name: string; genres?: string[] }> }>();
-  return data.items.map((item, i) => ({ ...item, genres: item.genres ?? [], rank: i + 1 }));
+  const data = await res.json<{ items: Array<{ id: string; name: string; genres?: string[]; images?: Array<{ url: string }> }> }>();
+  return data.items.map((item, i) => ({
+    id: item.id,
+    name: item.name,
+    genres: item.genres ?? [],
+    imageUrl: item.images?.[0]?.url ?? null,
+    rank: i + 1,
+  }));
 }
 
 export async function fetchTopTracks(
   accessToken: string,
   timeRange: string
-): Promise<Array<{ id: string; name: string; rank: number }>> {
+): Promise<Array<{ id: string; name: string; imageUrl: string | null; rank: number }>> {
   const res = await fetch(
     `https://api.spotify.com/v1/me/top/tracks?time_range=${timeRange}&limit=50`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
   if (!res.ok) throw new Error(`Spotify top tracks fetch failed: ${res.status} ${await res.text()}`);
-  const data = await res.json<{ items: Array<{ id: string; name: string }> }>();
-  return data.items.map((item, i) => ({ ...item, rank: i + 1 }));
+  const data = await res.json<{ items: Array<{ id: string; name: string; album?: { images?: Array<{ url: string }> } }> }>();
+  return data.items.map((item, i) => ({
+    id: item.id,
+    name: item.name,
+    imageUrl: item.album?.images?.[0]?.url ?? null,
+    rank: i + 1,
+  }));
 }
 
 export async function getClientCredentialsToken(env: Env): Promise<string> {

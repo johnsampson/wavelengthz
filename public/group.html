@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wavelengthz — Group</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/tailwind.css" />
+</head>
+<body class="min-h-screen bg-base text-neutral-50 p-4 flex flex-col" x-data="groupApp()" x-init="init()">
+  <div id="wl-header-root"></div>
+
+  <template x-if="group">
+    <div class="mx-auto mb-2 w-full max-w-md">
+      <h1 class="text-xl font-bold" x-text="group.name"></h1>
+      <p x-show="group.topic" class="text-sm text-neutral-400" x-text="group.topic"></p>
+      <p class="text-xs text-neutral-500">
+        <span x-text="group.members.length"></span>/8 members
+      </p>
+      <button type="button" class="btn-ghost mt-1 text-sm text-red-400" @click="leave()">Leave group</button>
+    </div>
+  </template>
+
+  <p x-show="error" x-text="error" class="text-red-400 max-w-md w-full mx-auto mb-2" role="alert"></p>
+
+  <ul id="group-message-list" class="flex-1 flex flex-col gap-2 overflow-y-auto max-w-md w-full mx-auto">
+    <template x-for="message in messages" :key="message.id">
+      <li class="flex flex-col" :class="message.sender_id === myId ? 'items-end' : 'items-start'">
+        <span class="mb-0.5 text-xs text-neutral-500" x-text="message.sender_id === myId ? 'You' : memberName(message.sender_id)"></span>
+        <p
+          x-show="!message.recalledAt"
+          class="card max-w-[80%] px-3 py-2"
+          :class="message.sender_id === myId ? 'bg-brand-500 text-white' : ''"
+          x-text="message.body"
+        ></p>
+        <p x-show="message.recalledAt" class="card max-w-[80%] px-3 py-2 italic text-neutral-500" x-text="message.sender_id === myId ? 'You recalled this message' : 'Message recalled'"></p>
+        <button
+          type="button"
+          class="mt-0.5 text-xs text-neutral-500 underline"
+          x-show="canRecall(message)"
+          @click="recall(message)"
+        >Recall</button>
+      </li>
+    </template>
+  </ul>
+  <p x-show="group && messages.length === 0" class="mx-auto max-w-md text-center text-neutral-400">No messages yet — say hi!</p>
+
+  <form class="mx-auto mt-4 mb-20 flex w-full max-w-md gap-2" @submit.prevent="send()">
+    <label class="sr-only" for="group-message-input">Message</label>
+    <input id="group-message-input" class="field flex-1" x-model="draft" maxlength="2000" required />
+    <button type="submit" class="btn-primary px-5">Send</button>
+  </form>
+
+  <script type="module">
+    import { api } from '/app.js';
+    import { mountHeader, mountNav } from '/nav.js';
+    import { requireAuth } from '/auth.js';
+    mountHeader();
+    mountNav();
+
+    window.groupApp = function () {
+      return {
+        groupId: new URLSearchParams(window.location.search).get('id'),
+        group: null,
+        messages: [],
+        draft: '',
+        error: null,
+        myId: null,
+        pollTimer: null,
+        audioCtx: null,
+        recallWindowMs: 15000,
+        now: Date.now(),
+
+        async init() {
+          const me = await requireAuth();
+          if (!me) return;
+          this.myId = me.id;
+          try {
+            const res = await api.groupDetail(this.groupId);
+            this.group = res.group;
+          } catch (e) {
+            this.error = 'Could not load this group. Please try again.';
+            return;
+          }
+          await this.load();
+          this.scrollToBottom();
+          // Same short-polling approach as public/messages.html -- no
+          // WebSocket/Durable-Object infrastructure in this app. 3s stays
+          // well under the general API rate limit (120 req/min/IP).
+          this.pollTimer = setInterval(() => this.poll(), 3000);
+          const unlockAudio = () => this.ensureAudioContext()?.resume();
+          document.addEventListener('pointerdown', unlockAudio, { once: true });
+          document.addEventListener('keydown', unlockAudio, { once: true });
+        },
+
+        memberName(userId) {
+          const m = this.group?.members.find((m) => m.id === userId);
+          return m?.displayName || 'Someone';
+        },
+
+        async load() {
+          try {
+            const res = await api.groupMessages(this.groupId);
+            this.messages = res.messages;
+          } catch (e) {
+            this.error = 'Could not load messages. Please try again.';
+          }
+        },
+
+        async poll() {
+          if (document.hidden) return;
+          this.now = Date.now(); // re-evaluates canRecall()'s x-show each tick
+          try {
+            const res = await api.groupMessages(this.groupId);
+            const grew = res.messages.length > this.messages.length;
+            // A recall doesn't change the message count -- it flips
+            // recalledAt on an already-known row -- so length alone missed
+            // it entirely for other members (the sender already sees their
+            // own recall optimistically, in recall() below).
+            const recalledChanged = res.messages.some((m) => {
+              const existing = this.messages.find((x) => x.id === m.id);
+              return existing && existing.recalledAt !== m.recalledAt;
+            });
+            if (grew) {
+              const arrived = res.messages.slice(this.messages.length);
+              this.messages = res.messages;
+              this.$nextTick(() => this.scrollToBottom());
+              if (arrived.some((m) => m.sender_id !== this.myId)) this.notifyNewMessage();
+            } else if (recalledChanged || res.messages.length !== this.messages.length) {
+              this.messages = res.messages;
+            }
+          } catch (e) {
+            // Ignore -- the next tick retries.
+          }
+        },
+
+        // Always-on for now -- see public/messages.html's note on this being
+        // a good future notification-settings candidate.
+        notifyNewMessage() {
+          this.playNotificationSound();
+          if (navigator.vibrate) navigator.vibrate(200);
+        },
+
+        ensureAudioContext() {
+          if (!this.audioCtx) {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (AudioCtx) this.audioCtx = new AudioCtx();
+          }
+          return this.audioCtx;
+        },
+
+        playNotificationSound() {
+          const ctx = this.ensureAudioContext();
+          if (!ctx) return;
+          try {
+            if (ctx.state === 'suspended') ctx.resume();
+            const now = ctx.currentTime;
+            [880, 1174.66].forEach((freq, i) => {
+              const oscillator = ctx.createOscillator();
+              const gain = ctx.createGain();
+              oscillator.connect(gain);
+              gain.connect(ctx.destination);
+              oscillator.type = 'sine';
+              oscillator.frequency.value = freq;
+              const start = now + i * 0.12;
+              gain.gain.setValueAtTime(0.001, start);
+              gain.gain.exponentialRampToValueAtTime(0.15, start + 0.02);
+              gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.22);
+              oscillator.start(start);
+              oscillator.stop(start + 0.22);
+            });
+          } catch (e) {
+            // Sound is a nice-to-have -- an autoplay restriction or an
+            // unsupported browser must not break message polling.
+          }
+        },
+
+        scrollToBottom() {
+          const list = document.getElementById('group-message-list');
+          if (list) list.scrollTop = list.scrollHeight;
+        },
+
+        canRecall(message) {
+          return message.sender_id === this.myId && !message.recalledAt && this.now - message.created_at < this.recallWindowMs;
+        },
+
+        async recall(message) {
+          this.error = null;
+          try {
+            await api.recallGroupMessage(this.groupId, message.id);
+            message.recalledAt = Date.now();
+          } catch (e) {
+            this.error = 'Could not recall that message. Please try again.';
+          }
+        },
+
+        async send() {
+          const trimmed = this.draft.trim();
+          if (!trimmed) return;
+          this.error = null;
+          // Cheap client-side charset pre-check -- see public/messages.html
+          // for why the profanity blocklist can't mirror here too.
+          if (!/^[-A-Za-z0-9 .,!?']*$/.test(trimmed)) {
+            this.error = "Messages can only contain letters, numbers, spaces, and basic punctuation ( . , ! ? ' ).";
+            return;
+          }
+          try {
+            await api.sendGroupMessage(this.groupId, trimmed);
+            this.draft = '';
+            this.now = Date.now();
+            await this.load();
+            this.$nextTick(() => this.scrollToBottom());
+          } catch (e) {
+            if (e.status === 400 && e.body?.error === 'invalid_message') {
+              this.error = "That message isn't allowed. Please rephrase it.";
+            } else {
+              this.error = 'Could not send that message. Please try again.';
+            }
+          }
+        },
+
+        async leave() {
+          this.error = null;
+          try {
+            await api.leaveGroup(this.groupId);
+            window.location.href = '/groups';
+          } catch (e) {
+            this.error = 'Could not leave the group. Please try again.';
+          }
+        },
+      };
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <div id="wl-nav-root"></div>
+</body>
+</html>

@@ -152,15 +152,162 @@ describe('POST /api/onboarding', () => {
     const req = new Request('http://localhost/api/onboarding', {
       method: 'POST',
       headers: { Cookie: cookie, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bio: 'hi', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, max_distance_km: 40 }),
+      body: JSON.stringify({
+        display_name: 'Jordan',
+        bio: 'hi',
+        date_of_birth: '1995-01-01',
+        location_label: 'Austin, TX',
+        lat: 30.27,
+        lng: -97.74,
+        max_distance_km: 40,
+        gender: 'female',
+        seeking: 'male',
+        intent: 'dating_around',
+      }),
     });
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     expect(res.status).toBe(200);
     const row = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind('u1').first<any>();
     expect(row.onboarded_at).not.toBeNull();
     expect(row.age_verified_at).not.toBeNull();
+    expect(row.display_name).toBe('Jordan');
     expect(row.bio).toBe('hi');
     expect(row.max_distance_km).toBe(40);
+    expect(row.gender).toBe('female');
+    expect(row.seeking).toBe('male');
+    expect(row.intent).toBe('dating_around');
+    // First-time onboarding is not a "location change" -- the cooldown clock
+    // doesn't start until a later call actually changes lat/lng.
+    expect(row.location_updated_at).toBeNull();
+  });
+
+  it('rejects and writes nothing when gender is missing or invalid', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const post = (gender: unknown) =>
+      worker.fetch(
+        new Request('http://localhost/api/onboarding', {
+          method: 'POST',
+          headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender, seeking: 'male', intent: 'dating_around' }),
+        }),
+        env,
+        {} as ExecutionContext
+      );
+
+    for (const bad of [undefined, '', 'nonbinary', 'Male']) {
+      const res = await post(bad);
+      expect(res.status).toBe(400);
+      const body = await res.json<any>();
+      expect(body.error).toBe('invalid_gender');
+    }
+    const row = await env.DB.prepare('SELECT onboarded_at FROM users WHERE id = ?').bind('u1').first<any>();
+    expect(row.onboarded_at).toBeNull();
+  });
+
+  it('rejects and writes nothing when seeking is missing or invalid', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const req = new Request('http://localhost/api/onboarding', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'everyone', intent: 'dating_around' }),
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_seeking');
+  });
+
+  it('rejects and writes nothing when intent is missing or invalid', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const req = new Request('http://localhost/api/onboarding', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'female', intent: 'married' }),
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_intent');
+  });
+
+  describe('location change cooldown', () => {
+    const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+    const completePayload = (overrides: Record<string, unknown>) => ({
+      display_name: 'Jordan',
+      date_of_birth: '1995-01-01',
+      location_label: 'Austin, TX',
+      gender: 'male',
+      seeking: 'female',
+      intent: 'dating_around',
+      lat: 30.27,
+      lng: -97.74,
+      ...overrides,
+    });
+    const post = (cookie: string, payload: Record<string, unknown>) =>
+      worker.fetch(
+        new Request('http://localhost/api/onboarding', {
+          method: 'POST',
+          headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }),
+        env,
+        {} as ExecutionContext
+      );
+
+    it('allows changing location on the very next call after first onboarding (no cooldown yet)', async () => {
+      const cookie = await sessionCookieFor('u1');
+      await post(cookie, completePayload({}));
+
+      const res = await post(cookie, completePayload({ lat: 40.71, lng: -74.0 }));
+      expect(res.status).toBe(200);
+
+      const row = await env.DB.prepare('SELECT lat, lng, location_updated_at FROM users WHERE id = ?').bind('u1').first<any>();
+      expect(row.lat).toBe(40.71);
+      expect(row.lng).toBe(-74.0);
+      expect(row.location_updated_at).not.toBeNull();
+    });
+
+    it('rejects a second location change within 7 days of the first', async () => {
+      const cookie = await sessionCookieFor('u1');
+      await post(cookie, completePayload({}));
+      await post(cookie, completePayload({ lat: 40.71, lng: -74.0 }));
+
+      const res = await post(cookie, completePayload({ lat: 41.88, lng: -87.63 }));
+      expect(res.status).toBe(429);
+      const body = await res.json<any>();
+      expect(body.error).toBe('location_change_cooldown');
+      expect(body.retryAfterMs).toBeGreaterThan(0);
+
+      const row = await env.DB.prepare('SELECT lat, lng FROM users WHERE id = ?').bind('u1').first<any>();
+      expect(row.lat).toBe(40.71); // unchanged
+    });
+
+    it('allows a location change once 7 days have passed', async () => {
+      const cookie = await sessionCookieFor('u1');
+      await post(cookie, completePayload({}));
+      await post(cookie, completePayload({ lat: 40.71, lng: -74.0 }));
+      await env.DB.prepare('UPDATE users SET location_updated_at = ? WHERE id = ?')
+        .bind(Date.now() - COOLDOWN_MS - 1000, 'u1')
+        .run();
+
+      const res = await post(cookie, completePayload({ lat: 41.88, lng: -87.63 }));
+      expect(res.status).toBe(200);
+      const row = await env.DB.prepare('SELECT lat, lng FROM users WHERE id = ?').bind('u1').first<any>();
+      expect(row.lat).toBe(41.88);
+    });
+
+    it('does not trigger the cooldown when re-submitting the same lat/lng (settings re-save path)', async () => {
+      const cookie = await sessionCookieFor('u1');
+      await post(cookie, completePayload({}));
+      await post(cookie, completePayload({ lat: 40.71, lng: -74.0 }));
+
+      // Re-saving settings without touching location re-sends the same lat/lng
+      // (public/settings.js's fetch-then-resubmit pattern) -- must not count
+      // as a "change" or every unrelated settings save would start a 7-day
+      // lockout.
+      const res = await post(cookie, completePayload({ lat: 40.71, lng: -74.0, max_distance_km: 60 }));
+      expect(res.status).toBe(200);
+    });
   });
 
   it('preserves an existing bio on a second call that re-sends it (settings re-save path)', async () => {
@@ -181,9 +328,9 @@ describe('POST /api/onboarding', () => {
         {} as ExecutionContext
       );
 
-    await post({ bio: 'loud guitars', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, max_distance_km: 25 });
+    await post({ display_name: 'Jordan', bio: 'loud guitars', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, max_distance_km: 25, gender: 'male', seeking: 'female', intent: 'dating_around' });
 
-    const resaved = await post({ bio: 'loud guitars', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, max_distance_km: 50 });
+    const resaved = await post({ display_name: 'Jordan', bio: 'loud guitars', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, max_distance_km: 50, gender: 'male', seeking: 'female', intent: 'dating_around' });
     expect(resaved.status).toBe(200);
 
     const row = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind('u1').first<any>();
@@ -204,10 +351,106 @@ describe('POST /api/onboarding', () => {
         {} as ExecutionContext
       );
 
-    await post({ bio: 'loud guitars', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74 });
-    await post({ date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, max_distance_km: 50 });
+    await post({ display_name: 'Jordan', bio: 'loud guitars', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'female', intent: 'dating_around' });
+    await post({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, max_distance_km: 50, gender: 'male', seeking: 'female', intent: 'dating_around' });
 
     const row = await env.DB.prepare('SELECT bio FROM users WHERE id = ?').bind('u1').first<any>();
     expect(row.bio).toBeNull();
+  });
+
+  it('rejects and writes nothing when display_name is missing', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const req = new Request('http://localhost/api/onboarding', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74 }),
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_display_name');
+    const row = await env.DB.prepare('SELECT onboarded_at, display_name FROM users WHERE id = ?').bind('u1').first<any>();
+    expect(row.onboarded_at).toBeNull();
+    expect(row.display_name).toBeNull();
+  });
+
+  it('rejects a whitespace-only display_name', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const req = new Request('http://localhost/api/onboarding', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_name: '   ', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74 }),
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_display_name');
+  });
+
+  it('rejects a display_name containing characters outside letters/numbers/dashes/spaces', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const req = new Request('http://localhost/api/onboarding', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_name: 'Jordan!!', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74 }),
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_display_name');
+  });
+
+  it('rejects and writes nothing when bio exceeds the max length', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const req = new Request('http://localhost/api/onboarding', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_name: 'Jordan', bio: 'a'.repeat(501), date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74 }),
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_bio');
+    const row = await env.DB.prepare('SELECT onboarded_at FROM users WHERE id = ?').bind('u1').first<any>();
+    expect(row.onboarded_at).toBeNull();
+  });
+
+  it('rejects a non-string bio', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const req = new Request('http://localhost/api/onboarding', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_name: 'Jordan', bio: 12345, date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74 }),
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_bio');
+  });
+
+  it('accepts a display_name with letters, numbers, dashes, and spaces', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const req = new Request('http://localhost/api/onboarding', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_name: 'Jordan-Lee 2', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'female', intent: 'dating_around' }),
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    const row = await env.DB.prepare('SELECT display_name FROM users WHERE id = ?').bind('u1').first<any>();
+    expect(row.display_name).toBe('Jordan-Lee 2');
+  });
+
+  it('trims the display name before saving', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const req = new Request('http://localhost/api/onboarding', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_name: '  Jordan  ', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'female', intent: 'dating_around' }),
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    const row = await env.DB.prepare('SELECT display_name FROM users WHERE id = ?').bind('u1').first<any>();
+    expect(row.display_name).toBe('Jordan');
   });
 });

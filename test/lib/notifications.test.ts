@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
-import { notifyMatch, notifyMessage } from '../../src/lib/notifications';
+import { notifyMatch, notifyMessage, sendDelayedMatchNotificationEmails, MATCH_NOTIFICATION_DELAY_MS } from '../../src/lib/notifications';
 
 beforeAll(async () => {
   await applySchema(env.DB);
@@ -51,6 +51,65 @@ describe('notifyMatch', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     const n1 = await env.DB.prepare('SELECT email_sent_at FROM notifications WHERE id = ?').bind('n1').first<any>();
     expect(n1.email_sent_at).toBeNull();
+
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('sendDelayedMatchNotificationEmails', () => {
+  // beforeEach already seeds match 'm1' (u1<->u2) with 'match' notifications
+  // n1 (u1, has an email) and n2 (u2, no email) both at created_at: 1000.
+  const AFTER_DELAY = 1000 + MATCH_NOTIFICATION_DELAY_MS + 1;
+  const BEFORE_DELAY = 1000 + 60 * 1000; // 1 minute later -- well inside the window
+
+  it('sends the email once the 15-minute delay has elapsed', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendDelayedMatchNotificationEmails({ DB: env.DB, RESEND_API_KEY: 'k', RESEND_FROM_ADDRESS: 'f@x.com' } as any, AFTER_DELAY);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1); // only u1 has an email on file
+    const n1 = await env.DB.prepare('SELECT email_sent_at FROM notifications WHERE id = ?').bind('n1').first<any>();
+    expect(n1.email_sent_at).not.toBeNull();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('does not send before the 15-minute delay has elapsed', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendDelayedMatchNotificationEmails({ DB: env.DB, RESEND_API_KEY: 'k', RESEND_FROM_ADDRESS: 'f@x.com' } as any, BEFORE_DELAY);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    const n1 = await env.DB.prepare('SELECT email_sent_at FROM notifications WHERE id = ?').bind('n1').first<any>();
+    expect(n1.email_sent_at).toBeNull();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('skips a match that was unmatched within the window -- the "cancel before it ships" case', async () => {
+    await env.DB.prepare('UPDATE matches SET unmatched_at = ? WHERE id = ?').bind(1500, 'm1').run();
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendDelayedMatchNotificationEmails({ DB: env.DB, RESEND_API_KEY: 'k', RESEND_FROM_ADDRESS: 'f@x.com' } as any, AFTER_DELAY);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    const n1 = await env.DB.prepare('SELECT email_sent_at FROM notifications WHERE id = ?').bind('n1').first<any>();
+    expect(n1.email_sent_at).toBeNull();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('does not re-send once the email has already been sent', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendDelayedMatchNotificationEmails({ DB: env.DB, RESEND_API_KEY: 'k', RESEND_FROM_ADDRESS: 'f@x.com' } as any, AFTER_DELAY);
+    await sendDelayedMatchNotificationEmails({ DB: env.DB, RESEND_API_KEY: 'k', RESEND_FROM_ADDRESS: 'f@x.com' } as any, AFTER_DELAY + 1000);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1); // not twice
 
     vi.unstubAllGlobals();
   });

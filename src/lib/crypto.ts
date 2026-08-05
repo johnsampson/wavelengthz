@@ -1,3 +1,19 @@
+import { timingSafeEqual } from 'node:crypto';
+
+// A plain `===` comparison on a secret short-circuits at the first
+// mismatched byte, so how long the comparison takes leaks information about
+// how many leading characters matched -- exploitable to guess a secret
+// byte-by-byte given enough attempts. timingSafeEqual always compares every
+// byte. The length check first is a smaller, standard, accepted leak (secret
+// length) rather than content -- timingSafeEqual itself throws on mismatched
+// lengths rather than comparing.
+export function constantTimeEqual(a: string, b: string): boolean {
+  const bufA = new TextEncoder().encode(a);
+  const bufB = new TextEncoder().encode(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
 function b64ToBytes(b64: string): Uint8Array {
   return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 }

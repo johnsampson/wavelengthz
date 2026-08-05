@@ -11,8 +11,10 @@ import { registerMatchRoutes } from './routes/matches';
 import { registerNotificationRoutes } from './routes/notifications';
 import { registerSafetyRoutes } from './routes/safety';
 import { registerAccountRoutes } from './routes/account';
+import { registerGroupRoutes } from './routes/groups';
 import { purgeExpiredDeletions } from './lib/accountDeletion';
 import { refreshCatalogFromProfiles } from './db/catalogRefresh';
+import { sendDelayedMatchNotificationEmails } from './lib/notifications';
 import { checkRateLimit } from './lib/rateLimit';
 import { reportError } from './lib/sentry';
 
@@ -30,6 +32,7 @@ registerMatchRoutes(router);
 registerNotificationRoutes(router);
 registerSafetyRoutes(router);
 registerAccountRoutes(router);
+registerGroupRoutes(router);
 
 router.all('*', () => new Response('Not found', { status: 404 }));
 
@@ -45,6 +48,49 @@ const SWIPE_LIMIT = { limit: 30, windowSeconds: 60 };
 // cutting the ceiling on scripted mass account creation by 6x.
 const CALLBACK_LIMIT = { limit: 20, windowSeconds: 60 };
 
+// Static HTML/JS/CSS under public/ is served directly by the Assets binding
+// and never reaches this fetch() handler at all (no run_worker_first), so
+// these headers only cover Worker-generated responses (API routes,
+// /login, /photos/:id, etc). The static pages get the *same* headers via
+// public/_headers instead -- Cloudflare's documented mechanism for exactly
+// this split (see the Workers Static Assets docs: "_headers" is applied to
+// static-asset responses and explicitly does NOT cover Worker responses,
+// which is why this second copy exists here rather than relying on one or
+// the other alone).
+function withSecurityHeaders(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set(
+    // 'unsafe-eval' is required by Alpine.js's default (non-CSP) build: every
+    // x-data/x-show/@click/etc. directive expression is evaluated via
+    // `new Function(...)` under the hood, which CSP treats identically to
+    // `eval()`. Without it, EVERY page using Alpine breaks outright ("Alpine
+    // Expression Error: ... violates ... 'unsafe-eval'"), not just one --
+    // this was caught live on the match page but affects the whole app.
+    // Rewriting every page's directives against Alpine's CSP-safe build is a
+    // real option later, but out of scope for this pass.
+    'Content-Security-Policy',
+    // connect-src is 'self' only: no app code calls fetch() against the CDN/
+    // fonts/image hosts directly (they're only ever loaded via native
+    // <script src>/<link>/<img> tags, governed by script-src/style-src/
+    // img-src respectively). public/sw.js previously re-issued ALL requests
+    // -- including cross-origin ones -- via its own fetch(), which forced
+    // connect-src to list every such host too (a moving target: jsdelivr,
+    // then googleapis/gstatic, then scdn.co for artist images). Fixed at the
+    // root in the service worker instead (cross-origin requests are no
+    // longer intercepted at all), so connect-src can stay minimal.
+    //
+    // frame-src allows Spotify's own track embed (public/artist.html) --
+    // Spotify stopped returning preview_url for tracks, so playback now goes
+    // through https://open.spotify.com/embed/track/{id} instead of an
+    // <audio> tag.
+    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https://*.scdn.co data:; connect-src 'self'; frame-src https://open.spotify.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+  );
+  headers.set('X-Frame-Options', 'DENY');
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 export default {
   fetch: async (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> => {
     const url = new URL(request.url);
@@ -58,20 +104,20 @@ export default {
 
       if (url.pathname.startsWith('/api/swipe/')) {
         const swipeAllowed = await checkRateLimit(env.RATE_LIMIT_KV, `swipe:${ip}`, SWIPE_LIMIT.limit, SWIPE_LIMIT.windowSeconds);
-        if (!swipeAllowed) return Response.json({ error: 'rate_limited' }, { status: 429 });
+        if (!swipeAllowed) return withSecurityHeaders(Response.json({ error: 'rate_limited' }, { status: 429 }));
       }
 
       if (url.pathname === '/callback') {
         const callbackAllowed = await checkRateLimit(env.RATE_LIMIT_KV, `callback:${ip}`, CALLBACK_LIMIT.limit, CALLBACK_LIMIT.windowSeconds);
-        if (!callbackAllowed) return Response.json({ error: 'rate_limited' }, { status: 429 });
+        if (!callbackAllowed) return withSecurityHeaders(Response.json({ error: 'rate_limited' }, { status: 429 }));
       }
 
       if (url.pathname.startsWith('/api/')) {
         const generallyAllowed = await checkRateLimit(env.RATE_LIMIT_KV, `general:${ip}`, GENERAL_LIMIT.limit, GENERAL_LIMIT.windowSeconds);
-        if (!generallyAllowed) return Response.json({ error: 'rate_limited' }, { status: 429 });
+        if (!generallyAllowed) return withSecurityHeaders(Response.json({ error: 'rate_limited' }, { status: 429 }));
       }
 
-      return await router.fetch(request, env, ctx);
+      return withSecurityHeaders(await router.fetch(request, env, ctx));
     } catch (error) {
       // Always log locally first -- reportError only reaches Sentry, which
       // in local dev is typically an unmonitored placeholder DSN. Without
@@ -91,7 +137,7 @@ export default {
       } else {
         await reportError(env, error, { path: url.pathname });
       }
-      return new Response('Internal Server Error', { status: 500 });
+      return withSecurityHeaders(new Response('Internal Server Error', { status: 500 }));
     }
   },
   scheduled: async (event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> => {
@@ -106,6 +152,12 @@ export default {
         refreshCatalogFromProfiles(env)
           .then(() => undefined)
           .catch(report('scheduled:refreshCatalogFromProfiles'))
+      );
+    } else if (event.cron === '*/5 * * * *') {
+      ctx.waitUntil(
+        sendDelayedMatchNotificationEmails(env, Date.now())
+          .then(() => undefined)
+          .catch(report('scheduled:sendDelayedMatchNotificationEmails'))
       );
     } else {
       ctx.waitUntil(

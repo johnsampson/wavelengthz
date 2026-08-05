@@ -8,9 +8,14 @@ export interface UserRow {
   location_label: string | null;
   lat: number | null;
   lng: number | null;
+  location_updated_at: number | null;
   max_distance_km: number;
+  gender: string | null;
+  seeking: string | null;
+  intent: string | null;
   email: string | null;
   spotify_avatar_url: string | null;
+  spotify_product: string | null;
   access_token: string;
   refresh_token: string;
   token_expires_at: number;
@@ -22,13 +27,25 @@ export interface UserRow {
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
-export function sessionCookieHeader(id: string, maxAgeSeconds: number): string {
-  return `wl_session=${id}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAgeSeconds}`;
+// Safari (unlike Chromium) enforces `Secure` literally -- it refuses to store
+// or send the cookie back over plain HTTP even for localhost/127.0.0.1. Local
+// dev runs wrangler over http://127.0.0.1, so a hardcoded `Secure` silently
+// drops every auth cookie in Safari: the state cookie on /login, the session
+// cookie on /callback, and the clear-cookie on /logout. Every caller derives
+// `secure` from the live request's protocol (requestIsSecure below) so this
+// self-corrects once deployed behind real HTTPS.
+export function sessionCookieHeader(id: string, maxAgeSeconds: number, secure: boolean = true): string {
+  return `wl_session=${id}; Path=/; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Lax; Max-Age=${maxAgeSeconds}`;
+}
+
+export function requestIsSecure(request: Request): boolean {
+  return new URL(request.url).protocol === 'https:';
 }
 
 export async function createSession(
   db: D1Database,
-  userId: string
+  userId: string,
+  secure: boolean = true
 ): Promise<{ id: string; cookie: string }> {
   const id = crypto.randomUUID();
   const now = Date.now();
@@ -37,7 +54,7 @@ export async function createSession(
     .prepare(`INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)`)
     .bind(id, userId, now, expiresAt)
     .run();
-  return { id, cookie: sessionCookieHeader(id, SESSION_TTL_SECONDS) };
+  return { id, cookie: sessionCookieHeader(id, SESSION_TTL_SECONDS, secure) };
 }
 
 function parseCookie(request: Request, name: string): string | null {

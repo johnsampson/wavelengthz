@@ -25,6 +25,18 @@ describe('session', () => {
     expect(cookie).toContain('SameSite=Lax');
   });
 
+  it('omits Secure when told the request was not over https', async () => {
+    // Safari (unlike Chromium) refuses to store a `Secure` cookie over plain
+    // HTTP even for localhost/127.0.0.1, so local dev over http://127.0.0.1
+    // needs the attribute dropped or the cookie silently never gets set --
+    // which is indistinguishable from the browser just not sending it back.
+    const { cookie } = await createSession(env.DB, 'u1', false);
+    expect(cookie).toContain('wl_session=');
+    expect(cookie).not.toContain('Secure');
+    expect(cookie).toContain('HttpOnly');
+    expect(cookie).toContain('SameSite=Lax');
+  });
+
   it('resolves the user from a request carrying the session cookie', async () => {
     const { id } = await createSession(env.DB, 'u1');
     const req = new Request('http://localhost/api/me', {

@@ -1,21 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { NAV_ITEMS, getActiveTab, getNavItemsWithActive, renderNavHtml } from '../../public/nav.js';
+import { NAV_ITEMS, getActiveTab, getNavItemsWithActive, renderNavHtml, renderHeaderHtml } from '../../public/nav.js';
 
 describe('NAV_ITEMS', () => {
-  it('has exactly the four top-level destinations', () => {
-    expect(NAV_ITEMS.map((i) => i.href)).toEqual(['/', '/history', '/matches', '/settings']);
+  it('has exactly the five top-level destinations', () => {
+    expect(NAV_ITEMS.map((i) => i.href)).toEqual(['/', '/history', '/matches', '/groups', '/settings']);
   });
 });
 
 describe('getActiveTab', () => {
-  it('matches each of the four tabs by exact path', () => {
+  it('matches each of the five tabs by exact path', () => {
     expect(getActiveTab('/')).toBe('/');
     expect(getActiveTab('/history')).toBe('/history');
     expect(getActiveTab('/matches')).toBe('/matches');
+    expect(getActiveTab('/groups')).toBe('/groups');
     expect(getActiveTab('/settings')).toBe('/settings');
   });
 
-  it('returns null for a page that is not one of the four tabs', () => {
+  it('returns null for a page that is not one of the five tabs', () => {
     expect(getActiveTab('/messages')).toBeNull();
     expect(getActiveTab('/onboarding')).toBeNull();
   });
@@ -52,5 +53,27 @@ describe('renderNavHtml', () => {
       expect(html).toContain(item.label);
     }
     expect(html).not.toContain('.html');
+  });
+});
+
+describe('renderHeaderHtml', () => {
+  it('always links the bell to /notifications', () => {
+    expect(renderHeaderHtml(0)).toContain('href="/notifications"');
+  });
+
+  it('shows no unread badge when the count is zero', () => {
+    const html = renderHeaderHtml(0);
+    expect(html).not.toContain('data-unread-badge');
+  });
+
+  it('shows the unread count when greater than zero', () => {
+    const html = renderHeaderHtml(3);
+    expect(html).toContain('data-unread-badge');
+    expect(html).toContain('>3<');
+  });
+
+  it('caps the displayed badge at 9+', () => {
+    const html = renderHeaderHtml(15);
+    expect(html).toContain('>9+<');
   });
 });

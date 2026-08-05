@@ -18,7 +18,9 @@
     <div class="mx-auto flex max-w-md flex-col gap-6">
       <div class="grid grid-cols-2 gap-2">
         <template x-for="(url, i) in profile.photoUrls" :key="url">
-          <img :src="url" alt="" class="aspect-square w-full rounded-2xl object-cover" :class="i === 0 ? 'col-span-2 aspect-[4/3]' : ''" />
+          <button type="button" @click="openLightbox(i)" class="contents">
+            <img :src="url" alt="" class="aspect-square w-full rounded-2xl object-cover" :class="i === 0 ? 'col-span-2 aspect-[4/3]' : ''" />
+          </button>
         </template>
         <p x-show="profile.photoUrls.length === 0" class="card col-span-2 flex aspect-[4/3] items-center justify-center text-neutral-500">
           No photos yet
@@ -26,28 +28,34 @@
       </div>
 
       <div>
+        <p x-show="profile.isSelf" class="mb-1 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Your Profile</p>
         <h1 class="text-2xl font-bold" x-text="profile.displayName || 'Wavelengthz user'"></h1>
         <p class="text-neutral-400" x-text="profile.distanceLabel"></p>
         <p class="mt-2 text-neutral-200" x-text="profile.bio"></p>
-        <div class="mt-2 flex gap-2">
+        <div class="mt-2 flex gap-2" x-show="!profile.isSelf">
           <span x-show="profile.isMatch" class="pill-toggle pill-toggle-active">Matched</span>
           <span x-show="profile.likedYou && !profile.isMatch" class="pill-toggle pill-toggle-inactive text-brand-400">Likes you</span>
         </div>
+        <a
+          x-show="profile.isMatch"
+          :href="`/messages?matchId=${profile.matchId}`"
+          class="btn-primary mt-3 block w-full text-center"
+        >Send a Message</a>
       </div>
 
-      <section x-show="overlap.sharedGenres.length > 0" class="card p-4">
-        <h2 class="mb-3 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Shared genres</h2>
+      <section x-show="profile.topGenres.length > 0" class="card p-4">
+        <h2 class="mb-3 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Top genres on Spotify</h2>
         <div class="flex flex-wrap gap-2">
-          <template x-for="g in overlap.sharedGenres" :key="g.genre">
-            <span class="pill-toggle pill-toggle-inactive" x-text="g.genre"></span>
+          <template x-for="g in profile.topGenres" :key="g">
+            <span class="pill-toggle pill-toggle-inactive" x-text="g"></span>
           </template>
         </div>
       </section>
 
-      <section x-show="overlap.sharedArtists.length > 0" class="card p-4">
-        <h2 class="mb-3 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Artists you both like</h2>
+      <section x-show="profile.topArtists.length > 0" class="card p-4">
+        <h2 class="mb-3 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Top artists on Spotify</h2>
         <div class="grid grid-cols-3 gap-3">
-          <template x-for="a in overlap.sharedArtists" :key="a.id">
+          <template x-for="a in profile.topArtists" :key="a.id">
             <div class="flex flex-col items-center gap-1 text-center">
               <img :src="a.imageUrl" :alt="a.name" class="h-16 w-16 rounded-full object-cover" />
               <span class="text-xs text-neutral-300" x-text="a.name"></span>
@@ -56,29 +64,212 @@
         </div>
       </section>
 
-      <section x-show="overlap.sharedTracks.length > 0" class="card p-4">
-        <h2 class="mb-3 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Tracks you both like</h2>
+      <section x-show="profile.topTracks.length > 0" class="card p-4">
+        <h2 class="mb-3 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Top tracks on Spotify</h2>
         <ul class="flex flex-col gap-2">
-          <template x-for="t in overlap.sharedTracks" :key="t.id">
-            <li class="flex items-center gap-3">
-              <img :src="t.imageUrl" :alt="t.name" class="h-10 w-10 rounded object-cover" />
-              <div class="min-w-0">
-                <p class="truncate text-sm text-neutral-100" x-text="t.name"></p>
-                <p class="truncate text-xs text-neutral-500" x-text="t.artistName"></p>
+          <template x-for="t in profile.topTracks" :key="t.id">
+            <li class="flex flex-col gap-2">
+              <div class="flex items-center gap-3">
+                <img :src="t.imageUrl" :alt="t.name" class="h-10 w-10 rounded object-cover" />
+                <p class="min-w-0 flex-1 truncate text-sm text-neutral-100" x-text="t.name"></p>
+                <button
+                  type="button"
+                  class="btn-ghost h-8 w-8 shrink-0 rounded-full"
+                  @click="togglePlayer(t)"
+                  :aria-label="openTrackId === t.id ? 'Hide player' : 'Show player'"
+                >
+                  <svg x-show="openTrackId !== t.id" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                  <svg x-show="openTrackId === t.id" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
+                    <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
+                  </svg>
+                </button>
               </div>
+              <template x-if="openTrackId === t.id">
+                <iframe
+                  :src="`https://open.spotify.com/embed/track/${t.spotifyId}?theme=0`"
+                  width="100%"
+                  height="80"
+                  frameborder="0"
+                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                  loading="lazy"
+                  class="rounded-xl"
+                ></iframe>
+              </template>
             </li>
           </template>
         </ul>
       </section>
 
-      <p
-        x-show="overlap.sharedGenres.length === 0 && overlap.sharedArtists.length === 0 && overlap.sharedTracks.length === 0"
-        class="text-center text-neutral-400"
-      >
-        No shared music activity yet.
-      </p>
+      <template x-if="!profile.isSelf">
+        <div class="flex flex-col gap-6">
+          <section x-show="overlap.sharedGenres.length > 0" class="card p-4">
+            <h2 class="mb-3 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Shared genres</h2>
+            <div class="flex flex-wrap gap-2">
+              <template x-for="g in overlap.sharedGenres" :key="g.genre">
+                <span class="pill-toggle pill-toggle-inactive" x-text="g.genre"></span>
+              </template>
+            </div>
+          </section>
+
+          <section x-show="overlap.sharedArtists.length > 0" class="card p-4">
+            <h2 class="mb-3 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Artists you both like</h2>
+            <div class="grid grid-cols-3 gap-3">
+              <template x-for="a in overlap.sharedArtists.slice(0, visibleArtistsCount)" :key="a.id">
+                <div class="flex flex-col items-center gap-1 text-center">
+                  <img :src="a.imageUrl" :alt="a.name" class="h-16 w-16 rounded-full object-cover" />
+                  <span class="text-xs text-neutral-300" x-text="a.name"></span>
+                </div>
+              </template>
+            </div>
+            <button
+              type="button"
+              class="btn-ghost mt-3 w-full text-sm"
+              x-show="overlap.sharedArtists.length > visibleArtistsCount"
+              @click="visibleArtistsCount += PAGE_SIZE"
+            >Show more</button>
+          </section>
+
+          <section x-show="overlap.sharedTracks.length > 0" class="card p-4">
+            <h2 class="mb-3 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Songs you both like</h2>
+            <ul class="flex flex-col gap-2">
+              <template x-for="t in overlap.sharedTracks.slice(0, visibleTracksCount)" :key="t.id">
+                <li class="flex flex-col gap-2">
+                  <div class="flex items-center gap-3">
+                    <img :src="t.imageUrl" :alt="t.name" class="h-10 w-10 rounded object-cover" />
+                    <div class="min-w-0 flex-1">
+                      <p class="truncate text-sm text-neutral-100" x-text="t.name"></p>
+                      <p class="truncate text-xs text-neutral-500" x-text="t.artistName"></p>
+                    </div>
+                    <button
+                      type="button"
+                      class="btn-ghost h-8 w-8 shrink-0 rounded-full"
+                      @click="togglePlayer(t)"
+                      :aria-label="openTrackId === t.id ? 'Hide player' : 'Show player'"
+                    >
+                      <svg x-show="openTrackId !== t.id" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                      <svg x-show="openTrackId === t.id" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
+                        <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
+                      </svg>
+                    </button>
+                  </div>
+                  <template x-if="openTrackId === t.id">
+                    <iframe
+                      :src="`https://open.spotify.com/embed/track/${t.spotifyId}?theme=0`"
+                      width="100%"
+                      height="80"
+                      frameborder="0"
+                      allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                      loading="lazy"
+                      class="rounded-xl"
+                    ></iframe>
+                  </template>
+                </li>
+              </template>
+            </ul>
+            <button
+              type="button"
+              class="btn-ghost mt-3 w-full text-sm"
+              x-show="overlap.sharedTracks.length > visibleTracksCount"
+              @click="visibleTracksCount += PAGE_SIZE"
+            >Show more</button>
+          </section>
+
+          <p
+            x-show="overlap.sharedGenres.length === 0 && overlap.sharedArtists.length === 0 && overlap.sharedTracks.length === 0"
+            class="text-center text-neutral-400"
+          >
+            No shared music activity yet.
+          </p>
+        </div>
+      </template>
+
+      <template x-if="profile.isSelf">
+        <div class="flex flex-col gap-6">
+          <section x-show="profile.recentArtists.length > 0" class="card p-4">
+            <h2 class="mb-3 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Your recent artists</h2>
+            <div class="grid grid-cols-3 gap-3">
+              <template x-for="a in profile.recentArtists" :key="a.id">
+                <div class="flex flex-col items-center gap-1 text-center">
+                  <img :src="a.imageUrl" :alt="a.name" class="h-16 w-16 rounded-full object-cover" />
+                  <span class="text-xs text-neutral-300" x-text="a.name"></span>
+                </div>
+              </template>
+            </div>
+          </section>
+
+          <section x-show="profile.recentTracks.length > 0" class="card p-4">
+            <h2 class="mb-3 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Your recent songs</h2>
+            <ul class="flex flex-col gap-2">
+              <template x-for="t in profile.recentTracks" :key="t.id">
+                <li class="flex flex-col gap-2">
+                  <div class="flex items-center gap-3">
+                    <img :src="t.imageUrl" :alt="t.name" class="h-10 w-10 rounded object-cover" />
+                    <p class="min-w-0 flex-1 truncate text-sm text-neutral-100" x-text="t.name"></p>
+                    <button
+                      type="button"
+                      class="btn-ghost h-8 w-8 shrink-0 rounded-full"
+                      @click="togglePlayer(t)"
+                      :aria-label="openTrackId === t.id ? 'Hide player' : 'Show player'"
+                    >
+                      <svg x-show="openTrackId !== t.id" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                      <svg x-show="openTrackId === t.id" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
+                        <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
+                      </svg>
+                    </button>
+                  </div>
+                  <template x-if="openTrackId === t.id">
+                    <iframe
+                      :src="`https://open.spotify.com/embed/track/${t.spotifyId}?theme=0`"
+                      width="100%"
+                      height="80"
+                      frameborder="0"
+                      allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                      loading="lazy"
+                      class="rounded-xl"
+                    ></iframe>
+                  </template>
+                </li>
+              </template>
+            </ul>
+          </section>
+        </div>
+      </template>
     </div>
   </template>
+
+  <div
+    x-show="lightboxIndex !== null"
+    class="fixed inset-0 z-30 flex items-center justify-center bg-black/90 p-4"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Photo viewer"
+    @click="closeLightbox()"
+  >
+    <template x-if="lightboxIndex !== null">
+      <img :src="profile.photoUrls[lightboxIndex]" alt="" class="max-h-full max-w-full rounded-lg object-contain" @click.stop />
+    </template>
+    <button type="button" class="btn-ghost absolute top-4 right-4 text-white" @click="closeLightbox()" aria-label="Close">✕</button>
+    <button
+      type="button"
+      class="btn-ghost absolute left-4 text-white"
+      x-show="profile.photoUrls.length > 1"
+      @click.stop="prevPhoto()"
+      aria-label="Previous photo"
+    >‹</button>
+    <button
+      type="button"
+      class="btn-ghost absolute right-4 text-white"
+      x-show="profile.photoUrls.length > 1"
+      @click.stop="nextPhoto()"
+      aria-label="Next photo"
+    >›</button>
+  </div>
 
   <script type="module">
     import { api } from '/app.js';
@@ -87,12 +278,21 @@
     mountHeader();
     mountNav();
 
+    const PAGE_SIZE = 6;
+
     window.profileApp = function () {
       return {
         userId: new URLSearchParams(window.location.search).get('id'),
         profile: null,
         overlap: { sharedArtists: [], sharedTracks: [], sharedGenres: [] },
         error: null,
+        PAGE_SIZE,
+        visibleArtistsCount: PAGE_SIZE,
+        visibleTracksCount: PAGE_SIZE,
+        lightboxIndex: null,
+        // Shared across all three track lists on this page (top/shared/recent)
+        // -- only one embedded player open at a time, same as public/artist.html.
+        openTrackId: null,
 
         async init() {
           if (!(await requireAuth())) return;
@@ -103,6 +303,26 @@
           } catch (e) {
             this.error = 'Could not load this profile. Please try again.';
           }
+        },
+
+        togglePlayer(track) {
+          this.openTrackId = this.openTrackId === track.id ? null : track.id;
+        },
+
+        openLightbox(i) {
+          this.lightboxIndex = i;
+        },
+
+        closeLightbox() {
+          this.lightboxIndex = null;
+        },
+
+        nextPhoto() {
+          this.lightboxIndex = (this.lightboxIndex + 1) % this.profile.photoUrls.length;
+        },
+
+        prevPhoto() {
+          this.lightboxIndex = (this.lightboxIndex - 1 + this.profile.photoUrls.length) % this.profile.photoUrls.length;
         },
       };
     };

@@ -60,6 +60,25 @@ describe('history page pagination', () => {
     expect(calls.some((c) => c.includes(`offset=${PAGE_SIZE}`))).toBe(true);
   });
 
+  it('scrolls to the top when navigating to the next or previous page', async () => {
+    stubSwipeHistoryPages({
+      'people:0': page(PAGE_SIZE, 0),
+      [`people:${PAGE_SIZE}`]: page(4, PAGE_SIZE),
+    });
+    const scrollTo = vi.fn();
+    vi.stubGlobal('window', { scrollTo });
+    const app = createHistoryApp();
+    await app.load();
+
+    await app.next();
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+
+    await app.prev();
+    expect(scrollTo).toHaveBeenCalledTimes(2);
+
+    vi.unstubAllGlobals();
+  });
+
   it('prev() steps back by PAGE_SIZE and never goes below 0', async () => {
     stubSwipeHistoryPages({
       'people:0': page(PAGE_SIZE, 0),
@@ -149,5 +168,77 @@ describe('history page direction filter', () => {
 
     expect(app.directionFilter).toBeNull();
     expect(app.swipes).toHaveLength(5);
+  });
+});
+
+describe('history page blocked view', () => {
+  function stubBlocks(blocks: Array<{ userId: string; displayName: string | null }>) {
+    const calls: Array<{ path: string; options: any }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (path: string, options: any = {}) => {
+        calls.push({ path, options });
+        if (path === '/api/blocks') return new Response(JSON.stringify({ blocks }), { status: 200 });
+        if (path.match(/^\/api\/blocks\/.+\/unblock$/)) return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        throw new Error(`unexpected ${path}`);
+      })
+    );
+    return calls;
+  }
+
+  it('loads blocked users instead of swipe history when the filter is "blocked"', async () => {
+    stubBlocks([{ userId: 'u2', displayName: 'Blocked User' }]);
+    const app = createHistoryApp();
+
+    await app.setDirectionFilter('blocked');
+
+    expect(app.swipes).toEqual([{ id: 'u2', name: 'Blocked User', direction: 'blocked' }]);
+    expect(app.hasNext).toBe(false);
+  });
+
+  it('unblock() calls the API and removes the row from the list', async () => {
+    stubBlocks([
+      { userId: 'u2', displayName: 'Blocked User' },
+      { userId: 'u3', displayName: 'Another Blocked User' },
+    ]);
+    const app = createHistoryApp();
+    await app.setDirectionFilter('blocked');
+
+    await app.unblock(app.swipes[0]);
+
+    expect(app.swipes.map((s: any) => s.id)).toEqual(['u3']);
+  });
+
+  it('surfaces an error and keeps the row when unblock fails', async () => {
+    const calls = stubBlocks([{ userId: 'u2', displayName: 'Blocked User' }]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (path: string) => {
+        calls.push({ path, options: {} });
+        if (path === '/api/blocks') return new Response(JSON.stringify({ blocks: [{ userId: 'u2', displayName: 'Blocked User' }] }), { status: 200 });
+        return new Response('nope', { status: 500 });
+      })
+    );
+    const app = createHistoryApp();
+    await app.setDirectionFilter('blocked');
+
+    await app.unblock(app.swipes[0]);
+
+    expect(app.error).toBeTruthy();
+    expect(app.swipes).toHaveLength(1);
+  });
+
+  it('resets the blocked filter back to null when switching to music mode', async () => {
+    stubBlocks([{ userId: 'u2', displayName: 'Blocked User' }]);
+    const app = createHistoryApp();
+    await app.setDirectionFilter('blocked');
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (path: string) => new Response(JSON.stringify({ swipes: [] }), { status: 200 }))
+    );
+    await app.setMode('music');
+
+    expect(app.directionFilter).toBeNull();
   });
 });
