@@ -17,6 +17,7 @@ import { refreshCatalogFromProfiles } from './db/catalogRefresh';
 import { sendDelayedMatchNotificationEmails } from './lib/notifications';
 import { checkRateLimit } from './lib/rateLimit';
 import { reportError } from './lib/sentry';
+import { constantTimeEqual } from './lib/crypto';
 
 export const router = Router();
 
@@ -34,7 +35,14 @@ registerSafetyRoutes(router);
 registerAccountRoutes(router);
 registerGroupRoutes(router);
 
-router.all('*', () => new Response('Not found', { status: 404 }));
+// Falls back to the ASSETS binding (static HTML/JS/CSS under public/) for
+// anything that isn't an API route -- required once [assets].run_worker_first
+// routes every request through this Worker first, rather than letting
+// Cloudflare serve static assets before the Worker ever runs. `env.ASSETS`
+// is only undefined in the test harness (no such binding is configured
+// there), where the plain 404 this used to always return is exactly what
+// existing tests already expect.
+router.all('*', (request: Request, env: Env) => (env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found', { status: 404 })));
 
 const GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -91,8 +99,29 @@ function withSecurityHeaders(response: Response): Response {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
+// Pre-launch site-wide password gate -- a no-op unless both
+// SITE_BASIC_AUTH_USER/PASSWORD are set (see src/env.d.ts). Checked first,
+// before rate limiting/routing/anything else, and ahead of ASSETS too (once
+// [assets].run_worker_first is on, every request -- API and static alike --
+// reaches this handler), so nothing about the app is reachable without it.
+function checkSiteBasicAuth(request: Request, env: Env): Response | null {
+  if (!env.SITE_BASIC_AUTH_USER || !env.SITE_BASIC_AUTH_PASSWORD) return null;
+
+  const expected = 'Basic ' + btoa(`${env.SITE_BASIC_AUTH_USER}:${env.SITE_BASIC_AUTH_PASSWORD}`);
+  const provided = request.headers.get('Authorization') ?? '';
+  if (constantTimeEqual(provided, expected)) return null;
+
+  return new Response('Authentication required', {
+    status: 401,
+    headers: { 'WWW-Authenticate': 'Basic realm="Wavelengthz (pre-launch)"' },
+  });
+}
+
 export default {
   fetch: async (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> => {
+    const authResponse = checkSiteBasicAuth(request, env);
+    if (authResponse) return authResponse;
+
     const url = new URL(request.url);
 
     // The rate-limit checks live *inside* this try. They talk to KV, so a KV
@@ -147,7 +176,7 @@ export default {
     // (e.g. the initial SELECT) that it can't.
     const report = (path: string) => (error: unknown) => reportError(env, error, { path });
 
-    if (event.cron === '0 4 * * 0') {
+    if (event.cron === '0 4 * * sun') {
       ctx.waitUntil(
         refreshCatalogFromProfiles(env)
           .then(() => undefined)

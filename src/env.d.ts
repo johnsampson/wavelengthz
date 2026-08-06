@@ -25,6 +25,13 @@ interface Env {
   RESEND_API_KEY: string;
   RESEND_FROM_ADDRESS: string;
   SENTRY_DSN: string;
+  // Optional pre-launch site-wide password gate (src/index.ts) -- unset
+  // (the normal case once real users are live) means the gate is a no-op.
+  // Set both via `wrangler secret put` to lock the whole site (API routes
+  // and static pages alike, via [assets] run_worker_first) behind a single
+  // shared Basic Auth prompt.
+  SITE_BASIC_AUTH_USER?: string;
+  SITE_BASIC_AUTH_PASSWORD?: string;
 }
 
 // `cloudflare:test`'s `env` export is typed as `Cloudflare.Env` (a separate
@@ -44,5 +51,7 @@ declare namespace Cloudflare {
     RESEND_API_KEY: string;
     RESEND_FROM_ADDRESS: string;
     SENTRY_DSN: string;
+    SITE_BASIC_AUTH_USER?: string;
+    SITE_BASIC_AUTH_PASSWORD?: string;
   }
 }

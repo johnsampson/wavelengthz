@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
+import { getMatchNotificationDelayMs } from '../../src/lib/notifications';
 import worker from '../../src/index';
 
 beforeAll(async () => {
@@ -66,16 +67,18 @@ describe('GET /api/matches', () => {
     expect(body.matches.length).toBe(0);
   });
 
-  it('hides a match less than 15 minutes old -- passive discovery only, per MATCH_NOTIFICATION_DELAY_MS', async () => {
-    await env.DB.prepare('UPDATE matches SET created_at = ? WHERE id = ?').bind(Date.now() - 60 * 1000, 'm1').run(); // 1 minute ago
+  it('hides a match less than the delay old -- passive discovery only, per getMatchNotificationDelayMs', async () => {
+    const delayMs = getMatchNotificationDelayMs(env);
+    await env.DB.prepare('UPDATE matches SET created_at = ? WHERE id = ?').bind(Date.now() - (delayMs - 60 * 1000), 'm1').run(); // 1 minute inside the window
     const cookie = await cookieFor('u1');
     const res = await worker.fetch(new Request('http://localhost/api/matches', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
     const body = await res.json<any>();
     expect(body.matches.length).toBe(0);
   });
 
-  it('includes a match once 15 minutes have passed', async () => {
-    await env.DB.prepare('UPDATE matches SET created_at = ? WHERE id = ?').bind(Date.now() - 16 * 60 * 1000, 'm1').run();
+  it('includes a match once the delay has passed', async () => {
+    const delayMs = getMatchNotificationDelayMs(env);
+    await env.DB.prepare('UPDATE matches SET created_at = ? WHERE id = ?').bind(Date.now() - (delayMs + 60 * 1000), 'm1').run(); // 1 minute past the window
     const cookie = await cookieFor('u1');
     const res = await worker.fetch(new Request('http://localhost/api/matches', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
     const body = await res.json<any>();

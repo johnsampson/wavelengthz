@@ -6,7 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "wavelengthz-db"
-database_id = "REPLACE_WITH_REAL_ID_AFTER_wrangler_d1_create"
+database_id = "2cceb37f-f22e-44ee-a015-b14b062ebc4e"
 
 [[r2_buckets]]
 binding = "PHOTOS"
@@ -14,19 +14,33 @@ bucket_name = "wavelengthz-photos"
 
 [[kv_namespaces]]
 binding = "RATE_LIMIT_KV"
-id = "REPLACE_WITH_REAL_ID_AFTER_wrangler_kv_namespace_create"
+id = "9234707e75a842fbafb19e20911148d4"
 
 [assets]
 directory = "./public"
 binding = "ASSETS"
+# Routes every request (static assets included) through this Worker's fetch
+# handler first, rather than Cloudflare serving public/ directly -- required
+# for the pre-launch password gate in src/index.ts to actually cover the
+# whole site instead of only /api/* routes.
+run_worker_first = true
 
 [vars]
 SPOTIFY_REDIRECT_URI = "http://127.0.0.1:8787/callback"
+# How long a new match stays hidden from passive-discovery surfaces (Matches
+# list, profile isMatch badge, notification bell/email) -- src/lib/
+# notifications.ts's getMatchNotificationDelayMs(). Minutes, not ms, for a
+# human-editable config value.
+MATCH_NOTIFICATION_DELAY_MINUTES = "5"
 
 [triggers]
-# "0 3 * * *": nightly purgeExpiredDeletions. "0 4 * * 0": weekly catalog refresh.
-# "*/5 * * * *": sweeps deferred match-notification emails (MATCH_NOTIFICATION_DELAY_MS).
-crons = ["0 3 * * *", "0 4 * * 0", "*/5 * * * *"]
+# "0 3 * * *": nightly purgeExpiredDeletions. "0 4 * * sun": weekly catalog
+# refresh -- Cloudflare's day-of-week is 1=Sunday..7=Saturday, NOT the usual
+# 0=Sunday..6=Saturday, so the numeric form (e.g. "0") is a different day
+# than it looks and can even be rejected outright as out of range; the
+# 3-letter name Cloudflare itself recommends sidesteps the whole ambiguity.
+# "*/5 * * * *": sweeps deferred match-notification emails (MATCH_NOTIFICATION_DELAY_MINUTES above).
+crons = ["0 3 * * *", "0 4 * * sun", "*/5 * * * *"]
 
 [env.test]
 [[env.test.d1_databases]]
@@ -44,6 +58,7 @@ id = "test-kv-id"
 
 [env.test.vars]
 SPOTIFY_REDIRECT_URI = "http://127.0.0.1:8787/callback"
+MATCH_NOTIFICATION_DELAY_MINUTES = "5"
 SPOTIFY_CLIENT_ID = "test-client-id"
 SPOTIFY_CLIENT_SECRET = "test-client-secret"
 TOKEN_ENCRYPTION_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="

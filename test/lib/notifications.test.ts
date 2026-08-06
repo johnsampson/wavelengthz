@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
-import { notifyMatch, notifyMessage, sendDelayedMatchNotificationEmails, MATCH_NOTIFICATION_DELAY_MS } from '../../src/lib/notifications';
+import { notifyMatch, notifyMessage, sendDelayedMatchNotificationEmails, getMatchNotificationDelayMs } from '../../src/lib/notifications';
 
 beforeAll(async () => {
   await applySchema(env.DB);
@@ -59,10 +59,15 @@ describe('notifyMatch', () => {
 describe('sendDelayedMatchNotificationEmails', () => {
   // beforeEach already seeds match 'm1' (u1<->u2) with 'match' notifications
   // n1 (u1, has an email) and n2 (u2, no email) both at created_at: 1000.
-  const AFTER_DELAY = 1000 + MATCH_NOTIFICATION_DELAY_MS + 1;
+  // The fake env below (no MATCH_NOTIFICATION_DELAY_MINUTES) matches exactly
+  // what sendDelayedMatchNotificationEmails is actually called with further
+  // down, so this resolves to whatever the default fallback is regardless of
+  // its value.
+  const DELAY_MS = getMatchNotificationDelayMs({} as any);
+  const AFTER_DELAY = 1000 + DELAY_MS + 1;
   const BEFORE_DELAY = 1000 + 60 * 1000; // 1 minute later -- well inside the window
 
-  it('sends the email once the 15-minute delay has elapsed', async () => {
+  it('sends the email once the delay has elapsed', async () => {
     const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -75,7 +80,7 @@ describe('sendDelayedMatchNotificationEmails', () => {
     vi.unstubAllGlobals();
   });
 
-  it('does not send before the 15-minute delay has elapsed', async () => {
+  it('does not send before the delay has elapsed', async () => {
     const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 

@@ -1,14 +1,25 @@
 import { sendEmail } from './email';
 
 // A match is only surfaced -- bell badge, /notifications list, and the email
-// below -- 15 minutes after it's created, so the person who just matched has
+// below -- some delay after it's created, so the person who just matched has
 // a window to hit "unmatch" (POST /api/matches/:id/unmatch) before the other
 // side ever finds out. This does NOT delay the actor's own "It's a match!"
 // celebration in the deck -- that's driven directly by the swipe response,
 // not this table, so it still fires instantly for whoever completed the
 // match. Also used by src/routes/notifications.ts to gate GET
 // /api/notifications the same way.
-export const MATCH_NOTIFICATION_DELAY_MS = 15 * 60 * 1000;
+//
+// Configurable via MATCH_NOTIFICATION_DELAY_MINUTES (wrangler.toml's [vars]),
+// in minutes rather than ms for a human-editable config value; defaults to 5
+// if it's ever unset. Takes `env` rather than being a plain constant so it
+// can vary per environment without a code change.
+const DEFAULT_MATCH_NOTIFICATION_DELAY_MINUTES = 5;
+
+export function getMatchNotificationDelayMs(env: Env): number {
+  const minutes = Number(env.MATCH_NOTIFICATION_DELAY_MINUTES ?? DEFAULT_MATCH_NOTIFICATION_DELAY_MINUTES);
+  const safeMinutes = Number.isFinite(minutes) && minutes >= 0 ? minutes : DEFAULT_MATCH_NOTIFICATION_DELAY_MINUTES;
+  return safeMinutes * 60 * 1000;
+}
 
 export async function notifyMatch(db: D1Database, env: Env, matchId: string): Promise<void> {
   // `u.deleted_at IS NULL`: a soft-deleted account stays in the users table
@@ -63,16 +74,17 @@ export async function notifyMessage(db: D1Database, env: Env, messageId: string,
 
 /**
  * Cron sweep (src/index.ts's scheduled()): sends the deferred match-notification
- * emails for every match old enough that the 15-minute cancellation window has
- * passed, skipping any match that was unmatched in the meantime -- that's the
- * "cancel before it ships" behavior MATCH_NOTIFICATION_DELAY_MS exists for.
- * Per-match failures are isolated (same reasoning as purgeExpiredDeletions):
- * this runs from ctx.waitUntil, where a thrown error is swallowed with no
- * trace, so one bad match must not block the rest of the batch.
+ * emails for every match old enough that the cancellation window (see
+ * getMatchNotificationDelayMs) has passed, skipping any match that was
+ * unmatched in the meantime -- that's the "cancel before it ships" behavior
+ * the delay exists for. Per-match failures are isolated (same reasoning as
+ * purgeExpiredDeletions): this runs from ctx.waitUntil, where a thrown error
+ * is swallowed with no trace, so one bad match must not block the rest of
+ * the batch.
  */
 export async function sendDelayedMatchNotificationEmails(env: Env, nowMs: number): Promise<void> {
   const db = env.DB;
-  const cutoff = nowMs - MATCH_NOTIFICATION_DELAY_MS;
+  const cutoff = nowMs - getMatchNotificationDelayMs(env);
 
   // Joined to users and filtered on u.email IS NOT NULL: a recipient with no
   // email on file never gets their notification row stamped (notifyMatch

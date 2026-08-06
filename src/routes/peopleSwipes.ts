@@ -7,7 +7,7 @@ import { bucketedDistanceLabel, haversineKm } from '../lib/scoring';
 import { isBlockedEitherDirection } from '../lib/blocks';
 import { computeMusicOverlap, MusicOverlap } from '../lib/musicOverlap';
 import { getDisplayMusicProfile } from '../lib/profile';
-import { MATCH_NOTIFICATION_DELAY_MS } from '../lib/notifications';
+import { getMatchNotificationDelayMs } from '../lib/notifications';
 
 // Hard cap on the like-priority queue. It previously had no LIMIT at all, so a
 // popular account's deck request grew without bound.
@@ -259,7 +259,7 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
         .bind(targetId, me.id)
         .first();
 
-      // Passive discovery only, per MATCH_NOTIFICATION_DELAY_MS (see
+      // Passive discovery only, per getMatchNotificationDelayMs (see
       // GET /api/matches for the fuller reasoning) -- a match younger than
       // the delay simply isn't found here, so this profile badge stays
       // "not matched" until it ages past the window. Whoever already knows
@@ -270,7 +270,7 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
           `SELECT id FROM matches WHERE unmatched_at IS NULL AND created_at <= ? AND
            ((user_a_id = ? AND user_b_id = ?) OR (user_a_id = ? AND user_b_id = ?))`
         )
-        .bind(Date.now() - MATCH_NOTIFICATION_DELAY_MS, me.id, targetId, targetId, me.id)
+        .bind(Date.now() - getMatchNotificationDelayMs(env), me.id, targetId, targetId, me.id)
         .first<{ id: string }>();
 
       likedYou = !!likedYouRow;
@@ -350,9 +350,9 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
        ON CONFLICT(swiper_id, target_id) DO UPDATE SET direction = excluded.direction, match_score = excluded.match_score, updated_at = excluded.updated_at`
     ).bind(crypto.randomUUID(), me.id, target_id, direction, score, now, now).run();
 
-    // Match-notification emails are NOT sent here -- they're deferred 15
-    // minutes (src/lib/notifications.ts's MATCH_NOTIFICATION_DELAY_MS, swept
-    // by the scheduled() cron) so the person who just matched has a window to
+    // Match-notification emails are NOT sent here -- they're deferred
+    // (src/lib/notifications.ts's getMatchNotificationDelayMs, swept by the
+    // scheduled() cron) so the person who just matched has a window to
     // unmatch before the other side is ever emailed or sees a bell badge.
     // createMatchIfMutual already inserted both participants' notification
     // rows; only the immediate email send is skipped here.

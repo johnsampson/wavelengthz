@@ -1,6 +1,6 @@
 import type { RouterType, IRequest } from 'itty-router';
 import { getSessionUser } from '../lib/session';
-import { MATCH_NOTIFICATION_DELAY_MS } from '../lib/notifications';
+import { getMatchNotificationDelayMs } from '../lib/notifications';
 
 export function registerNotificationRoutes(router: RouterType) {
   router.get('/api/notifications', async (request: Request, env: Env) => {
@@ -12,7 +12,7 @@ export function registerNotificationRoutes(router: RouterType) {
     // already is one; for 'message', related_id is a messages.id and the
     // match it belongs to has to be looked up via that message.
     //
-    // 'match' rows younger than MATCH_NOTIFICATION_DELAY_MS are excluded
+    // 'match' rows younger than getMatchNotificationDelayMs are excluded
     // entirely (bell badge included, since it's driven by this same query) --
     // see src/lib/notifications.ts for why.
     //
@@ -35,7 +35,7 @@ export function registerNotificationRoutes(router: RouterType) {
              AND m.unmatched_at IS NOT NULL
          )
        ORDER BY n.created_at DESC`
-    ).bind(user.id, Date.now() - MATCH_NOTIFICATION_DELAY_MS).all<any>();
+    ).bind(user.id, Date.now() - getMatchNotificationDelayMs(env)).all<any>();
 
     return Response.json({
       notifications: rows.results.map((r) => ({

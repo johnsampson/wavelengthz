@@ -25,7 +25,9 @@
 // /group's own pre-check). v17 fixes recall not showing up for the other
 // participant's poll -- it only refreshed on a message-count change, and a
 // recall doesn't change the count, just flips recalledAt on an existing row.
-const CACHE_NAME = 'wavelengthz-shell-v17';
+// v18 replaces /profile's photo grid with a single-image carousel (prev/next
+// arrows + a shared index with the full-screen lightbox).
+const CACHE_NAME = 'wavelengthz-shell-v18';
 const APP_SHELL = [
   '/',
   '/app.js',

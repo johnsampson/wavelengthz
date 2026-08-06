@@ -1,6 +1,6 @@
 import type { RouterType, IRequest } from 'itty-router';
 import { getSessionUser } from '../lib/session';
-import { notifyMessage, MATCH_NOTIFICATION_DELAY_MS } from '../lib/notifications';
+import { notifyMessage, getMatchNotificationDelayMs } from '../lib/notifications';
 import { canRecall } from '../lib/messageRecall';
 import { computeMusicOverlap } from '../lib/musicOverlap';
 import { isValidMessageBody } from '../lib/messageFilter';
@@ -29,7 +29,7 @@ export function registerMatchRoutes(router: RouterType) {
 
     // Passive discovery only: this list (and the isMatch badge on
     // GET /api/people/:id/profile) is exactly the "before anything happens"
-    // window MATCH_NOTIFICATION_DELAY_MS exists for -- someone who
+    // window getMatchNotificationDelayMs exists for -- someone who
     // deliberately already knows the matchId (from the celebration modal, or
     // a message link) can still open the match detail/message it right away;
     // see src/lib/notifications.ts.
@@ -43,7 +43,7 @@ export function registerMatchRoutes(router: RouterType) {
          AND ua.deleted_at IS NULL AND ub.deleted_at IS NULL
          AND m.created_at <= ?
        ORDER BY m.created_at DESC`
-    ).bind(user.id, user.id, Date.now() - MATCH_NOTIFICATION_DELAY_MS).all<any>();
+    ).bind(user.id, user.id, Date.now() - getMatchNotificationDelayMs(env)).all<any>();
 
     const matches = rows.results.map((m) => ({
       id: m.id,

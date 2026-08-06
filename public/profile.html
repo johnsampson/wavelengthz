@@ -16,16 +16,36 @@
 
   <template x-if="profile">
     <div class="mx-auto flex max-w-md flex-col gap-6">
-      <div class="grid grid-cols-2 gap-2">
-        <template x-for="(url, i) in profile.photoUrls" :key="url">
-          <button type="button" @click="openLightbox(i)" class="contents">
-            <img :src="url" alt="" class="aspect-square w-full rounded-2xl object-cover" :class="i === 0 ? 'col-span-2 aspect-[4/3]' : ''" />
-          </button>
-        </template>
-        <p x-show="profile.photoUrls.length === 0" class="card col-span-2 flex aspect-[4/3] items-center justify-center text-neutral-500">
-          No photos yet
-        </p>
+      <div class="relative" x-show="profile.photoUrls.length > 0">
+        <img
+          :src="profile.photoUrls[carouselIndex]"
+          alt=""
+          class="aspect-[4/3] w-full cursor-pointer rounded-2xl object-cover"
+          @click="openLightbox()"
+        />
+        <button
+          type="button"
+          class="btn-ghost absolute left-2 top-1/2 -translate-y-1/2 text-white"
+          x-show="profile.photoUrls.length > 1"
+          @click.stop="prevPhoto()"
+          aria-label="Previous photo"
+        >‹</button>
+        <button
+          type="button"
+          class="btn-ghost absolute right-2 top-1/2 -translate-y-1/2 text-white"
+          x-show="profile.photoUrls.length > 1"
+          @click.stop="nextPhoto()"
+          aria-label="Next photo"
+        >›</button>
+        <p
+          x-show="profile.photoUrls.length > 1"
+          class="absolute bottom-2 right-2 rounded-full bg-black/60 px-2 py-0.5 text-xs text-white"
+          x-text="`${carouselIndex + 1} / ${profile.photoUrls.length}`"
+        ></p>
       </div>
+      <p x-show="profile.photoUrls.length === 0" class="card flex aspect-[4/3] items-center justify-center text-neutral-500">
+        No photos yet
+      </p>
 
       <div>
         <p x-show="profile.isSelf" class="mb-1 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Your Profile</p>
@@ -244,15 +264,15 @@
   </template>
 
   <div
-    x-show="lightboxIndex !== null"
+    x-show="lightboxOpen"
     class="fixed inset-0 z-30 flex items-center justify-center bg-black/90 p-4"
     role="dialog"
     aria-modal="true"
     aria-label="Photo viewer"
     @click="closeLightbox()"
   >
-    <template x-if="lightboxIndex !== null">
-      <img :src="profile.photoUrls[lightboxIndex]" alt="" class="max-h-full max-w-full rounded-lg object-contain" @click.stop />
+    <template x-if="lightboxOpen">
+      <img :src="profile.photoUrls[carouselIndex]" alt="" class="max-h-full max-w-full rounded-lg object-contain" @click.stop />
     </template>
     <button type="button" class="btn-ghost absolute top-4 right-4 text-white" @click="closeLightbox()" aria-label="Close">✕</button>
     <button
@@ -289,7 +309,11 @@
         PAGE_SIZE,
         visibleArtistsCount: PAGE_SIZE,
         visibleTracksCount: PAGE_SIZE,
-        lightboxIndex: null,
+        // Shared by the inline carousel and the full-screen lightbox -- both
+        // just show profile.photoUrls[carouselIndex], so paging through one
+        // keeps the other in sync whichever gets opened.
+        carouselIndex: 0,
+        lightboxOpen: false,
         // Shared across all three track lists on this page (top/shared/recent)
         // -- only one embedded player open at a time, same as public/artist.html.
         openTrackId: null,
@@ -309,20 +333,20 @@
           this.openTrackId = this.openTrackId === track.id ? null : track.id;
         },
 
-        openLightbox(i) {
-          this.lightboxIndex = i;
+        openLightbox() {
+          this.lightboxOpen = true;
         },
 
         closeLightbox() {
-          this.lightboxIndex = null;
+          this.lightboxOpen = false;
         },
 
         nextPhoto() {
-          this.lightboxIndex = (this.lightboxIndex + 1) % this.profile.photoUrls.length;
+          this.carouselIndex = (this.carouselIndex + 1) % this.profile.photoUrls.length;
         },
 
         prevPhoto() {
-          this.lightboxIndex = (this.lightboxIndex - 1 + this.profile.photoUrls.length) % this.profile.photoUrls.length;
+          this.carouselIndex = (this.carouselIndex - 1 + this.profile.photoUrls.length) % this.profile.photoUrls.length;
         },
       };
     };

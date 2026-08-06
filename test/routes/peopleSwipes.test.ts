@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
+import { getMatchNotificationDelayMs } from '../../src/lib/notifications';
 import worker from '../../src/index';
 
 beforeAll(async () => {
@@ -368,10 +369,10 @@ describe('POST /api/swipe/people', () => {
 
 describe('match creation defers the transactional email', () => {
   // Match-notification emails are no longer sent synchronously on match
-  // creation -- they're deferred 15 minutes (src/lib/notifications.ts's
-  // MATCH_NOTIFICATION_DELAY_MS, swept by the scheduled() cron) so the person
-  // who just matched has a window to unmatch before anyone is emailed. See
-  // test/lib/notifications.test.ts for the sweep's own behavior.
+  // creation -- they're deferred (src/lib/notifications.ts's
+  // getMatchNotificationDelayMs, swept by the scheduled() cron) so the
+  // person who just matched has a window to unmatch before anyone is
+  // emailed. See test/lib/notifications.test.ts for the sweep's own behavior.
   it('creates notification rows but does not call the Resend API immediately', async () => {
     await makeUserWithEmail('e1', 'e1@example.com');
     await makeUserWithEmail('e2', 'e2@example.com');
@@ -646,9 +647,10 @@ describe('GET /api/people/:id/profile', () => {
     expect(body.profile.matchId).toBe('m1');
   });
 
-  it('hides isMatch/matchId for a match less than 15 minutes old -- passive discovery only', async () => {
+  it('hides isMatch/matchId for a match less than the delay old -- passive discovery only', async () => {
     const [a, b] = ['u1', 'u2'].sort();
-    await env.DB.prepare(`INSERT INTO matches (id, user_a_id, user_b_id, created_at) VALUES ('m1', ?, ?, ?)`).bind(a, b, Date.now() - 60 * 1000).run();
+    const delayMs = getMatchNotificationDelayMs(env);
+    await env.DB.prepare(`INSERT INTO matches (id, user_a_id, user_b_id, created_at) VALUES ('m1', ?, ?, ?)`).bind(a, b, Date.now() - (delayMs - 60 * 1000)).run();
     const cookie = await cookieFor('u1');
 
     const res = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
@@ -657,9 +659,10 @@ describe('GET /api/people/:id/profile', () => {
     expect(body.profile.matchId).toBeNull();
   });
 
-  it('reveals isMatch/matchId once 15 minutes have passed', async () => {
+  it('reveals isMatch/matchId once the delay has passed', async () => {
     const [a, b] = ['u1', 'u2'].sort();
-    await env.DB.prepare(`INSERT INTO matches (id, user_a_id, user_b_id, created_at) VALUES ('m1', ?, ?, ?)`).bind(a, b, Date.now() - 16 * 60 * 1000).run();
+    const delayMs = getMatchNotificationDelayMs(env);
+    await env.DB.prepare(`INSERT INTO matches (id, user_a_id, user_b_id, created_at) VALUES ('m1', ?, ?, ?)`).bind(a, b, Date.now() - (delayMs + 60 * 1000)).run();
     const cookie = await cookieFor('u1');
 
     const res = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
