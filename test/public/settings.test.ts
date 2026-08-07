@@ -372,4 +372,69 @@ describe('settings page', () => {
     expect(app.error).toBeTruthy();
     vi.unstubAllGlobals();
   });
+
+  it('loads the real age range instead of leaving the hardcoded 18-100 default', async () => {
+    stubApi({ ...ONBOARDED_USER, age_min: 25, age_max: 40 });
+    const app = createSettingsApp();
+    expect(app.ageMin).toBe(18); // placeholder before init
+    expect(app.ageMax).toBe(100);
+
+    await app.init();
+
+    expect(app.ageMin).toBe(25);
+    expect(app.ageMax).toBe(40);
+    vi.unstubAllGlobals();
+  });
+
+  it('round-trips a changed age range on save', async () => {
+    const api = stubApi(ONBOARDED_USER);
+    const app = createSettingsApp();
+    await app.init();
+    app.ageMin = 22;
+    app.ageMax = 55;
+
+    await app.updateDistance();
+
+    const body = api.onboardBody();
+    expect(body.age_min).toBe(22);
+    expect(body.age_max).toBe(55);
+    vi.unstubAllGlobals();
+  });
+
+  it('shows "100+" in the range label when the max is uncapped', async () => {
+    stubApi(ONBOARDED_USER);
+    const app = createSettingsApp();
+    await app.init();
+
+    expect(app.ageRangeLabel).toBe('18 - 100+');
+    vi.unstubAllGlobals();
+  });
+
+  it('clamps the minimum thumb so it can never cross the maximum', async () => {
+    stubApi(ONBOARDED_USER);
+    const app = createSettingsApp();
+    await app.init();
+    app.ageMax = 30;
+
+    app.ageMin = 30;
+    app.handleAgeMinInput();
+
+    expect(app.ageMin).toBe(29);
+    expect(app.activeAgeThumb).toBe('min');
+    vi.unstubAllGlobals();
+  });
+
+  it('clamps the maximum thumb so it can never cross the minimum', async () => {
+    stubApi(ONBOARDED_USER);
+    const app = createSettingsApp();
+    await app.init();
+    app.ageMin = 40;
+
+    app.ageMax = 40;
+    app.handleAgeMaxInput();
+
+    expect(app.ageMax).toBe(41);
+    expect(app.activeAgeThumb).toBe('max');
+    vi.unstubAllGlobals();
+  });
 });

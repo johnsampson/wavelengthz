@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
 import { getMatchNotificationDelayMs } from '../../src/lib/notifications';
@@ -214,6 +214,77 @@ describe('max_distance_km is enforced as a filter, not just a scoring weight', (
     const res = await worker.fetch(new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
     const body = await res.json<any>();
     expect(body.candidates.find((c: any) => c.id === 'far')).toBeUndefined();
+  });
+});
+
+describe('age_min/age_max are enforced as a filter, not just a scoring weight', () => {
+  async function makeUserWithAge(id: string, dateOfBirth: string | null, ageMin = 18, ageMax = 100) {
+    await env.DB.prepare(
+      `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, onboarded_at, gender, seeking, date_of_birth, age_min, age_max, access_token, refresh_token, token_expires_at, created_at, updated_at)
+       VALUES (?, ?, 30.27, -97.74, 80, 1000, 'female', 'female', ?, ?, ?, 'a', 'r', 9999999999999, 1000, 1000)`
+    ).bind(id, `sp-${id}`, dateOfBirth, ageMin, ageMax).run();
+  }
+
+  // Fixed reference point so age-from-date_of_birth is deterministic
+  // regardless of when the suite runs.
+  const NOW = new Date('2026-01-01T00:00:00Z').getTime();
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('excludes a candidate younger than the caller\'s minimum age', async () => {
+    await env.DB.prepare('UPDATE users SET age_min = 30, age_max = 100 WHERE id = ?').bind('u1').run();
+    await makeUserWithAge('young', '2005-06-01'); // 20 years old
+    await makeUserWithAge('old-enough', '1990-06-01'); // 35 years old
+
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'young')).toBeUndefined();
+    expect(body.candidates.find((c: any) => c.id === 'old-enough')).toBeDefined();
+  });
+
+  it('excludes a candidate older than the caller\'s maximum age', async () => {
+    await env.DB.prepare('UPDATE users SET age_min = 18, age_max = 30 WHERE id = ?').bind('u1').run();
+    await makeUserWithAge('too-old', '1980-06-01'); // 45 years old
+    await makeUserWithAge('in-range', '2000-06-01'); // 25 years old
+
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'too-old')).toBeUndefined();
+    expect(body.candidates.find((c: any) => c.id === 'in-range')).toBeDefined();
+  });
+
+  it('never excludes a candidate with no date_of_birth on record', async () => {
+    // Every real onboarded account has date_of_birth set, but a candidate row
+    // that predates the field (or the shared test fixtures, which never set
+    // it) must not be silently hidden just because an age can't be computed.
+    await env.DB.prepare('UPDATE users SET age_min = 30, age_max = 40 WHERE id = ?').bind('u1').run();
+
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'u2')).toBeDefined();
+  });
+
+  it('excludes an out-of-age-range liker from the like-priority queue too', async () => {
+    await env.DB.prepare('UPDATE users SET age_min = 30, age_max = 100 WHERE id = ?').bind('u1').run();
+    await makeUserWithAge('young-liker', '2005-06-01'); // 20 years old
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, match_score, created_at, updated_at) VALUES ('s1', 'young-liker', 'u1', 'right', 0.99, 1000, 1000)`
+    ).run();
+
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'young-liker')).toBeUndefined();
   });
 });
 

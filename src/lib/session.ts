@@ -10,6 +10,8 @@ export interface UserRow {
   lng: number | null;
   location_updated_at: number | null;
   max_distance_km: number;
+  age_min: number;
+  age_max: number;
   gender: string | null;
   seeking: string | null;
   intent: string | null;
