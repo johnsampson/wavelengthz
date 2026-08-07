@@ -111,6 +111,15 @@ export function registerOnboardingRoutes(router: RouterType) {
         console.error(`invalid_age_range user=${user.id} age_min=${JSON.stringify(body.age_min)} age_max=${JSON.stringify(body.age_max)}`);
         return Response.json({ error: 'invalid_age_range' }, { status: 400 });
       }
+
+      // Safety guardrail: a search range that excludes the searcher's own age
+      // (e.g. a 45-year-old only searching 18-25) is a hallmark of predatory
+      // targeting rather than a genuine preference, so it's rejected outright
+      // rather than merely discouraged.
+      if (age < body.age_min! || age > body.age_max!) {
+        console.error(`age_range_excludes_self user=${user.id} age=${age} age_min=${body.age_min} age_max=${body.age_max}`);
+        return Response.json({ error: 'age_range_excludes_self' }, { status: 400 });
+      }
     }
 
     const now = Date.now();
