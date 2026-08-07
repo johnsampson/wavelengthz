@@ -84,6 +84,39 @@
       <span class="field-label">Max distance (km): <span x-text="loading ? '…' : maxDistanceKm" class="text-neutral-200 normal-case"></span></span>
       <input type="range" min="5" max="200" x-model.number="maxDistanceKm" :disabled="loading" class="accent-brand-500" />
     </label>
+
+    <div class="flex flex-col gap-1">
+      <span class="field-label">Age range: <span x-text="loading ? '…' : ageRangeLabel" class="text-neutral-200 normal-case"></span></span>
+      <div class="age-range-slider">
+        <span class="age-range-bubble" :style="`left: ${ageMinPct}%`" x-text="ageMin"></span>
+        <span class="age-range-bubble" :style="`left: ${ageMaxPct}%`" x-text="ageMax >= 100 ? '100+' : ageMax"></span>
+        <div class="age-range-track"></div>
+        <div class="age-range-fill" :style="`left: ${ageMinPct}%; right: ${100 - ageMaxPct}%`"></div>
+        <input
+          type="range"
+          min="18"
+          max="100"
+          x-model.number="ageMin"
+          @input="handleAgeMinInput()"
+          :disabled="loading"
+          :style="`z-index: ${activeAgeThumb === 'min' ? 5 : 3}`"
+          class="age-range-input"
+          aria-label="Minimum age"
+        />
+        <input
+          type="range"
+          min="18"
+          max="100"
+          x-model.number="ageMax"
+          @input="handleAgeMaxInput()"
+          :disabled="loading"
+          :style="`z-index: ${activeAgeThumb === 'max' ? 5 : 4}`"
+          class="age-range-input"
+          aria-label="Maximum age"
+        />
+      </div>
+    </div>
+
     <button type="submit" class="btn-primary" :disabled="loading">Save</button>
   </form>
 

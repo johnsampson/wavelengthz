@@ -453,4 +453,76 @@ describe('POST /api/onboarding', () => {
     const row = await env.DB.prepare('SELECT display_name FROM users WHERE id = ?').bind('u1').first<any>();
     expect(row.display_name).toBe('Jordan');
   });
+
+  describe('age range', () => {
+    const completePayload = (overrides: Record<string, unknown>) => ({
+      display_name: 'Jordan',
+      date_of_birth: '1995-01-01',
+      location_label: 'Austin, TX',
+      lat: 30.27,
+      lng: -97.74,
+      gender: 'male',
+      seeking: 'female',
+      intent: 'dating_around',
+      ...overrides,
+    });
+    const post = (cookie: string, payload: Record<string, unknown>) =>
+      worker.fetch(
+        new Request('http://localhost/api/onboarding', {
+          method: 'POST',
+          headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }),
+        env,
+        {} as ExecutionContext
+      );
+
+    it('defaults new users to the full 18-100 range', async () => {
+      const cookie = await sessionCookieFor('u1');
+      await post(cookie, completePayload({}));
+      const row = await env.DB.prepare('SELECT age_min, age_max FROM users WHERE id = ?').bind('u1').first<any>();
+      expect(row.age_min).toBe(18);
+      expect(row.age_max).toBe(100);
+    });
+
+    it('round-trips a narrowed age range through save', async () => {
+      const cookie = await sessionCookieFor('u1');
+      await post(cookie, completePayload({ age_min: 25, age_max: 40 }));
+      const row = await env.DB.prepare('SELECT age_min, age_max FROM users WHERE id = ?').bind('u1').first<any>();
+      expect(row.age_min).toBe(25);
+      expect(row.age_max).toBe(40);
+    });
+
+    it('leaves an existing age range untouched when a resave omits it (settings re-save path)', async () => {
+      const cookie = await sessionCookieFor('u1');
+      await post(cookie, completePayload({ age_min: 25, age_max: 40 }));
+      await post(cookie, completePayload({ max_distance_km: 60 }));
+      const row = await env.DB.prepare('SELECT age_min, age_max FROM users WHERE id = ?').bind('u1').first<any>();
+      expect(row.age_min).toBe(25);
+      expect(row.age_max).toBe(40);
+    });
+
+    it.each([
+      [17, 40], // below MIN_AGE
+      [25, 101], // above MAX_AGE
+      [40, 25], // min above max
+      [25.5, 40], // non-integer
+    ])('rejects and writes nothing for age_min=%s age_max=%s', async (age_min, age_max) => {
+      const cookie = await sessionCookieFor('u1');
+      const res = await post(cookie, completePayload({ age_min, age_max }));
+      expect(res.status).toBe(400);
+      const body = await res.json<any>();
+      expect(body.error).toBe('invalid_age_range');
+      const row = await env.DB.prepare('SELECT onboarded_at FROM users WHERE id = ?').bind('u1').first<any>();
+      expect(row.onboarded_at).toBeNull();
+    });
+
+    it('rejects when only one bound is provided', async () => {
+      const cookie = await sessionCookieFor('u1');
+      const res = await post(cookie, completePayload({ age_min: 25 }));
+      expect(res.status).toBe(400);
+      const body = await res.json<any>();
+      expect(body.error).toBe('invalid_age_range');
+    });
+  });
 });

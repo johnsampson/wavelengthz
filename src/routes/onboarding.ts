@@ -10,6 +10,8 @@ interface OnboardingBody {
   lat: number;
   lng: number;
   max_distance_km?: number;
+  age_min?: number;
+  age_max?: number;
   gender: string;
   seeking: string;
   intent: string;
@@ -30,6 +32,8 @@ const INTENT_OPTIONS = new Set([
 
 const LOCATION_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_BIO_LENGTH = 500;
+const MIN_AGE = 18;
+const MAX_AGE = 100;
 
 export function registerOnboardingRoutes(router: RouterType) {
   router.post('/api/onboarding', async (request: Request, env: Env) => {
@@ -93,6 +97,22 @@ export function registerOnboardingRoutes(router: RouterType) {
       return Response.json({ error: 'invalid_intent' }, { status: 400 });
     }
 
+    // Both bounds are always sent together by the settings slider -- accepting
+    // just one would let a stale age_max linger below a freshly-raised
+    // age_min (or vice versa) via the COALESCE update below.
+    if (body.age_min !== undefined || body.age_max !== undefined) {
+      if (
+        !Number.isInteger(body.age_min) ||
+        !Number.isInteger(body.age_max) ||
+        body.age_min! < MIN_AGE ||
+        body.age_max! > MAX_AGE ||
+        body.age_min! > body.age_max!
+      ) {
+        console.error(`invalid_age_range user=${user.id} age_min=${JSON.stringify(body.age_min)} age_max=${JSON.stringify(body.age_max)}`);
+        return Response.json({ error: 'invalid_age_range' }, { status: 400 });
+      }
+    }
+
     const now = Date.now();
 
     // Only a genuine *change* to an already-onboarded user's lat/lng starts (or
@@ -109,7 +129,9 @@ export function registerOnboardingRoutes(router: RouterType) {
     await env.DB.prepare(
       `UPDATE users SET display_name = ?, bio = ?, date_of_birth = ?, age_verified_at = ?, location_label = ?, lat = ?, lng = ?,
         location_updated_at = ?, gender = ?, seeking = ?, intent = ?,
-        max_distance_km = COALESCE(?, max_distance_km), onboarded_at = ?, updated_at = ?
+        max_distance_km = COALESCE(?, max_distance_km),
+        age_min = COALESCE(?, age_min), age_max = COALESCE(?, age_max),
+        onboarded_at = ?, updated_at = ?
        WHERE id = ?`
     ).bind(
       body.display_name.trim(),
@@ -124,6 +146,8 @@ export function registerOnboardingRoutes(router: RouterType) {
       body.seeking,
       body.intent,
       body.max_distance_km ?? null,
+      body.age_min ?? null,
+      body.age_max ?? null,
       now,
       now,
       user.id

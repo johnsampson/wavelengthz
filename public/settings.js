@@ -12,9 +12,15 @@ const LOCATION_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 // so every field it owns has to be echoed back or it gets clobbered -- hence
 // the fetch-then-resubmit-with-existing-values shape of both init() and
 // updateDistance().
+const MIN_AGE = 18;
+const MAX_AGE = 100;
+
 export function createSettingsApp() {
   return {
     maxDistanceKm: 80,
+    ageMin: MIN_AGE,
+    ageMax: MAX_AGE,
+    activeAgeThumb: 'max',
     displayName: '',
     bio: null,
     userId: null,
@@ -44,12 +50,26 @@ export function createSettingsApp() {
       return Math.ceil(this.locationCooldownRemainingMs / (24 * 60 * 60 * 1000));
     },
 
+    get ageMinPct() {
+      return ((this.ageMin - MIN_AGE) / (MAX_AGE - MIN_AGE)) * 100;
+    },
+
+    get ageMaxPct() {
+      return ((this.ageMax - MIN_AGE) / (MAX_AGE - MIN_AGE)) * 100;
+    },
+
+    get ageRangeLabel() {
+      return `${this.ageMin} - ${this.ageMax >= MAX_AGE ? '100+' : this.ageMax}`;
+    },
+
     async init() {
       try {
         const [me, photosRes] = await Promise.all([api.me(), api.myPhotos()]);
         // Never leave the slider on a hardcoded default: saving would then
         // silently overwrite the user's real radius with 80.
         if (me.user.max_distance_km != null) this.maxDistanceKm = me.user.max_distance_km;
+        if (me.user.age_min != null) this.ageMin = me.user.age_min;
+        if (me.user.age_max != null) this.ageMax = me.user.age_max;
         this.userId = me.user.id;
         this.displayName = me.user.display_name ?? '';
         this.bio = me.user.bio ?? null;
@@ -87,6 +107,16 @@ export function createSettingsApp() {
       );
     },
 
+    handleAgeMinInput() {
+      this.activeAgeThumb = 'min';
+      if (this.ageMin > this.ageMax - 1) this.ageMin = this.ageMax - 1;
+    },
+
+    handleAgeMaxInput() {
+      this.activeAgeThumb = 'max';
+      if (this.ageMax < this.ageMin + 1) this.ageMax = this.ageMin + 1;
+    },
+
     async updateDistance() {
       this.error = null;
       this.saved = false;
@@ -122,6 +152,8 @@ export function createSettingsApp() {
           lat: this.lat,
           lng: this.lng,
           max_distance_km: this.maxDistanceKm,
+          age_min: this.ageMin,
+          age_max: this.ageMax,
           gender: this.gender,
           seeking: this.seeking,
           intent: this.intent,
