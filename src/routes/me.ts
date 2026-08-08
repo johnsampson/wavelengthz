@@ -50,7 +50,7 @@ export function registerMeRoutes(router: RouterType) {
       profile = { user_id: user.id, top_artists: topArtists, top_tracks: topTracks, top_genres: topGenres, time_range: TIME_RANGE, refreshed_at: now };
     }
 
-    const { access_token, refresh_token, ...safeUser } = user;
+    const safeUser = user;
     return Response.json({ user: safeUser, musicProfile: profile });
   });
 }
