@@ -73,7 +73,7 @@ export function registerCatalogRoutes(router: RouterType) {
     }
 
     const artistGenres = genresFromRow(artistRow.genres);
-    const topTracks = await searchTracksByArtistName(token, artistRow.name, ARTIST_PROFILE_TRACK_LIMIT);
+    const topTracks = await searchTracksByArtistName(token, artistRow.spotify_id, artistRow.name, ARTIST_PROFILE_TRACK_LIMIT);
     const now = Date.now();
     // Pairs each live Spotify track with its resolved internal id -- needed
     // because everything downstream (swipe direction lookup, totalLikes,

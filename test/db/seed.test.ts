@@ -38,8 +38,8 @@ describe('seedCatalog', () => {
             JSON.stringify({
               tracks: {
                 items: [
-                  { id: 'track-1', name: 'Song One', album: { images: [{ url: 'http://img/t1' }] }, preview_url: 'http://preview/1' },
-                  { id: 'track-2', name: 'Song Two', album: { images: [{ url: 'http://img/t2' }] }, preview_url: null },
+                  { id: 'track-1', name: 'Song One', artists: [{ id: 'artist-1', name: 'Shared Artist' }], album: { images: [{ url: 'http://img/t1' }] }, preview_url: 'http://preview/1' },
+                  { id: 'track-2', name: 'Song Two', artists: [{ id: 'artist-1', name: 'Shared Artist' }], album: { images: [{ url: 'http://img/t2' }] }, preview_url: null },
                 ],
               },
             }),
@@ -111,8 +111,8 @@ describe('seedCatalog', () => {
             JSON.stringify({
               tracks: {
                 items: [
-                  { id: 'track-1', name: 'Song One', album: { images: [{ url: 'http://img/t1' }] }, preview_url: 'http://preview/1' },
-                  { id: 'track-2', name: 'Song Two', album: { images: [{ url: 'http://img/t2' }] }, preview_url: null },
+                  { id: 'track-1', name: 'Song One', artists: [{ id: 'artist-ok', name: 'Reliable Artist' }], album: { images: [{ url: 'http://img/t1' }] }, preview_url: 'http://preview/1' },
+                  { id: 'track-2', name: 'Song Two', artists: [{ id: 'artist-ok', name: 'Reliable Artist' }], album: { images: [{ url: 'http://img/t2' }] }, preview_url: null },
                 ],
               },
             }),
@@ -165,8 +165,8 @@ describe('seedCatalog', () => {
           JSON.stringify({
             tracks: {
               items: [
-                { id: 'track-1', name: 'Song One', album: { images: [{ url: 'http://img/t1' }] }, preview_url: 'http://preview/1' },
-                { id: 'track-2', name: 'Song Two', album: { images: [{ url: 'http://img/t2' }] }, preview_url: null },
+                { id: 'track-1', name: 'Song One', artists: [{ id: 'artist-1', name: 'Shared Artist' }], album: { images: [{ url: 'http://img/t1' }] }, preview_url: 'http://preview/1' },
+                { id: 'track-2', name: 'Song Two', artists: [{ id: 'artist-1', name: 'Shared Artist' }], album: { images: [{ url: 'http://img/t2' }] }, preview_url: null },
               ],
             },
           }),

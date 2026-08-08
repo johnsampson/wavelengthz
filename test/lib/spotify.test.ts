@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { buildAuthUrl, fetchSpotifyProfile } from '../../src/lib/spotify';
+import { buildAuthUrl, fetchSpotifyProfile, searchTracksByArtistName } from '../../src/lib/spotify';
 
 const env = {
   SPOTIFY_CLIENT_ID: 'client123',
@@ -39,6 +39,37 @@ describe('fetchSpotifyProfile', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ id: 'sp1' }), { status: 200 })));
     const profile = await fetchSpotifyProfile('token');
     expect(profile.images).toBeUndefined();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('searchTracksByArtistName', () => {
+  it('excludes tracks whose artists do not actually include the requested artist id', async () => {
+    // Spotify's name-based `artist:"X"` search is a fuzzy text match, not an
+    // exact filter -- it can return tracks by an unrelated artist that
+    // happens to share a name. Each returned track carries its real
+    // `artists` list (with Spotify ids), which is the only reliable way to
+    // confirm a result actually belongs to the artist we asked about.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            tracks: {
+              items: [
+                { id: 't1', name: 'Right Song', artists: [{ id: 'artist-1', name: 'Real Artist' }] },
+                { id: 't2', name: 'Wrong Song', artists: [{ id: 'artist-2', name: 'Same Name, Different Act' }] },
+              ],
+            },
+          }),
+          { status: 200 }
+        )
+      )
+    );
+
+    const tracks = await searchTracksByArtistName('token', 'artist-1', 'Real Artist', 10);
+
+    expect(tracks.map((t: any) => t.id)).toEqual(['t1']);
     vi.unstubAllGlobals();
   });
 });

@@ -118,7 +118,7 @@ export async function seedCatalog(
             await recordCatalogGenres(env.DB, artist.genres ?? [], 'artist', now);
           }
 
-          const tracks = await searchTracksByArtistName(token, artist.name, TRACKS_PER_ARTIST);
+          const tracks = await searchTracksByArtistName(token, artist.id, artist.name, TRACKS_PER_ARTIST);
           for (const track of tracks) {
             const trackResult = await upsertTrack(env.DB, track, artistResult.id, 'seed', null, now);
             if (trackResult.inserted) {

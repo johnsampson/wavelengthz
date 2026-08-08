@@ -69,7 +69,7 @@ export async function topUpArtistsForUser(env: Env, user: UserRow): Promise<numb
       inserted += 1;
       await recordCatalogGenres(env.DB, artist.genres ?? [], 'artist', now);
 
-      const tracks = await searchTracksByArtistName(token, artist.name, TRACKS_PER_ARTIST);
+      const tracks = await searchTracksByArtistName(token, artist.id, artist.name, TRACKS_PER_ARTIST);
       for (const track of tracks) {
         const trackResult = await upsertTrack(env.DB, track, artistResult.id, 'spotify_search', null, now);
         if (trackResult.inserted) await recordCatalogGenres(env.DB, artist.genres ?? [], 'track', now);
