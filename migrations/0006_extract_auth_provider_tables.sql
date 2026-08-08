@@ -34,7 +34,8 @@ CREATE TABLE auth_identities (
   email        TEXT,
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL,
-  UNIQUE(provider, provider_id)
+  UNIQUE(provider, provider_id),
+  UNIQUE(user_id, provider)
 );
 
 CREATE TABLE music_source_tokens (
@@ -54,10 +55,12 @@ CREATE TABLE music_source_tokens (
 );
 
 INSERT INTO auth_identities (id, user_id, provider, provider_id, email, created_at, updated_at)
-SELECT lower(hex(randomblob(16))), id, 'spotify', spotify_id, email, created_at, updated_at FROM users;
+SELECT lower(hex(randomblob(16))), id, 'spotify', spotify_id, email, created_at, updated_at FROM users
+WHERE id != '00000000-0000-0000-0000-000000000000';
 
 INSERT INTO music_source_tokens (id, user_id, provider, provider_user_id, access_token, refresh_token, token_expires_at, avatar_url, product_tier, created_at, updated_at)
-SELECT lower(hex(randomblob(16))), id, 'spotify', spotify_id, access_token, refresh_token, token_expires_at, spotify_avatar_url, spotify_product, created_at, updated_at FROM users;
+SELECT lower(hex(randomblob(16))), id, 'spotify', spotify_id, access_token, refresh_token, token_expires_at, spotify_avatar_url, spotify_product, created_at, updated_at FROM users
+WHERE id != '00000000-0000-0000-0000-000000000000';
 
 ALTER TABLE users DROP COLUMN access_token;
 ALTER TABLE users DROP COLUMN refresh_token;

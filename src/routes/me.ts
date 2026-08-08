@@ -50,7 +50,11 @@ export function registerMeRoutes(router: RouterType) {
       profile = { user_id: user.id, top_artists: topArtists, top_tracks: topTracks, top_genres: topGenres, time_range: TIME_RANGE, refreshed_at: now };
     }
 
-    const safeUser = user;
+    const tokenRow = await env.DB.prepare(
+      `SELECT avatar_url FROM music_source_tokens WHERE user_id = ? AND provider = 'spotify'`
+    ).bind(user.id).first<{ avatar_url: string | null }>();
+
+    const safeUser = { ...user, spotify_avatar_url: tokenRow?.avatar_url ?? null };
     return Response.json({ user: safeUser, musicProfile: profile });
   });
 }

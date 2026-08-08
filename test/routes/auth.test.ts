@@ -228,12 +228,15 @@ describe('GET /callback', () => {
     expect(httpRes.headers.get('Set-Cookie')).not.toContain('Secure');
     vi.unstubAllGlobals();
 
-    await env.DB.exec(
-      `DELETE FROM sessions WHERE user_id IN (SELECT user_id FROM auth_identities WHERE provider_id = 'spotify-secure-check');
-       DELETE FROM music_source_tokens WHERE user_id IN (SELECT user_id FROM auth_identities WHERE provider_id = 'spotify-secure-check');
-       DELETE FROM auth_identities WHERE provider_id = 'spotify-secure-check';
-       DELETE FROM users WHERE spotify_id = 'spotify-secure-check';`
-    );
+    const { user_id: secureCheckUserId } = (await env.DB.prepare(
+      `SELECT user_id FROM auth_identities WHERE provider_id = 'spotify-secure-check'`
+    ).first<{ user_id: string }>())!;
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(secureCheckUserId),
+      env.DB.prepare('DELETE FROM music_source_tokens WHERE user_id = ?').bind(secureCheckUserId),
+      env.DB.prepare(`DELETE FROM auth_identities WHERE provider_id = 'spotify-secure-check'`),
+      env.DB.prepare('DELETE FROM users WHERE id = ?').bind(secureCheckUserId),
+    ]);
 
     stubFetch();
     const httpsReq = new Request('https://wavelengthz.app/callback?code=abc&state=match', {

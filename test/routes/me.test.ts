@@ -27,6 +27,7 @@ describe('GET /api/me', () => {
     await insertTestUser(env.DB, {
       id: 'u1', spotifyId: 'sp1', accessToken: encToken, refreshToken: encToken,
       tokenExpiresAt: Date.now() + 100000, createdAt: 1000, updatedAt: 1000,
+      avatarUrl: 'https://img.example/avatar.jpg',
     });
     const { cookie } = await createSession(env.DB, 'u1');
     const sessionId = cookie.split(';')[0].split('=')[1];
@@ -56,6 +57,7 @@ describe('GET /api/me', () => {
     expect(res.status).toBe(200);
     const body = await res.json<any>();
     expect(body.user.id).toBe('u1');
+    expect(body.user.spotify_avatar_url).toBe('https://img.example/avatar.jpg');
     expect(body.musicProfile.top_artists).toContain('a1');
 
     const row = await env.DB.prepare('SELECT * FROM music_profiles WHERE user_id = ?').bind('u1').first<any>();

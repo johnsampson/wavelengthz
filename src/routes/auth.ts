@@ -106,26 +106,33 @@ export function registerAuthRoutes(router: RouterType) {
     // getSessionUser's deleted_at IS NULL check, and no way to re-register the
     // same Spotify account as "new" either.
     const existingIdentity = await env.DB.prepare(
-      `SELECT user_id FROM auth_identities WHERE provider = 'spotify' AND provider_id = ?`
+      `SELECT ai.user_id, u.onboarded_at FROM auth_identities ai
+       JOIN users u ON u.id = ai.user_id
+       WHERE ai.provider = 'spotify' AND ai.provider_id = ?`
     )
       .bind(profile.id)
-      .first<{ user_id: string }>();
+      .first<{ user_id: string; onboarded_at: number | null }>();
 
     let userId: string;
     let onboarded: boolean;
 
+    const tokenStatement = (uid: string) =>
+      env.DB.prepare(
+        `INSERT INTO music_source_tokens (id, user_id, provider, provider_user_id, access_token, refresh_token, token_expires_at, avatar_url, product_tier, created_at, updated_at)
+         VALUES (?, ?, 'spotify', ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, provider) DO UPDATE SET
+           access_token = excluded.access_token, refresh_token = excluded.refresh_token, token_expires_at = excluded.token_expires_at,
+           avatar_url = excluded.avatar_url, product_tier = excluded.product_tier, updated_at = excluded.updated_at`
+      ).bind(crypto.randomUUID(), uid, profile.id, encryptedAccess, encryptedRefresh, expiresAt, avatarUrl, product, now, now);
+
     if (existingIdentity) {
       userId = existingIdentity.user_id;
-      const existingUser = await env.DB.prepare('SELECT onboarded_at FROM users WHERE id = ?')
-        .bind(userId)
-        .first<{ onboarded_at: number | null }>();
-      onboarded = existingUser?.onboarded_at != null;
+      onboarded = existingIdentity.onboarded_at != null;
 
-      await env.DB.prepare('UPDATE users SET deleted_at = NULL, updated_at = ? WHERE id = ?').bind(now, userId).run();
-      await env.DB.prepare(
-        `UPDATE music_source_tokens SET access_token = ?, refresh_token = ?, token_expires_at = ?, avatar_url = ?, product_tier = ?, updated_at = ?
-         WHERE user_id = ? AND provider = 'spotify'`
-      ).bind(encryptedAccess, encryptedRefresh, expiresAt, avatarUrl, product, now, userId).run();
+      await env.DB.batch([
+        env.DB.prepare('UPDATE users SET deleted_at = NULL, updated_at = ? WHERE id = ?').bind(now, userId),
+        tokenStatement(userId),
+      ]);
     } else {
       userId = crypto.randomUUID();
       onboarded = false;
@@ -135,17 +142,15 @@ export function registerAuthRoutes(router: RouterType) {
       // oversight, that it can't be dropped). Keep writing the real value
       // here for constraint satisfaction; auth_identities is what the
       // application actually reads going forward.
-      await env.DB.prepare(
-        `INSERT INTO users (id, spotify_id, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`
-      ).bind(userId, profile.id, profile.email ?? null, now, now).run();
-      await env.DB.prepare(
-        `INSERT INTO auth_identities (id, user_id, provider, provider_id, email, created_at, updated_at)
-         VALUES (?, ?, 'spotify', ?, ?, ?, ?)`
-      ).bind(crypto.randomUUID(), userId, profile.id, profile.email ?? null, now, now).run();
-      await env.DB.prepare(
-        `INSERT INTO music_source_tokens (id, user_id, provider, provider_user_id, access_token, refresh_token, token_expires_at, avatar_url, product_tier, created_at, updated_at)
-         VALUES (?, ?, 'spotify', ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(crypto.randomUUID(), userId, profile.id, encryptedAccess, encryptedRefresh, expiresAt, avatarUrl, product, now, now).run();
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO users (id, spotify_id, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`)
+          .bind(userId, profile.id, profile.email ?? null, now, now),
+        env.DB.prepare(
+          `INSERT INTO auth_identities (id, user_id, provider, provider_id, email, created_at, updated_at)
+           VALUES (?, ?, 'spotify', ?, ?, ?, ?)`
+        ).bind(crypto.randomUUID(), userId, profile.id, profile.email ?? null, now, now),
+        tokenStatement(userId),
+      ]);
     }
 
     const { cookie } = await createSession(env.DB, userId, requestIsSecure(request));
