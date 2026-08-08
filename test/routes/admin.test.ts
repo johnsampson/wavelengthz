@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import worker from '../../src/index';
+import { insertTestUser } from '../helpers/createUser';
 
 beforeAll(async () => {
   await applySchema(env.DB);
@@ -76,11 +77,8 @@ describe('POST /internal/seed', () => {
 
 describe('POST /internal/users/:id/delete', () => {
   beforeEach(async () => {
-    await env.DB.exec('DELETE FROM sessions; DELETE FROM users;');
-    await env.DB.prepare(
-      `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-       VALUES ('u1', 'spotify-u1', 'a', 'r', 9999999999999, 1000, 1000)`
-    ).run();
+    await env.DB.exec('DELETE FROM sessions; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;');
+    await insertTestUser(env.DB, { id: 'u1', spotifyId: 'spotify-u1' });
   });
 
   it('rejects requests without the correct seed secret', async () => {
