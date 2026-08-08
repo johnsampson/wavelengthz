@@ -1,7 +1,8 @@
 import type { IRequest, RouterType } from 'itty-router';
 import { buildAuthUrl, exchangeCodeForToken, fetchSpotifyProfile } from '../lib/spotify';
 import { encrypt } from '../lib/crypto';
-import { createSession, requestIsSecure, requestProtocol } from '../lib/session';
+import { createSession, requestIsSecure, requestProtocol, getSessionUser } from '../lib/session';
+import { buildGoogleAuthUrl } from '../lib/google';
 
 function parseCookie(request: Request, name: string): string | null {
   const header = request.headers.get('Cookie');
@@ -36,7 +37,7 @@ function callbackUrlForHost(protocol: string, host: string): string {
 }
 
 export function registerAuthRoutes(router: RouterType) {
-  router.get('/login', async (request: IRequest, env: Env) => {
+  router.get('/login/spotify', async (request: IRequest, env: Env) => {
     // The state cookie set below is host-scoped, but Spotify always redirects
     // back to whatever host the redirect_uri we send it names -- if /login is
     // reached via a host that isn't allowed to complete OAuth (see
@@ -61,6 +62,22 @@ export function registerAuthRoutes(router: RouterType) {
     // here even when the public/browser side is https, and Spotify rejects
     // a non-loopback http redirect_uri outright.
     const authUrl = buildAuthUrl(state, env, callbackUrlForHost(requestProtocol(request), url.host));
+    const secure = requestIsSecure(request);
+
+    // ?intent=connect (from Settings' "Connect Spotify" action) marks this as
+    // linking to the currently logged-in user rather than a fresh login --
+    // /callback reads this cookie to decide which path to take.
+    const headers = new Headers({ Location: authUrl });
+    headers.append('Set-Cookie', `wl_oauth_state=${state}; Path=/; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Lax; Max-Age=600`);
+    if (url.searchParams.get('intent') === 'connect') {
+      headers.append('Set-Cookie', `wl_oauth_intent=connect; Path=/; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Lax; Max-Age=600`);
+    }
+    return new Response(null, { status: 302, headers });
+  });
+
+  router.get('/login/google', async (request: IRequest, env: Env) => {
+    const state = crypto.randomUUID();
+    const authUrl = buildGoogleAuthUrl(state, env);
     const secure = requestIsSecure(request);
     return new Response(null, {
       status: 302,
