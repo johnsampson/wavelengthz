@@ -49,11 +49,13 @@ CREATE TABLE music_source_tokens (
 
 ## Migration (same file, `migrations/0006_extract_auth_provider_tables.sql`)
 
-Follows the exact `ADD → copy → DROP COLUMN` pattern `migrations/0002_obfuscate_catalog_ids.sql` already used successfully for the artist/track UUID switch — proof `ALTER TABLE ... DROP COLUMN` is safe in this D1 setup:
-
 1. `CREATE TABLE auth_identities` / `CREATE TABLE music_source_tokens` (above).
 2. For every existing `users` row: insert one `auth_identities` row (`provider='spotify'`, `provider_id = users.spotify_id`, `email = users.email`) and one `music_source_tokens` row (`provider='spotify'`, `provider_user_id = users.spotify_id`, tokens/avatar/product copied across).
-3. `ALTER TABLE users DROP COLUMN spotify_id` (and the other five).
+3. `ALTER TABLE users DROP COLUMN` for `access_token`, `refresh_token`, `token_expires_at`, `spotify_avatar_url`, `spotify_product` only.
+
+**Platform constraint discovered during implementation, changing this section from the original plan:** `spotify_id` is **not** dropped from `users` in this migration. SQLite cannot drop a `UNIQUE` column via plain `ALTER TABLE` (confirmed empirically — `access_token` alone drops fine; `spotify_id` throws `SQLITE_ERROR: cannot drop UNIQUE column`). The standard SQLite workaround — rebuild the table under a temporary name, then rename — is itself blocked in D1: D1 enforces foreign keys unconditionally (already independently confirmed in `src/lib/accountDeletion.ts`'s module comment re: `PRAGMA foreign_keys=OFF` not being honored), and empirically, `DROP TABLE users` fails with `SQLITE_CONSTRAINT_FOREIGNKEY` — even under `PRAGMA defer_foreign_keys = ON` — because roughly 14 other tables (`sessions`, `matches`, `people_swipes`, etc.) have a live `REFERENCES users(id)` foreign key. Rebuilding every referencing table too, just to relax one column's constraint, is a disproportionate, high-risk operation for what was scoped as a low-risk refactor.
+
+`users.spotify_id` therefore stays in place, still `UNIQUE NOT NULL`, as a legacy column the application no longer reads — `auth_identities` is the authoritative source for identity lookups going forward. Every functional code path (`getValidAccessToken`, `/callback`, the admin hard-delete lookup, account deletion's tombstone/cascade) is still rewritten against the new tables exactly as designed; only the literal removal of the `spotify_id` column is deferred. This means `auth.ts`'s new-user insert and `accountDeletion.ts`'s tombstone insert must keep supplying a `spotify_id` value (to satisfy the still-live constraint) alongside writing the real data to `auth_identities`/`music_source_tokens`. Solving `spotify_id`'s constraint for a genuinely Spotify-less (e.g. Google-only) user is deferred to the Google Sign-On follow-up itself, once it's actually needed — at that point there will be a concrete decision to make (a placeholder value, or finally justifying the full cascade rebuild across every referencing table) with fuller context than exists here.
 
 ## Code Changes
 

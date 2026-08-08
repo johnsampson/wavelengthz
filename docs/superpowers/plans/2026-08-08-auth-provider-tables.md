@@ -53,17 +53,33 @@
 -- migrations/0006_extract_auth_provider_tables.sql
 -- Migration number: 0006 	 2026-08-08T18:00:00.000Z
 
--- Extracts Spotify-specific identity/token columns off `users` into two
--- general-purpose tables, so a second identity provider (Google, in a
--- follow-up) can be added without special-casing `users`. `users.id`
--- remains the only column any other table's foreign key references --
--- confirmed unchanged by this migration.
+-- Extracts Spotify token/profile storage off `users` into two general-
+-- purpose tables, so a second identity provider (Google, in a follow-up)
+-- can be added without special-casing `users`. `users.id` remains the only
+-- column any other table's foreign key references -- confirmed unchanged
+-- by this migration.
 --
 -- auth_identities answers "how does this user log in" -- an identity-only
 -- provider (e.g. Google) never gets a music_source_tokens row at all.
 -- music_source_tokens answers "where do we pull this user's music-taste
 -- data from" -- only Spotify today; a future Apple Music/SoundCloud source
 -- would add rows here, not new columns on users.
+--
+-- NOTE on spotify_id: it is NOT dropped from `users` here, unlike the
+-- other five columns. SQLite cannot drop a UNIQUE column via ALTER TABLE
+-- (confirmed empirically -- "cannot drop UNIQUE column" SQLITE_ERROR), and
+-- the standard SQLite workaround (rebuild the table under a temp name) is
+-- itself blocked in D1: D1 enforces foreign keys unconditionally (already
+-- independently confirmed in src/lib/accountDeletion.ts's module comment),
+-- and empirically DROP TABLE users fails with SQLITE_CONSTRAINT_FOREIGNKEY
+-- -- even under PRAGMA defer_foreign_keys = ON -- because ~14 other tables
+-- (sessions, matches, people_swipes, ...) hold a live REFERENCES users(id)
+-- foreign key. Rebuilding every referencing table too, just to relax one
+-- column, is disproportionate here. spotify_id stays in place, still
+-- UNIQUE NOT NULL, as a legacy column the application no longer reads --
+-- auth_identities is authoritative going forward. auth.ts's new-user
+-- insert and accountDeletion.ts's tombstone insert (Tasks 3-4) must keep
+-- supplying a spotify_id value to satisfy the still-live constraint.
 CREATE TABLE auth_identities (
   id           TEXT PRIMARY KEY,
   user_id      TEXT NOT NULL REFERENCES users(id),
@@ -100,9 +116,8 @@ SELECT lower(hex(randomblob(16))), id, 'spotify', spotify_id, email, created_at,
 INSERT INTO music_source_tokens (id, user_id, provider, provider_user_id, access_token, refresh_token, token_expires_at, avatar_url, product_tier, created_at, updated_at)
 SELECT lower(hex(randomblob(16))), id, 'spotify', spotify_id, access_token, refresh_token, token_expires_at, spotify_avatar_url, spotify_product, created_at, updated_at FROM users;
 
--- Same DROP COLUMN pattern migration 0002 already used successfully for
--- the artist/track UUID switch -- proof this is safe in this D1 setup.
-ALTER TABLE users DROP COLUMN spotify_id;
+-- These five have no UNIQUE constraint and no other table references
+-- them, so a plain DROP COLUMN works -- confirmed empirically.
 ALTER TABLE users DROP COLUMN access_token;
 ALTER TABLE users DROP COLUMN refresh_token;
 ALTER TABLE users DROP COLUMN token_expires_at;
@@ -200,13 +215,14 @@ export async function insertTestUser(db: D1Database, overrides: TestUserOverride
   await db
     .prepare(
       `INSERT INTO users (
-         id, display_name, bio, date_of_birth, age_verified_at, location_label, lat, lng,
+         id, spotify_id, display_name, bio, date_of_birth, age_verified_at, location_label, lat, lng,
          location_updated_at, max_distance_km, age_min, age_max, gender, seeking, intent, email,
          onboarded_at, deleted_at, created_at, updated_at
-       ) VALUES (?, ?, NULL, ?, ?, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`
+       ) VALUES (?, ?, ?, NULL, ?, ?, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`
     )
     .bind(
       id,
+      spotifyId,
       overrides.displayName ?? null,
       overrides.dateOfBirth ?? null,
       overrides.ageVerifiedAt ?? null,
@@ -280,11 +296,11 @@ git commit -m "feat: add auth_identities/music_source_tokens tables and test hel
 
 **Interfaces:**
 - Consumes: `music_source_tokens` table (Task 1).
-- Produces: `UserRow` (in `src/lib/session.ts`) without `spotify_id`, `access_token`, `refresh_token`, `token_expires_at`, `spotify_avatar_url`, `spotify_product`. `getValidAccessToken(user: UserRow, env: Env, db: D1Database): Promise<string>` keeps its exact signature — internals change only.
+- Produces: `UserRow` (in `src/lib/session.ts`) without `access_token`, `refresh_token`, `token_expires_at`, `spotify_avatar_url`, `spotify_product` — `spotify_id` stays on `UserRow` (Task 1's migration note: it's a platform constraint that it can't be dropped from `users`, so `getSessionUser`'s `SELECT u.*` still returns it; the application just no longer treats it as authoritative). `getValidAccessToken(user: UserRow, env: Env, db: D1Database): Promise<string>` keeps its exact signature — internals change only.
 
 - [ ] **Step 1: Update `UserRow` in `src/lib/session.ts`**
 
-Remove these six lines from the `UserRow` interface: `spotify_id: string;`, `spotify_avatar_url: string | null;`, `spotify_product: string | null;`, `access_token: string;`, `refresh_token: string;`, `token_expires_at: number;`. Nothing else in this file changes — `getSessionUser`'s `SELECT u.*` naturally returns the narrower shape once `users` itself has fewer columns (Task 1's migration already dropped them).
+Remove these five lines from the `UserRow` interface: `spotify_avatar_url: string | null;`, `spotify_product: string | null;`, `access_token: string;`, `refresh_token: string;`, `token_expires_at: number;`. Leave `spotify_id: string;` in place — Task 1's migration note explains it can't be dropped from `users` (a D1/SQLite platform constraint, not an oversight); it stays on the row and the type, just no longer treated as authoritative by any application code. Nothing else in this file changes — `getSessionUser`'s `SELECT u.*` naturally returns the narrower shape once `users` itself has fewer columns (Task 1's migration already dropped the five that could be).
 
 - [ ] **Step 2: Write the failing tests for `getValidAccessToken`**
 
@@ -496,9 +512,14 @@ Replace the body of `router.get('/callback', ...)` from `const token = await exc
       userId = crypto.randomUUID();
       onboarded = false;
 
+      // spotify_id is still a required, still-UNIQUE column on users (see
+      // Task 1's migration note -- it's a platform constraint, not an
+      // oversight, that it can't be dropped). Keep writing the real value
+      // here for constraint satisfaction; auth_identities is what the
+      // application actually reads going forward.
       await env.DB.prepare(
-        `INSERT INTO users (id, email, created_at, updated_at) VALUES (?, ?, ?, ?)`
-      ).bind(userId, profile.email ?? null, now, now).run();
+        `INSERT INTO users (id, spotify_id, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`
+      ).bind(userId, profile.id, profile.email ?? null, now, now).run();
       await env.DB.prepare(
         `INSERT INTO auth_identities (id, user_id, provider, provider_id, email, created_at, updated_at)
          VALUES (?, ?, 'spotify', ?, ?, ?, ?)`
@@ -860,12 +881,17 @@ with:
 
 ```typescript
 const TOMBSTONE_USER_ID = '00000000-0000-0000-0000-000000000000';
+const TOMBSTONE_SPOTIFY_ID = '__wavelengthz_deleted_user_tombstone__';
 
-// No auth_identities/music_source_tokens row needed -- the tombstone never
-// logs in, and nothing requires a user to have either.
+// access_token/refresh_token/token_expires_at are dropped by Task 1's
+// migration, so they're no longer supplied here. spotify_id stays --
+// Task 1's migration note explains it's a platform constraint that it
+// can't be dropped from users, so it's still UNIQUE NOT NULL. No
+// auth_identities/music_source_tokens row is needed -- the tombstone
+// never logs in, and nothing requires a user to have either.
 async function ensureTombstoneUser(env: Env): Promise<void> {
-  await env.DB.prepare(`INSERT OR IGNORE INTO users (id, created_at, updated_at) VALUES (?, 0, 0)`)
-    .bind(TOMBSTONE_USER_ID)
+  await env.DB.prepare(`INSERT OR IGNORE INTO users (id, spotify_id, created_at, updated_at) VALUES (?, ?, 0, 0)`)
+    .bind(TOMBSTONE_USER_ID, TOMBSTONE_SPOTIFY_ID)
     .run();
 }
 ```
