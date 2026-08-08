@@ -432,6 +432,108 @@ describe('GET /callback', () => {
 
     vi.unstubAllGlobals();
   });
+
+  it('links to an existing user found by email instead of creating a duplicate, when no Spotify identity exists yet', async () => {
+    const existingUserId = await insertTestUser(env.DB, { email: 'shared@example.com', skipSpotify: true, onboardedAt: Date.now() });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('accounts.spotify.com/api/token')) {
+          return new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 }), { status: 200 });
+        }
+        if (url.includes('api.spotify.com/v1/me')) {
+          return new Response(JSON.stringify({ id: 'spotify-linkme', email: 'shared@example.com' }), { status: 200 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    const req = new Request('http://localhost/callback?code=abc&state=match', {
+      headers: { Cookie: 'wl_oauth_state=match' },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/'); // already onboarded
+
+    const identity = await env.DB.prepare(`SELECT user_id FROM auth_identities WHERE provider_id = 'spotify-linkme'`).first<any>();
+    expect(identity.user_id).toBe(existingUserId); // linked, not a new user
+
+    const usersCount = await env.DB.prepare(`SELECT COUNT(*) as c FROM users WHERE email = 'shared@example.com'`).first<any>();
+    expect(usersCount.c).toBe(1); // no duplicate
+
+    vi.unstubAllGlobals();
+  });
+
+  it('connects Spotify to the currently logged-in user when intent=connect, without creating a new account', async () => {
+    const googleUserId = await insertTestUser(env.DB, { email: 'connectme@example.com', skipSpotify: true, onboardedAt: Date.now() });
+    const { id: sessionId } = await createSession(env.DB, googleUserId);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('accounts.spotify.com/api/token')) {
+          return new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 }), { status: 200 });
+        }
+        if (url.includes('api.spotify.com/v1/me')) {
+          return new Response(JSON.stringify({ id: 'spotify-connect-target', email: 'different@example.com' }), { status: 200 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    const req = new Request('http://localhost/callback?code=abc&state=match', {
+      headers: { Cookie: `wl_oauth_state=match; wl_oauth_intent=connect; wl_session=${sessionId}` },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/settings?spotify_connected=1');
+
+    const identity = await env.DB.prepare(`SELECT user_id FROM auth_identities WHERE provider_id = 'spotify-connect-target'`).first<any>();
+    expect(identity.user_id).toBe(googleUserId);
+
+    const tokenRow = await env.DB.prepare(`SELECT * FROM music_source_tokens WHERE user_id = ? AND provider = 'spotify'`).bind(googleUserId).first<any>();
+    expect(tokenRow).toBeTruthy();
+
+    const usersCount = await env.DB.prepare(`SELECT COUNT(*) as c FROM users`).first<any>();
+    expect(usersCount.c).toBe(1); // no second user created
+
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects connecting a Spotify account that is already linked to a different user', async () => {
+    const userA = await insertTestUser(env.DB, { spotifyId: 'spotify-already-claimed' });
+    const userB = await insertTestUser(env.DB, { email: 'userb@example.com', skipSpotify: true, onboardedAt: Date.now() });
+    const { id: sessionId } = await createSession(env.DB, userB);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('accounts.spotify.com/api/token')) {
+          return new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 }), { status: 200 });
+        }
+        if (url.includes('api.spotify.com/v1/me')) {
+          return new Response(JSON.stringify({ id: 'spotify-already-claimed', email: 'usera@example.com' }), { status: 200 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    const req = new Request('http://localhost/callback?code=abc&state=match', {
+      headers: { Cookie: `wl_oauth_state=match; wl_oauth_intent=connect; wl_session=${sessionId}` },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/settings?spotify_error=already_linked');
+
+    const identity = await env.DB.prepare(`SELECT user_id FROM auth_identities WHERE provider_id = 'spotify-already-claimed'`).first<any>();
+    expect(identity.user_id).toBe(userA); // unchanged, still belongs to user A
+
+    vi.unstubAllGlobals();
+  });
 });
 
 describe('POST /logout', () => {
