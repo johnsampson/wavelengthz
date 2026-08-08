@@ -45,7 +45,9 @@
       <div class="flex gap-2 rounded-full bg-surface2 p-1">
         <button type="button" class="pill-toggle flex-1" :class="seeking === 'male' ? 'pill-toggle-active' : 'pill-toggle-inactive'" :disabled="loading" @click="seeking = 'male'">Male</button>
         <button type="button" class="pill-toggle flex-1" :class="seeking === 'female' ? 'pill-toggle-active' : 'pill-toggle-inactive'" :disabled="loading" @click="seeking = 'female'">Female</button>
+        <button type="button" class="pill-toggle flex-1" :class="seeking === 'friends' ? 'pill-toggle-active' : 'pill-toggle-inactive'" :disabled="loading" @click="seeking = 'friends'">Friends</button>
       </div>
+      <p x-show="seeking === 'friends'" class="text-xs text-neutral-400">You'll match with anyone else also seeking friends, regardless of gender.</p>
     </div>
 
     <div class="flex flex-col gap-1">

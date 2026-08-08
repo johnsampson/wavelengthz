@@ -21,12 +21,18 @@ interface OnboardingBody {
 // as VALID_REASONS in src/routes/safety.ts) -- no DB-level CHECK constraint,
 // validated here so adding/renaming an option never needs a migration.
 const GENDER_OPTIONS = new Set(['male', 'female']);
-const SEEKING_OPTIONS = new Set(['male', 'female']);
+// 'friends' is seeking-only -- there's no matching gender, by design. It
+// means "match me with anyone else also seeking friends, regardless of
+// gender" (src/routes/peopleSwipes.ts's RECIPROCITY_SQL), not a fourth
+// gender identity.
+const SEEKING_OPTIONS = new Set(['male', 'female', 'friends']);
+// 'making_friends' retired here in favor of the real seeking:'friends'
+// filter above -- keeping both would give onboarding two different "I want
+// friends" signals, only one of which actually did anything.
 const INTENT_OPTIONS = new Set([
   'long_term_relationship',
   'something_casual',
   'dating_around',
-  'making_friends',
   'not_sure_yet',
 ]);
 

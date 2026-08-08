@@ -237,6 +237,33 @@ describe('POST /api/onboarding', () => {
     expect(body.error).toBe('invalid_intent');
   });
 
+  it('accepts seeking: friends -- a real filter value, not a fourth gender', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const req = new Request('http://localhost/api/onboarding', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'friends', intent: 'dating_around' }),
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    const row = await env.DB.prepare('SELECT gender, seeking FROM users WHERE id = ?').bind('u1').first<any>();
+    expect(row.gender).toBe('male');
+    expect(row.seeking).toBe('friends');
+  });
+
+  it('rejects the retired making_friends intent -- superseded by seeking: friends', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const req = new Request('http://localhost/api/onboarding', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'female', intent: 'making_friends' }),
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_intent');
+  });
+
   describe('location change cooldown', () => {
     const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
     const completePayload = (overrides: Record<string, unknown>) => ({

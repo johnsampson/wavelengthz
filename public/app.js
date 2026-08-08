@@ -17,12 +17,14 @@ async function request(path, options = {}) {
 }
 
 // Shared with onboarding.html and settings.html so the option list can't drift
-// between the two places it's picked.
+// between the two places it's picked. 'making_friends' retired -- superseded
+// by the real seeking:'friends' filter (src/routes/onboarding.ts's
+// SEEKING_OPTIONS), which actually changes who you match with rather than
+// just being a label. Kept in sync with onboarding.ts's INTENT_OPTIONS set.
 export const INTENT_OPTIONS = [
   { value: 'long_term_relationship', label: 'Long-term relationship' },
   { value: 'something_casual', label: 'Something casual' },
   { value: 'dating_around', label: 'Dating around' },
-  { value: 'making_friends', label: 'Making new friends' },
   { value: 'not_sure_yet', label: 'Not sure yet' },
 ];
 
