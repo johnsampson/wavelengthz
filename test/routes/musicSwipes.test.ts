@@ -30,11 +30,10 @@ async function cookieFor(userId: string) {
   return `wl_session=${cookie.split(';')[0].split('=')[1]}`;
 }
 
-// GET /api/candidates/music now calls ctx.waitUntil for the background
-// artist top-up (src/routes/musicSwipes.ts), so a bare `{}` throws
-// "ctx.waitUntil is not a function". This no-op stands in for real routes
-// that don't care about the background work's outcome; the one test that
-// does care builds its own ctx that captures the promise instead.
+// worker.fetch()'s signature always takes a third ExecutionContext argument
+// (Workers convention), even though no route in this file uses it anymore --
+// the background artist top-up that used to call ctx.waitUntil has moved to
+// the scheduled catalog-growth job (src/lib/catalogGrowth.ts).
 const ctx = { waitUntil: () => {} } as unknown as ExecutionContext;
 
 describe('GET /api/candidates/music', () => {
@@ -118,63 +117,6 @@ describe('GET /api/candidates/music', () => {
     const row = await env.DB.prepare('SELECT * FROM artists WHERE spotify_id = ?').bind('fresh1').first<any>();
     expect(row).toBeTruthy();
     expect(body.candidates.map((c: any) => c.itemId)).toContain(row.id);
-
-    vi.unstubAllGlobals();
-  });
-
-  it('tops up in the background (ctx.waitUntil) once the pool is low but not yet empty, without delaying the response', async () => {
-    // Seed up to 16 total artists (a1/a2 from beforeEach + 14 more), then
-    // swipe all but one -- 1 remaining is well under LOW_ARTIST_POOL_THRESHOLD
-    // (15), but not zero, so this should hit the background path, not the
-    // synchronous one.
-    for (let i = 0; i < 14; i++) {
-      await env.DB.prepare(
-        `INSERT INTO artists (id, name, genres, image_url, source, approved, created_at) VALUES (?, ?, '{}', ?, 'seed', 1, 1000)`
-      ).bind(`extra${i}`, `Extra ${i}`, `https://img.example/extra${i}.jpg`).run();
-    }
-    await env.DB.prepare(
-      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s1', 'u1', 'artist', 'a1', 'right', 1000, 1000)`
-    ).run();
-    for (let i = 0; i < 14; i++) {
-      await env.DB.prepare(
-        `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES (?, 'u1', 'artist', ?, 'right', 1000, 1000)`
-      ).bind(`s-extra${i}`, `extra${i}`).run();
-    }
-    // Only 'a2' remains unswiped.
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo) => {
-        const url = input.toString();
-        if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
-        if (url.includes('type=artist')) {
-          return new Response(
-            JSON.stringify({ artists: { items: [{ id: 'bg-fresh', name: 'Background Fresh Artist', genres: ['pop'], images: [{ url: 'https://img.example/bg-fresh.jpg' }], popularity: 50 }] } }),
-            { status: 200 }
-          );
-        }
-        if (url.includes('/albums')) return new Response(JSON.stringify({ items: [] }), { status: 200 });
-        throw new Error(`unexpected ${url}`);
-      })
-    );
-
-    const pending: Promise<any>[] = [];
-    const capturingCtx = { waitUntil: (p: Promise<any>) => pending.push(p) } as unknown as ExecutionContext;
-
-    const cookie = await cookieFor('u1');
-    const req = new Request('http://localhost/api/candidates/music?limit=50', { headers: { Cookie: cookie } });
-    const res = await worker.fetch(req, env, capturingCtx);
-    const body = await res.json<any>();
-
-    // Response comes back immediately with what's already there -- no
-    // 'bg-fresh' yet, since the top-up hasn't been awaited.
-    expect(body.candidates.map((c: any) => c.itemId)).toEqual(['a2']);
-    expect(pending.length).toBe(1); // background top-up was scheduled, not awaited inline
-
-    await Promise.all(pending);
-
-    const row = await env.DB.prepare('SELECT * FROM artists WHERE spotify_id = ?').bind('bg-fresh').first<any>();
-    expect(row).toBeTruthy(); // ...but it's there once the background work finishes
 
     vi.unstubAllGlobals();
   });

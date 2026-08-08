@@ -1,7 +1,7 @@
 import type { RouterType, IRequest } from 'itty-router';
 import { getSessionUser } from '../lib/session';
 import { genresFromRow } from '../lib/genres';
-import { topUpArtistsForUser } from '../lib/artistTopUp';
+import { growArtistCatalog } from '../lib/catalogGrowth';
 
 async function genresForItem(db: D1Database, itemType: 'artist' | 'track', itemId: string): Promise<string[]> {
   const row =
@@ -63,12 +63,8 @@ async function applyGenreAffinity(
   }
 }
 
-// Once fewer than this many unswiped artists remain, kick off a background
-// top-up (see below) instead of waiting for the pool to hit exactly zero.
-const LOW_ARTIST_POOL_THRESHOLD = 15;
-
 export function registerMusicSwipeRoutes(router: RouterType) {
-  router.get('/api/candidates/music', async (request: Request, env: Env, ctx: ExecutionContext) => {
+  router.get('/api/candidates/music', async (request: Request, env: Env) => {
     const user = await getSessionUser(request, env.DB);
     if (!user) return new Response('Unauthorized', { status: 401 });
 
@@ -95,10 +91,12 @@ export function registerMusicSwipeRoutes(router: RouterType) {
 
     let rows = await queryCandidates();
 
-    // Never let a user permanently hit "no more candidates" in music mode.
-    // Tracks aren't included in either path below: track candidates come
-    // from artists already in the catalog, so topping up artists indirectly
-    // grows track candidates too on a later run.
+    // Catalog growth is now primarily driven by the scheduled job
+    // (src/lib/catalogGrowth.ts's runCatalogGrowthJob, wired in
+    // src/index.ts's scheduled()). This is only a last-resort safety net
+    // for the rare case a user's pool hits zero between runs -- bounded to
+    // 2 real Spotify searches so a live request never pays for more than
+    // that much added latency.
     if (itemType === 'artist') {
       const remainingRow = await env.DB.prepare(
         `SELECT COUNT(*) as c FROM ${table}
@@ -109,29 +107,14 @@ export function registerMusicSwipeRoutes(router: RouterType) {
       const remaining = remainingRow?.c ?? 0;
 
       if (remaining === 0) {
-        // Genuinely out right now -- top up synchronously so THIS request
-        // doesn't come back empty (matters the very first time a user's pool
-        // runs dry, before the background path below ever gets a chance to
-        // run ahead of it).
         try {
-          const inserted = await topUpArtistsForUser(env, user);
-          if (inserted > 0) rows = await queryCandidates();
+          const growth = await growArtistCatalog(env, Date.now(), { maxInserted: 10, maxGenres: 2 });
+          if (growth.inserted > 0) rows = await queryCandidates();
         } catch (error) {
           // A Spotify/token failure here must not turn an otherwise-successful
           // (if empty) candidates request into a 500 -- just serve what's there.
-          console.error('topUpArtistsForUser failed', error);
+          console.error('growArtistCatalog (reactive fallback) failed', error);
         }
-      } else if (remaining < LOW_ARTIST_POOL_THRESHOLD) {
-        // Below the threshold but not empty yet: top up in the BACKGROUND via
-        // ctx.waitUntil rather than blocking this response. The deck only
-        // re-fetches once its local queue is fully drained (public/index.html's
-        // decide()), so this gives the Spotify round-trip the user's remaining
-        // swipe-throughs' worth of wall-clock time to finish -- hiding the
-        // latency the synchronous-only version made visible right when
-        // someone hit their last candidate.
-        ctx.waitUntil(
-          topUpArtistsForUser(env, user).catch((error) => console.error('background topUpArtistsForUser failed', error))
-        );
       }
     }
 
