@@ -19,7 +19,7 @@ function stubArtistSearch(items: any[]) {
     vi.fn(async (input: RequestInfo) => {
       const url = input.toString();
       if (url.includes('type=artist')) return new Response(JSON.stringify({ artists: { items } }), { status: 200 });
-      if (url.includes('type=track')) return new Response(JSON.stringify({ tracks: { items: [] } }), { status: 200 });
+      if (url.includes('/albums')) return new Response(JSON.stringify({ items: [] }), { status: 200 });
       throw new Error(`unexpected ${url}`);
     })
   );
@@ -116,7 +116,7 @@ function stubArtistSearchByGenre(perGenre: (genre: string) => any[]) {
         const genre = decodeURIComponent(url).match(/genre:"([^"]+)"/)?.[1] ?? '';
         return new Response(JSON.stringify({ artists: { items: perGenre(genre) } }), { status: 200 });
       }
-      if (url.includes('type=track')) return new Response(JSON.stringify({ tracks: { items: [] } }), { status: 200 });
+      if (url.includes('/albums')) return new Response(JSON.stringify({ items: [] }), { status: 200 });
       throw new Error(`unexpected ${url}`);
     })
   );
@@ -201,7 +201,7 @@ describe('growArtistCatalog', () => {
           if (genre === GROWTH_GENRES[0]) return new Response('server error', { status: 500 });
           return new Response(JSON.stringify({ artists: { items: [{ id: `${genre}-1`, name: genre, genres: [], images: [{ url: 'https://img/x.jpg' }], popularity: 50 }] } }), { status: 200 });
         }
-        if (url.includes('type=track')) return new Response(JSON.stringify({ tracks: { items: [] } }), { status: 200 });
+        if (url.includes('/albums')) return new Response(JSON.stringify({ items: [] }), { status: 200 });
         throw new Error(`unexpected ${url}`);
       })
     );
@@ -260,7 +260,7 @@ describe('runCatalogGrowthJob', () => {
             { status: 200 }
           );
         }
-        if (url.includes('type=track')) return new Response(JSON.stringify({ tracks: { items: [] } }), { status: 200 });
+        if (url.includes('/albums')) return new Response(JSON.stringify({ items: [] }), { status: 200 });
         throw new Error(`unexpected ${url}`);
       })
     );

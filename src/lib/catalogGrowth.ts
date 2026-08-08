@@ -1,4 +1,4 @@
-import { searchArtistsByGenre, searchTracksByArtistName, getClientCredentialsToken } from './spotify';
+import { searchArtistsByGenre, fetchArtistTracks, getClientCredentialsToken } from './spotify';
 import { recordCatalogGenres } from './genreCatalog';
 import { upsertArtist, upsertTrack } from './catalogUpsert';
 import { sendEmail } from './email';
@@ -76,7 +76,7 @@ export async function growOneGenre(db: D1Database, token: string, genre: string,
     inserted += 1;
     await recordCatalogGenres(db, artist.genres ?? [], 'artist', now);
 
-    const tracks = await searchTracksByArtistName(token, artist.name, TRACKS_PER_ARTIST);
+    const tracks = await fetchArtistTracks(token, artist.id, TRACKS_PER_ARTIST);
     for (const track of tracks) {
       const trackResult = await upsertTrack(db, track, artistResult.id, 'spotify_search', null, now);
       if (trackResult.inserted) await recordCatalogGenres(db, artist.genres ?? [], 'track', now);
