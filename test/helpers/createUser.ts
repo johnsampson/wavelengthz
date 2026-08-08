@@ -21,6 +21,7 @@ export interface TestUserOverrides {
   tokenExpiresAt?: number;
   avatarUrl?: string | null;
   productTier?: string | null;
+  skipSpotify?: boolean;
 }
 
 export async function insertTestUser(db: D1Database, overrides: TestUserOverrides = {}): Promise<string> {
@@ -58,6 +59,8 @@ export async function insertTestUser(db: D1Database, overrides: TestUserOverride
       updatedAt
     )
     .run();
+
+  if (overrides.skipSpotify) return id;
 
   await db
     .prepare(
