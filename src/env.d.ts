@@ -16,6 +16,8 @@
 interface Env {
   SPOTIFY_CLIENT_ID: string;
   SPOTIFY_CLIENT_SECRET: string;
+  GOOGLE_CLIENT_ID: string;
+  GOOGLE_CLIENT_SECRET: string;
   TOKEN_ENCRYPTION_KEY: string;
   SEED_SECRET: string;
   R2_ACCOUNT_ID: string;
@@ -42,6 +44,8 @@ declare namespace Cloudflare {
   interface Env {
     SPOTIFY_CLIENT_ID: string;
     SPOTIFY_CLIENT_SECRET: string;
+    GOOGLE_CLIENT_ID: string;
+    GOOGLE_CLIENT_SECRET: string;
     TOKEN_ENCRYPTION_KEY: string;
     SEED_SECRET: string;
     R2_ACCOUNT_ID: string;
