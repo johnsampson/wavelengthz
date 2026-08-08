@@ -95,35 +95,57 @@ export function registerAuthRoutes(router: RouterType) {
     const encryptedRefresh = await encrypt(token.refresh_token, env.TOKEN_ENCRYPTION_KEY);
     const now = Date.now();
     const expiresAt = now + token.expires_in * 1000;
-
-    // Deliberately not filtered by deleted_at IS NULL: spotify_id is UNIQUE, so a
-    // soft-deleted row permanently occupies that Spotify account's slot. Signing
-    // back in during the grace period (before the nightly hard-delete purge)
-    // reactivates the account below rather than leaving it stuck -- found with
-    // deleted_at still set, but with no way to ever pass getSessionUser's
-    // deleted_at IS NULL check, and no way to re-register the same Spotify
-    // account as "new" either.
-    const existing = await env.DB.prepare('SELECT id, onboarded_at, deleted_at FROM users WHERE spotify_id = ?')
-      .bind(profile.id)
-      .first<{ id: string; onboarded_at: number | null; deleted_at: number | null }>();
-
-    const userId = existing?.id ?? crypto.randomUUID();
-    // A brand-new insert always has onboarded_at NULL (not set on insert), so this
-    // single check naturally covers both the new-user and abandoned-onboarding cases.
-    const onboarded = existing?.onboarded_at != null;
     const avatarUrl = profile.images?.[0]?.url ?? null;
     const product = profile.product ?? null;
 
-    if (existing) {
+    // Deliberately not filtered by deleted_at IS NULL: (provider, provider_id) is
+    // UNIQUE, so a soft-deleted row's identity permanently occupies that Spotify
+    // account's slot. Signing back in during the grace period (before the nightly
+    // hard-delete purge) reactivates the account below rather than leaving it
+    // stuck -- found with deleted_at still set, but with no way to ever pass
+    // getSessionUser's deleted_at IS NULL check, and no way to re-register the
+    // same Spotify account as "new" either.
+    const existingIdentity = await env.DB.prepare(
+      `SELECT user_id FROM auth_identities WHERE provider = 'spotify' AND provider_id = ?`
+    )
+      .bind(profile.id)
+      .first<{ user_id: string }>();
+
+    let userId: string;
+    let onboarded: boolean;
+
+    if (existingIdentity) {
+      userId = existingIdentity.user_id;
+      const existingUser = await env.DB.prepare('SELECT onboarded_at FROM users WHERE id = ?')
+        .bind(userId)
+        .first<{ onboarded_at: number | null }>();
+      onboarded = existingUser?.onboarded_at != null;
+
+      await env.DB.prepare('UPDATE users SET deleted_at = NULL, updated_at = ? WHERE id = ?').bind(now, userId).run();
       await env.DB.prepare(
-        `UPDATE users SET access_token = ?, refresh_token = ?, token_expires_at = ?, spotify_avatar_url = ?, spotify_product = ?, deleted_at = NULL, updated_at = ?
-         WHERE id = ?`
+        `UPDATE music_source_tokens SET access_token = ?, refresh_token = ?, token_expires_at = ?, avatar_url = ?, product_tier = ?, updated_at = ?
+         WHERE user_id = ? AND provider = 'spotify'`
       ).bind(encryptedAccess, encryptedRefresh, expiresAt, avatarUrl, product, now, userId).run();
     } else {
+      userId = crypto.randomUUID();
+      onboarded = false;
+
+      // spotify_id is still a required, still-UNIQUE column on users (see
+      // Task 1's migration note -- it's a platform constraint, not an
+      // oversight, that it can't be dropped). Keep writing the real value
+      // here for constraint satisfaction; auth_identities is what the
+      // application actually reads going forward.
       await env.DB.prepare(
-        `INSERT INTO users (id, spotify_id, email, spotify_avatar_url, spotify_product, access_token, refresh_token, token_expires_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(userId, profile.id, profile.email ?? null, avatarUrl, product, encryptedAccess, encryptedRefresh, expiresAt, now, now).run();
+        `INSERT INTO users (id, spotify_id, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`
+      ).bind(userId, profile.id, profile.email ?? null, now, now).run();
+      await env.DB.prepare(
+        `INSERT INTO auth_identities (id, user_id, provider, provider_id, email, created_at, updated_at)
+         VALUES (?, ?, 'spotify', ?, ?, ?, ?)`
+      ).bind(crypto.randomUUID(), userId, profile.id, profile.email ?? null, now, now).run();
+      await env.DB.prepare(
+        `INSERT INTO music_source_tokens (id, user_id, provider, provider_user_id, access_token, refresh_token, token_expires_at, avatar_url, product_tier, created_at, updated_at)
+         VALUES (?, ?, 'spotify', ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(crypto.randomUUID(), userId, profile.id, encryptedAccess, encryptedRefresh, expiresAt, avatarUrl, product, now, now).run();
     }
 
     const { cookie } = await createSession(env.DB, userId, requestIsSecure(request));

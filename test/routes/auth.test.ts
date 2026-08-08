@@ -3,13 +3,14 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
 import worker from '../../src/index';
+import { insertTestUser } from '../helpers/createUser';
 
 beforeAll(async () => {
   await applySchema(env.DB);
 });
 
 beforeEach(async () => {
-  await env.DB.exec('DELETE FROM sessions; DELETE FROM users;');
+  await env.DB.exec('DELETE FROM sessions; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;');
 });
 
 describe('GET /login', () => {
@@ -148,7 +149,7 @@ describe('GET /callback', () => {
     vi.unstubAllGlobals();
   });
 
-  it('creates a user and session on a valid callback', async () => {
+  it('creates a user, identity, and token row on a valid callback', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo) => {
@@ -181,14 +182,21 @@ describe('GET /callback', () => {
     expect(res.status).toBe(302);
     expect(res.headers.get('Set-Cookie')).toContain('wl_session=');
 
-    const row = await env.DB.prepare('SELECT * FROM users WHERE spotify_id = ?')
+    const identity = await env.DB.prepare(`SELECT * FROM auth_identities WHERE provider = 'spotify' AND provider_id = ?`)
       .bind('spotify-xyz')
       .first<any>();
-    expect(row).toBeTruthy();
-    expect(row.email).toBe('user@example.com');
-    expect(row.access_token).not.toBe('at'); // encrypted, not plaintext
-    expect(row.spotify_avatar_url).toBe('https://img.example/avatar.jpg');
-    expect(row.spotify_product).toBe('premium');
+    expect(identity).toBeTruthy();
+    expect(identity.email).toBe('user@example.com');
+
+    const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(identity.user_id).first<any>();
+    expect(user.email).toBe('user@example.com');
+
+    const tokenRow = await env.DB.prepare(`SELECT * FROM music_source_tokens WHERE user_id = ? AND provider = 'spotify'`)
+      .bind(identity.user_id)
+      .first<any>();
+    expect(tokenRow.access_token).not.toBe('at'); // encrypted, not plaintext
+    expect(tokenRow.avatar_url).toBe('https://img.example/avatar.jpg');
+    expect(tokenRow.product_tier).toBe('premium');
 
     vi.unstubAllGlobals();
   });
@@ -221,7 +229,10 @@ describe('GET /callback', () => {
     vi.unstubAllGlobals();
 
     await env.DB.exec(
-      `DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE spotify_id = 'spotify-secure-check'); DELETE FROM users WHERE spotify_id = 'spotify-secure-check';`
+      `DELETE FROM sessions WHERE user_id IN (SELECT user_id FROM auth_identities WHERE provider_id = 'spotify-secure-check');
+       DELETE FROM music_source_tokens WHERE user_id IN (SELECT user_id FROM auth_identities WHERE provider_id = 'spotify-secure-check');
+       DELETE FROM auth_identities WHERE provider_id = 'spotify-secure-check';
+       DELETE FROM users WHERE spotify_id = 'spotify-secure-check';`
     );
 
     stubFetch();
@@ -235,24 +246,13 @@ describe('GET /callback', () => {
 
   it('refreshes the stored Spotify avatar URL and payment status when an existing user logs in again', async () => {
     const now = Date.now();
-    await env.DB.prepare(
-      `INSERT INTO users (id, spotify_id, email, spotify_avatar_url, spotify_product, access_token, refresh_token, token_expires_at, onboarded_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
-        'user-existing-avatar',
-        'spotify-avatar-user',
-        'user@example.com',
-        'https://img.example/old-avatar.jpg',
-        'free',
-        'old-at',
-        'old-rt',
-        now + 3600 * 1000,
-        now,
-        now,
-        now
-      )
-      .run();
+    const userId = await insertTestUser(env.DB, {
+      spotifyId: 'spotify-avatar-user',
+      email: 'user@example.com',
+      avatarUrl: 'https://img.example/old-avatar.jpg',
+      productTier: 'free',
+      onboardedAt: now,
+    });
 
     vi.stubGlobal(
       'fetch',
@@ -282,33 +282,17 @@ describe('GET /callback', () => {
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     expect(res.status).toBe(302);
 
-    const row = await env.DB.prepare('SELECT spotify_avatar_url, spotify_product FROM users WHERE spotify_id = ?')
-      .bind('spotify-avatar-user')
+    const tokenRow = await env.DB.prepare(`SELECT avatar_url, product_tier FROM music_source_tokens WHERE user_id = ? AND provider = 'spotify'`)
+      .bind(userId)
       .first<any>();
-    expect(row.spotify_avatar_url).toBe('https://img.example/new-avatar.jpg');
-    expect(row.spotify_product).toBe('premium');
+    expect(tokenRow.avatar_url).toBe('https://img.example/new-avatar.jpg');
+    expect(tokenRow.product_tier).toBe('premium');
 
     vi.unstubAllGlobals();
   });
 
   it('redirects an existing user whose onboarding is incomplete to /onboarding', async () => {
-    const now = Date.now();
-    await env.DB.prepare(
-      `INSERT INTO users (id, spotify_id, email, access_token, refresh_token, token_expires_at, onboarded_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
-        'user-existing-unonboarded',
-        'spotify-xyz',
-        'user@example.com',
-        'old-at',
-        'old-rt',
-        now + 3600 * 1000,
-        null,
-        now,
-        now
-      )
-      .run();
+    await insertTestUser(env.DB, { spotifyId: 'spotify-xyz', email: 'user@example.com', onboardedAt: null });
 
     vi.stubGlobal(
       'fetch',
@@ -341,29 +325,8 @@ describe('GET /callback', () => {
   });
 
   it('reactivates a soft-deleted account on login instead of leaving it unauthenticatable', async () => {
-    // getSessionUser() requires deleted_at IS NULL, and spotify_id is UNIQUE, so
-    // if login doesn't clear deleted_at here, the account is a permanent dead
-    // end: signing in "succeeds" with a 302 + session cookie, but every
-    // subsequent request 401s, and a fresh signup with the same Spotify account
-    // is impossible because the row already exists.
     const now = Date.now();
-    await env.DB.prepare(
-      `INSERT INTO users (id, spotify_id, email, access_token, refresh_token, token_expires_at, onboarded_at, deleted_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
-        'user-soft-deleted',
-        'spotify-soft-deleted',
-        'user@example.com',
-        'old-at',
-        'old-rt',
-        now + 3600 * 1000,
-        now,
-        now,
-        now,
-        now
-      )
-      .run();
+    await insertTestUser(env.DB, { spotifyId: 'spotify-soft-deleted', email: 'user@example.com', onboardedAt: now, deletedAt: now });
 
     vi.stubGlobal(
       'fetch',
@@ -389,32 +352,16 @@ describe('GET /callback', () => {
     expect(res.status).toBe(302);
     expect(res.headers.get('Location')).toBe('/');
 
-    const row = await env.DB.prepare('SELECT deleted_at FROM users WHERE spotify_id = ?')
-      .bind('spotify-soft-deleted')
-      .first<any>();
-    expect(row.deleted_at).toBeNull();
+    const identity = await env.DB.prepare(`SELECT user_id FROM auth_identities WHERE provider_id = 'spotify-soft-deleted'`).first<any>();
+    const user = await env.DB.prepare('SELECT deleted_at FROM users WHERE id = ?').bind(identity.user_id).first<any>();
+    expect(user.deleted_at).toBeNull();
 
     vi.unstubAllGlobals();
   });
 
   it('redirects an existing, fully-onboarded user to /', async () => {
     const now = Date.now();
-    await env.DB.prepare(
-      `INSERT INTO users (id, spotify_id, email, access_token, refresh_token, token_expires_at, onboarded_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
-        'user-existing-onboarded',
-        'spotify-onboarded',
-        'user2@example.com',
-        'old-at',
-        'old-rt',
-        now + 3600 * 1000,
-        now,
-        now,
-        now
-      )
-      .run();
+    await insertTestUser(env.DB, { spotifyId: 'spotify-onboarded', email: 'user2@example.com', onboardedAt: now });
 
     vi.stubGlobal(
       'fetch',
@@ -473,13 +420,7 @@ describe('POST /logout', () => {
   });
 
   it('deletes the session row from the database so the cookie cannot be replayed', async () => {
-    const now = Date.now();
-    await env.DB.prepare(
-      `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind('user-logout-test', 'spotify-logout-test', 'enc-at', 'enc-rt', now + 3600 * 1000, now, now)
-      .run();
+    await insertTestUser(env.DB, { id: 'user-logout-test', spotifyId: 'spotify-logout-test' });
 
     const { id: sessionId } = await createSession(env.DB, 'user-logout-test');
 
