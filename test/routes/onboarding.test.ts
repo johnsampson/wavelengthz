@@ -2,7 +2,6 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
-import { computeAge } from '../../src/lib/age';
 import worker from '../../src/index';
 
 beforeAll(async () => {
@@ -526,29 +525,15 @@ describe('POST /api/onboarding', () => {
       expect(body.error).toBe('invalid_age_range');
     });
 
-    const dob = '1995-01-01';
-    const selfAge = computeAge(dob, Date.now());
-
-    it.each([
-      [selfAge + 4, selfAge + 9], // range starts above the user's own age
-      [18, selfAge - 6], // range ends below the user's own age
-    ])('rejects and writes nothing when age_min=%s age_max=%s excludes the user\'s own age', async (age_min, age_max) => {
+    it('accepts a range that excludes the user\'s own age', async () => {
+      // No self-inclusion guardrail: a saved age range is a search
+      // preference, not a claim about the user's own age.
       const cookie = await sessionCookieFor('u1');
-      const res = await post(cookie, completePayload({ date_of_birth: dob, age_min, age_max }));
-      expect(res.status).toBe(400);
-      const body = await res.json<any>();
-      expect(body.error).toBe('age_range_excludes_self');
-      const row = await env.DB.prepare('SELECT onboarded_at FROM users WHERE id = ?').bind('u1').first<any>();
-      expect(row.onboarded_at).toBeNull();
-    });
-
-    it("accepts a range that includes the user's own age at its edge", async () => {
-      const cookie = await sessionCookieFor('u1');
-      const res = await post(cookie, completePayload({ date_of_birth: dob, age_min: selfAge, age_max: selfAge + 9 }));
+      const res = await post(cookie, completePayload({ date_of_birth: '1995-01-01', age_min: 18, age_max: 25 }));
       expect(res.status).toBe(200);
       const row = await env.DB.prepare('SELECT age_min, age_max FROM users WHERE id = ?').bind('u1').first<any>();
-      expect(row.age_min).toBe(selfAge);
-      expect(row.age_max).toBe(selfAge + 9);
+      expect(row.age_min).toBe(18);
+      expect(row.age_max).toBe(25);
     });
   });
 });

@@ -166,8 +166,6 @@ export function createSettingsApp() {
           this.locationUpdatedAt = Date.now() - LOCATION_COOLDOWN_MS + e.body.retryAfterMs;
           const days = this.locationCooldownRemainingDays;
           this.error = `You can only change your location once every 7 days. Try again in ${days} day${days === 1 ? '' : 's'}.`;
-        } else if (e.status === 400 && e.body?.error === 'age_range_excludes_self') {
-          this.error = 'Your age range must include your own age.';
         } else {
           this.error = 'Could not save your settings. Please try again.';
         }
