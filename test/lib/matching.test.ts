@@ -99,4 +99,23 @@ describe('createMatchIfMutual', () => {
     const matchesAfter = await env.DB.prepare('SELECT * FROM matches').all<any>();
     expect(matchesAfter.results.length).toBe(0);
   });
+
+  it('does nothing if either party is ghosted, even with mutual right swipes recorded (defense in depth)', async () => {
+    // GET /api/candidates/people already filters this at the discovery
+    // level, but a client could still call POST /api/swipe/people directly
+    // with an arbitrary target_id, bypassing it entirely.
+    await env.DB.prepare('UPDATE users SET ghosted_at = ? WHERE id = ?').bind(1000, 'u2').run();
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, created_at, updated_at) VALUES ('s3', 'u2', 'u1', 'right', 1000, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, created_at, updated_at) VALUES ('s4', 'u1', 'u2', 'right', 1000, 1000)`
+    ).run();
+
+    const result = await createMatchIfMutual(env.DB, 'u1', 'u2');
+    expect(result).toBeNull();
+
+    const matches = await env.DB.prepare('SELECT * FROM matches').all<any>();
+    expect(matches.results.length).toBe(0);
+  });
 });

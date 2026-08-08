@@ -917,6 +917,68 @@ describe('POST /api/swipe/people rejects a soft-deleted target', () => {
   });
 });
 
+describe('ghosted users (src/lib/reports.ts)', () => {
+  it('excludes a ghosted user from the normal candidate pool', async () => {
+    await env.DB.prepare('UPDATE users SET ghosted_at = ? WHERE id = ?').bind(2000, 'u2').run();
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'u2')).toBeUndefined();
+  });
+
+  it('excludes a ghosted liker from the like-priority queue', async () => {
+    await env.DB.prepare('UPDATE users SET ghosted_at = ? WHERE id = ?').bind(2000, 'u2').run();
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, match_score, created_at, updated_at) VALUES ('s1', 'u2', 'u1', 'right', 0.99, 1000, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'u2')).toBeUndefined();
+  });
+
+  it('does not affect a ghosted user\'s own candidate deck -- ghosting only hides someone from others', async () => {
+    await env.DB.prepare('UPDATE users SET ghosted_at = ? WHERE id = ?').bind(2000, 'u1').run();
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    // u2 and u3 (both non-ghosted, from the shared beforeEach) still show up normally.
+    expect(body.candidates.find((c: any) => c.id === 'u2')).toBeDefined();
+  });
+
+  it('returns 400 unknown target_id when swiping on a ghosted user', async () => {
+    await env.DB.prepare('UPDATE users SET ghosted_at = ? WHERE id = ?').bind(2000, 'u2').run();
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/swipe/people', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_id: 'u2', direction: 'right' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('unknown target_id');
+  });
+
+  it('blocks a non-self lookup of a ghosted user\'s profile, but allows self-view', async () => {
+    await env.DB.prepare('UPDATE users SET ghosted_at = ? WHERE id = ?').bind(2000, 'u2').run();
+
+    const viewerCookie = await cookieFor('u1');
+    const viewerRes = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: viewerCookie } }), env, {} as ExecutionContext);
+    expect(viewerRes.status).toBe(404);
+
+    const selfCookie = await cookieFor('u2');
+    const selfRes = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: selfCookie } }), env, {} as ExecutionContext);
+    expect(selfRes.status).toBe(200);
+    const selfBody = await selfRes.json<any>();
+    expect(selfBody.profile.isSelf).toBe(true);
+  });
+});
+
 describe('blocks enforced at the swipe/match-creation layer', () => {
   it('rejects swiping on someone you have blocked, with 403 and no swipe written', async () => {
     await env.DB.prepare(`INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES ('b1', 'u1', 'u2', 1000)`).run();

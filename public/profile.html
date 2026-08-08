@@ -204,6 +204,8 @@
           >
             No shared music activity yet.
           </p>
+
+          <button type="button" class="btn-ghost text-sm text-amber-400" @click="report()">Report this profile</button>
         </div>
       </template>
 
@@ -347,6 +349,22 @@
 
         prevPhoto() {
           this.carouselIndex = (this.carouselIndex - 1 + this.profile.photoUrls.length) % this.profile.photoUrls.length;
+        },
+
+        // Same crude prompt-based flow as match.html's report() -- there's no
+        // report UI anywhere in the app yet beyond this, so this matches
+        // rather than reinvents it. Reports here can cover anything on the
+        // profile (photos, bio) since the report itself just targets the
+        // user, same as everywhere else reporting exists.
+        async report() {
+          const reason = prompt('Reason (inappropriate_photos, harassment, fake_profile, spam, underage, other):');
+          if (!reason) return;
+          this.error = null;
+          try {
+            await api.report(this.userId, reason);
+          } catch (e) {
+            this.error = 'Could not submit that report. Please try again.';
+          }
         },
       };
     };
