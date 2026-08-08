@@ -81,6 +81,24 @@ describe('GET /login', () => {
     expect(res.headers.get('Set-Cookie')).toContain('wl_oauth_state=');
   });
 
+  it('builds an https redirect_uri for an allowlisted host even though the request URL itself is http -- the Cloudflare Tunnel case', async () => {
+    // cloudflared terminates TLS at Cloudflare's edge but proxies to this
+    // local Worker over plain http without forwarding X-Forwarded-Proto (a
+    // documented gap: github.com/cloudflare/cloudflared/issues/1245), so
+    // request.url looks like http even though the public/browser side is
+    // genuinely https. Spotify requires https for any non-loopback redirect
+    // URI, so getting this wrong makes the tunnel host completely unusable,
+    // not just insecure.
+    const req = new Request('http://allowed.example.com/login', {
+      headers: { 'CF-Visitor': '{"scheme":"https"}' },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(302);
+    const location = res.headers.get('Location')!;
+    expect(location).toContain(encodeURIComponent('https://allowed.example.com/callback'));
+    expect(res.headers.get('Set-Cookie')).toContain('Secure');
+  });
+
   it('still redirects to the canonical host when reached via a host that is neither SPOTIFY_REDIRECT_URI nor in SPOTIFY_ALLOWED_HOSTS', async () => {
     const req = new Request('https://not-allowed.example.com/login');
     const res = await worker.fetch(req, env, {} as ExecutionContext);

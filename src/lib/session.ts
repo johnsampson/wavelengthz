@@ -41,8 +41,35 @@ export function sessionCookieHeader(id: string, maxAgeSeconds: number, secure: b
   return `wl_session=${id}; Path=/; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Lax; Max-Age=${maxAgeSeconds}`;
 }
 
+// Cloudflare's edge sets CF-Visitor (`{"scheme":"https"}`) reliably for any
+// request that passed through it, including a Cloudflare Tunnel's public
+// hostname -- unlike X-Forwarded-Proto, which `cloudflared` does NOT forward
+// when proxying an HTTPS public request to a plain-HTTP local origin (a
+// documented gap: github.com/cloudflare/cloudflared/issues/1245). Without
+// this, a tunneled local dev session (SPOTIFY_ALLOWED_HOSTS set to a Tunnel
+// hostname) sees every request as http even though the public/browser side
+// is genuinely https -- wrong for the Secure cookie flag, and fatal for
+// auth.ts's redirect_uri construction, which Spotify then rejects outright
+// (it requires https for any host other than the 127.0.0.1 loopback).
+// Deployed Workers traffic never carries this ambiguity in the first place
+// (request.url's protocol is already correct there), so this only changes
+// behavior for a request tunneled to a local dev instance.
 export function requestIsSecure(request: Request): boolean {
+  const cfVisitor = request.headers.get('CF-Visitor');
+  if (cfVisitor) {
+    try {
+      const { scheme } = JSON.parse(cfVisitor);
+      if (scheme === 'https') return true;
+      if (scheme === 'http') return false;
+    } catch {
+      // Malformed header -- fall through to the URL-based check below.
+    }
+  }
   return new URL(request.url).protocol === 'https:';
+}
+
+export function requestProtocol(request: Request): string {
+  return requestIsSecure(request) ? 'https:' : 'http:';
 }
 
 export async function createSession(
