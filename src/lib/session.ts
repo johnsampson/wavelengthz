@@ -23,6 +23,7 @@ export interface UserRow {
   token_expires_at: number;
   onboarded_at: number | null;
   deleted_at: number | null;
+  ghosted_at: number | null;
   created_at: number;
   updated_at: number;
 }

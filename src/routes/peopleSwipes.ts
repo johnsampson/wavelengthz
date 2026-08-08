@@ -132,6 +132,12 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
     const minLat = me.lat! - latDelta;
     const maxLat = me.lat! + latDelta;
 
+    // u.ghosted_at IS NULL below: a ghosted user (src/lib/reports.ts) never
+    // appears as a candidate to anyone, in either query -- but this is `me`'s
+    // own deck request, and `me` is loaded separately via getSessionUser, so
+    // this has no effect on what a ghosted caller sees when browsing their
+    // own deck. Ghosting only ever hides someone *from* others, never from
+    // themselves.
     const likePriorityRows = await env.DB.prepare(
       `SELECT u.*, ps.match_score FROM people_swipes ps
        JOIN users u ON u.id = ps.swiper_id
@@ -140,7 +146,7 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
          AND NOT EXISTS (
            SELECT 1 FROM blocks b WHERE (b.blocker_id = ? AND b.blocked_id = ps.swiper_id) OR (b.blocker_id = ps.swiper_id AND b.blocked_id = ?)
          )
-         AND u.deleted_at IS NULL AND u.onboarded_at IS NOT NULL
+         AND u.deleted_at IS NULL AND u.ghosted_at IS NULL AND u.onboarded_at IS NOT NULL
          AND u.lat IS NOT NULL AND u.lng IS NOT NULL
          AND u.lat BETWEEN ? AND ?
          AND u.gender = ? AND u.seeking = ?
@@ -152,7 +158,7 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
 
     const poolRows = await env.DB.prepare(
       `SELECT u.* FROM users u
-       WHERE u.id != ? AND u.deleted_at IS NULL AND u.onboarded_at IS NOT NULL
+       WHERE u.id != ? AND u.deleted_at IS NULL AND u.ghosted_at IS NULL AND u.onboarded_at IS NOT NULL
          AND u.lat IS NOT NULL AND u.lng IS NOT NULL
          AND u.lat BETWEEN ? AND ?
          AND u.gender = ? AND u.seeking = ?
@@ -240,8 +246,13 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
     const targetId = request.params.id;
     const isSelf = targetId === me.id;
 
-    const target = await env.DB.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL AND onboarded_at IS NOT NULL')
-      .bind(targetId)
+    // ghosted_at IS NULL OR id = ?(me.id): asymmetric like everywhere else
+    // ghosting is enforced -- a ghosted user must still be able to view
+    // their own profile normally, only OTHERS looking them up are blocked.
+    const target = await env.DB.prepare(
+      'SELECT * FROM users WHERE id = ? AND deleted_at IS NULL AND onboarded_at IS NOT NULL AND (ghosted_at IS NULL OR id = ?)'
+    )
+      .bind(targetId, me.id)
       .first<UserRow>();
     if (!target) return new Response('Not found', { status: 404 });
 
@@ -335,7 +346,11 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
 
     const { target_id, direction } = await request.json<{ target_id: string; direction: 'left' | 'right' }>();
 
-    const target = await env.DB.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL')
+    // ghosted_at IS NULL: defense in depth -- a ghosted user never appears
+    // as a candidate (GET /api/candidates/people), so this only matters for
+    // a stale target_id the client already had. No interaction should ever
+    // register against a ghosted person, including a harmless left-swipe.
+    const target = await env.DB.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL AND ghosted_at IS NULL')
       .bind(target_id)
       .first<UserRow>();
     if (!target) return Response.json({ error: 'unknown target_id' }, { status: 400 });
