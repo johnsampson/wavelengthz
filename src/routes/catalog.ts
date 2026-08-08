@@ -14,7 +14,14 @@ import { recordCatalogGenres } from '../lib/genreCatalog';
 import { upsertArtist, upsertTrack } from '../lib/catalogUpsert';
 import { haversineKm } from '../lib/scoring';
 
-const ARTIST_PROFILE_TRACK_LIMIT = 10;
+// Raised from 10 -- fetchArtistTracks (src/lib/spotify.ts) now fans out
+// across up to 10 albums/singles in parallel rather than fetching
+// sequentially, so a higher target here no longer means proportionally
+// slower page loads. Actual results still vary per artist: this is a
+// ceiling on what's drawn from their most recent ARTIST_ALBUMS_PAGE_SIZE
+// releases, not a guarantee -- an artist with sparse releases may still
+// come back with fewer.
+const ARTIST_PROFILE_TRACK_LIMIT = 30;
 
 export function registerCatalogRoutes(router: RouterType) {
   router.get('/api/artists/search', async (request: Request, env: Env) => {
