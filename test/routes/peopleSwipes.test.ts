@@ -286,6 +286,21 @@ describe('age_min/age_max are enforced as a filter, not just a scoring weight', 
     const body = await res.json<any>();
     expect(body.candidates.find((c: any) => c.id === 'young-liker')).toBeUndefined();
   });
+
+  it('excludes a candidate whose OWN age range does not include the caller, even though the caller is within the candidate\'s range from the caller\'s side', async () => {
+    // The actual reported gap: only "is the candidate within MY range" was
+    // ever checked. u1 is 40 with a wide range (18-100) -- a 20-year-old
+    // candidate passes THAT check -- but if the candidate set their own
+    // preference to only see 18-25, u1 (40) is outside THEIR stated range
+    // and must not be shown to them (or them to u1) regardless.
+    await env.DB.prepare('UPDATE users SET age_min = 18, age_max = 100, date_of_birth = ? WHERE id = ?').bind('1986-01-01', 'u1').run(); // 40 as of NOW
+    await makeUserWithAge('narrow-young', '2006-01-01', 18, 25); // 20 years old, only wants 18-25
+
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'narrow-young')).toBeUndefined();
+  });
 });
 
 describe('GET /api/candidates/people query count does not scale with pool size', () => {
