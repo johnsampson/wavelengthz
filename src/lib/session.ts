@@ -16,11 +16,6 @@ export interface UserRow {
   seeking: string | null;
   intent: string | null;
   email: string | null;
-  spotify_avatar_url: string | null;
-  spotify_product: string | null;
-  access_token: string;
-  refresh_token: string;
-  token_expires_at: number;
   onboarded_at: number | null;
   deleted_at: number | null;
   ghosted_at: number | null;

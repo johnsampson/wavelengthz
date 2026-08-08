@@ -9,32 +9,28 @@ const env = {
   SPOTIFY_CLIENT_SECRET: 'secret',
 } as any;
 
+const user = { id: 'u1' } as any;
+
 describe('getValidAccessToken', () => {
-  it('returns the decrypted token directly when not expired', async () => {
+  it('returns the decrypted token directly when the stored token is not expired', async () => {
     const encAccess = await encrypt('valid-access-token', KEY);
     const encRefresh = await encrypt('refresh-token', KEY);
-    const user = {
-      id: 'u1',
-      access_token: encAccess,
-      refresh_token: encRefresh,
-      token_expires_at: Date.now() + 1000 * 60 * 60,
-    } as any;
-    const db = { prepare: vi.fn() } as any;
+    const row = { access_token: encAccess, refresh_token: encRefresh, token_expires_at: Date.now() + 1000 * 60 * 60 };
+    const first = vi.fn().mockResolvedValue(row);
+    const run = vi.fn();
+    const bind = vi.fn().mockReturnValue({ first, run });
+    const db = { prepare: vi.fn().mockReturnValue({ bind }) } as any;
 
     const token = await getValidAccessToken(user, env, db);
+
     expect(token).toBe('valid-access-token');
-    expect(db.prepare).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled(); // no refresh/update attempted
   });
 
-  it('refreshes and persists new tokens when expired', async () => {
+  it('refreshes and persists new tokens into music_source_tokens when expired', async () => {
     const encAccess = await encrypt('stale-access-token', KEY);
     const encRefresh = await encrypt('refresh-token', KEY);
-    const user = {
-      id: 'u1',
-      access_token: encAccess,
-      refresh_token: encRefresh,
-      token_expires_at: Date.now() - 1000,
-    } as any;
+    const row = { access_token: encAccess, refresh_token: encRefresh, token_expires_at: Date.now() - 1000 };
 
     vi.stubGlobal(
       'fetch',
@@ -46,14 +42,25 @@ describe('getValidAccessToken', () => {
       )
     );
 
+    const first = vi.fn().mockResolvedValue(row);
     const run = vi.fn().mockResolvedValue({});
-    const bind = vi.fn().mockReturnValue({ run });
-    const db = { prepare: vi.fn().mockReturnValue({ bind }) } as any;
+    const bind = vi.fn().mockReturnValue({ first, run });
+    const prepare = vi.fn().mockReturnValue({ bind });
+    const db = { prepare } as any;
 
     const token = await getValidAccessToken(user, env, db);
+
     expect(token).toBe('fresh-access-token');
-    expect(db.prepare).toHaveBeenCalledWith(expect.stringContaining('UPDATE users'));
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining('UPDATE music_source_tokens'));
 
     vi.unstubAllGlobals();
+  });
+
+  it('throws a clear error when the user has no Spotify token row', async () => {
+    const first = vi.fn().mockResolvedValue(null);
+    const bind = vi.fn().mockReturnValue({ first });
+    const db = { prepare: vi.fn().mockReturnValue({ bind }) } as any;
+
+    await expect(getValidAccessToken(user, env, db)).rejects.toThrow();
   });
 });
