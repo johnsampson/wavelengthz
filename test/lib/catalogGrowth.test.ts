@@ -103,3 +103,113 @@ describe('growOneGenre', () => {
     vi.unstubAllGlobals();
   });
 });
+
+import { growArtistCatalog, GROWTH_GENRES } from '../../src/lib/catalogGrowth';
+
+function stubArtistSearchByGenre(perGenre: (genre: string) => any[]) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo) => {
+      const url = input.toString();
+      if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+      if (url.includes('type=artist')) {
+        const genre = decodeURIComponent(url).match(/genre:"([^"]+)"/)?.[1] ?? '';
+        return new Response(JSON.stringify({ artists: { items: perGenre(genre) } }), { status: 200 });
+      }
+      if (url.includes('type=track')) return new Response(JSON.stringify({ tracks: { items: [] } }), { status: 200 });
+      throw new Error(`unexpected ${url}`);
+    })
+  );
+}
+
+describe('growArtistCatalog', () => {
+  it('tries genres in order and stops once maxInserted is reached', async () => {
+    const genresCalled: string[] = [];
+    stubArtistSearchByGenre((genre) => {
+      genresCalled.push(genre);
+      return [{ id: `${genre}-1`, name: genre, genres: [genre], images: [{ url: `https://img/${genre}.jpg` }], popularity: 50 }];
+    });
+
+    const result = await growArtistCatalog(env as any, 1000, { maxInserted: 2 });
+
+    expect(result.inserted).toBe(2);
+    expect(genresCalled).toEqual([GROWTH_GENRES[0], GROWTH_GENRES[1]]);
+    vi.unstubAllGlobals();
+  });
+
+  it('stops after maxGenres real Spotify attempts when given', async () => {
+    const genresCalled: string[] = [];
+    // Every genre returns nothing new, so maxInserted is never reached --
+    // only maxGenres bounds how many are tried.
+    stubArtistSearchByGenre((genre) => {
+      genresCalled.push(genre);
+      return [];
+    });
+
+    const result = await growArtistCatalog(env as any, 1000, { maxInserted: 100, maxGenres: 3 });
+
+    expect(result.inserted).toBe(0);
+    expect(genresCalled.length).toBe(3);
+    expect(result.genresTried.length).toBe(3);
+    vi.unstubAllGlobals();
+  });
+
+  it('skips a genre already marked exhausted without calling Spotify for it', async () => {
+    await env.DB.prepare(
+      `INSERT INTO genre_search_cursors (genre, search_offset, exhausted, updated_at) VALUES (?, 500, 1, 1000)`
+    ).bind(GROWTH_GENRES[0]).run();
+    const genresCalled: string[] = [];
+    stubArtistSearchByGenre((genre) => {
+      genresCalled.push(genre);
+      return [{ id: `${genre}-1`, name: genre, genres: [], images: [{ url: 'https://img/x.jpg' }], popularity: 50 }];
+    });
+
+    const result = await growArtistCatalog(env as any, 1000, { maxInserted: 1 });
+
+    expect(genresCalled).not.toContain(GROWTH_GENRES[0]);
+    expect(result.inserted).toBe(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('resets every genre cursor once all of them are exhausted', async () => {
+    for (const genre of GROWTH_GENRES) {
+      await env.DB.prepare(
+        `INSERT INTO genre_search_cursors (genre, search_offset, exhausted, updated_at) VALUES (?, 500, 1, 1000)`
+      ).bind(genre).run();
+    }
+    stubArtistSearchByGenre((genre) => [{ id: `${genre}-1`, name: genre, genres: [], images: [{ url: 'https://img/x.jpg' }], popularity: 50 }]);
+
+    const result = await growArtistCatalog(env as any, 2000, { maxInserted: 1 });
+
+    expect(result.inserted).toBe(1); // proves at least one genre was actually tried, not all skipped
+    const cursor = await env.DB.prepare('SELECT search_offset, exhausted FROM genre_search_cursors WHERE genre = ?')
+      .bind(GROWTH_GENRES[1]) // untried by this call (maxInserted:1 stopped after the first) but still reset
+      .first<any>();
+    expect(cursor.search_offset).toBe(0);
+    expect(cursor.exhausted).toBe(0);
+    vi.unstubAllGlobals();
+  });
+
+  it('records a per-genre error without aborting the rest of the run', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+        if (url.includes('type=artist')) {
+          const genre = decodeURIComponent(url).match(/genre:"([^"]+)"/)?.[1] ?? '';
+          if (genre === GROWTH_GENRES[0]) return new Response('server error', { status: 500 });
+          return new Response(JSON.stringify({ artists: { items: [{ id: `${genre}-1`, name: genre, genres: [], images: [{ url: 'https://img/x.jpg' }], popularity: 50 }] } }), { status: 200 });
+        }
+        if (url.includes('type=track')) return new Response(JSON.stringify({ tracks: { items: [] } }), { status: 200 });
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+
+    const result = await growArtistCatalog(env as any, 1000, { maxInserted: 1 });
+
+    expect(result.errors[GROWTH_GENRES[0]]).toBeTruthy();
+    expect(result.inserted).toBe(1); // second genre still succeeded
+    vi.unstubAllGlobals();
+  });
+});

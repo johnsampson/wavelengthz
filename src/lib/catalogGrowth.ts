@@ -1,4 +1,4 @@
-import { searchArtistsByGenre, searchTracksByArtistName } from './spotify';
+import { searchArtistsByGenre, searchTracksByArtistName, getClientCredentialsToken } from './spotify';
 import { recordCatalogGenres } from './genreCatalog';
 import { upsertArtist, upsertTrack } from './catalogUpsert';
 
@@ -89,4 +89,62 @@ export async function growOneGenre(db: D1Database, token: string, genre: string,
   );
 
   return { inserted };
+}
+
+export interface GrowthResult {
+  inserted: number;
+  genresTried: string[];
+  errors: Record<string, string>;
+}
+
+/**
+ * Round-robins GROWTH_GENRES (in list order) via growOneGenre, stopping
+ * once maxInserted new artists have been inserted, maxGenres real Spotify
+ * attempts have been made (if given -- the reactive fallback in
+ * musicSwipes.ts bounds this to keep a live request's latency reasonable;
+ * the cron job leaves it unbounded), or every genre has been considered
+ * once. A genre already known exhausted is skipped without costing a
+ * Spotify call or counting against maxGenres. If every genre was already
+ * exhausted before this call started, all cursors are reset to offset 0
+ * first so growth never stalls permanently.
+ */
+export async function growArtistCatalog(
+  env: Env,
+  now: number,
+  options: { maxInserted: number; maxGenres?: number }
+): Promise<GrowthResult> {
+  const cursorRows = await env.DB.prepare('SELECT genre, exhausted FROM genre_search_cursors').all<{ genre: string; exhausted: number }>();
+  let exhaustedByGenre = new Map(cursorRows.results.map((r) => [r.genre, r.exhausted === 1]));
+  const allExhausted = GROWTH_GENRES.every((genre) => exhaustedByGenre.get(genre) === true);
+
+  if (allExhausted) {
+    for (const genre of GROWTH_GENRES) {
+      await env.DB.prepare(
+        `INSERT INTO genre_search_cursors (genre, search_offset, exhausted, updated_at) VALUES (?, 0, 0, ?)
+         ON CONFLICT(genre) DO UPDATE SET search_offset = 0, exhausted = 0, updated_at = excluded.updated_at`
+      ).bind(genre, now).run();
+    }
+    exhaustedByGenre = new Map(GROWTH_GENRES.map((genre) => [genre, false]));
+  }
+
+  const token = await getClientCredentialsToken(env);
+  let inserted = 0;
+  const genresTried: string[] = [];
+  const errors: Record<string, string> = {};
+
+  for (const genre of GROWTH_GENRES) {
+    if (inserted >= options.maxInserted) break;
+    if (options.maxGenres !== undefined && genresTried.length >= options.maxGenres) break;
+    if (exhaustedByGenre.get(genre)) continue;
+
+    genresTried.push(genre);
+    try {
+      const { inserted: genreInserted } = await growOneGenre(env.DB, token, genre, now);
+      inserted += genreInserted;
+    } catch (error) {
+      errors[genre] = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  return { inserted, genresTried, errors };
 }
