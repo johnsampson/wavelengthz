@@ -57,7 +57,18 @@
     <div x-show="authed === true && !current" class="card flex w-full max-w-sm flex-col items-center gap-2 px-6 py-10 text-center">
       <span class="text-3xl">✨</span>
       <p class="font-semibold text-neutral-200">No more candidates right now</p>
-      <p class="text-sm text-neutral-400">Check back later for more matches.</p>
+      <p class="text-sm text-neutral-400" x-text="mode === 'music' ? 'Check back later, or search for an artist you like.' : 'Check back later for more matches.'"></p>
+      <button
+        x-show="mode === 'music'"
+        class="btn-secondary mt-2 flex w-full items-center justify-center gap-2"
+        @click="openSearch()"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5">
+          <circle cx="11" cy="11" r="7" />
+          <path d="m21 21-4.35-4.35" />
+        </svg>
+        Search for an artist
+      </button>
     </div>
 
     <div class="flex items-center gap-8" x-show="authed === true && current && !matchModal">
