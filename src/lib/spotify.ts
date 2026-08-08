@@ -149,24 +149,80 @@ export async function searchArtistsByGenre(token: string, genre: string, limit: 
 // Related Artists/Recommendations/Audio Features/Analysis). It's a hard
 // removal, not a smaller result set or a client-credentials-only gap -- the
 // only way back is Extended Quota Mode (see docs/spotify-extended-quota.md),
-// which needs an approved org + 250k+ MAU we don't have yet. Until then this
-// falls back to the still-open track search endpoint instead, searching by
-// artist name rather than id.
+// which needs an approved org + 250k+ MAU we don't have yet.
 //
-// `artist:"NAME"` is still a fuzzy text match, not an exact filter -- two
-// unrelated Spotify artists can share a name, and the search happily returns
-// tracks from either. Each result carries its own `artists` list with real
-// Spotify ids, so that's checked against the artist id we actually asked
-// about and anything that doesn't match is dropped, rather than trusting the
-// search to have disambiguated correctly.
-export async function searchTracksByArtistName(token: string, artistId: string, artistName: string, limit: number) {
+// The previous fallback (GET /v1/search?type=track&q=artist:"NAME", filtered
+// down to results whose `artists` list actually contains the artist id) is
+// itself unreliable enough to come back completely empty for some real
+// artists -- confirmed live against the API for "Cirez D" (Eric Prydz's
+// alias): the exact query artist:"Cirez D" returns 10 results, and Spotify's
+// search index attributes every single one to Eric Prydz's mainline
+// catalog, with zero Cirez D credit on any of them. Filtering correctly
+// rejects all 10 (they're genuinely the wrong artist), leaving nothing --
+// "No tracks found" isn't a bug in the filter, it's this endpoint being
+// unable to find the artist's own tracks at all once fuzzy name matching
+// gets captured by a more famous associated identity.
+//
+// GET /v1/artists/{id}/albums -> GET /v1/albums/{id}/tracks is id-scoped
+// end to end -- no text matching, no alias ambiguity, and (unlike top-tracks)
+// not restricted in Development Mode. Verified live: this returns Cirez D's
+// actual discography (Valborg/The Raid, DARE U, Mokba, ...) with every track
+// correctly credited to Cirez D.
+async function fetchArtistAlbumIds(token: string, artistId: string, limit: number): Promise<string[]> {
   const res = await fetch(
-    `https://api.spotify.com/v1/search?type=track&limit=${limit}&q=${encodeURIComponent(`artist:"${artistName}"`)}`,
+    // include_groups excludes "compilation" and "appears_on" -- releases
+    // where this artist isn't the actual album artist, which is exactly the
+    // ambiguity this replaces the name-search fallback to avoid.
+    `https://api.spotify.com/v1/artists/${artistId}/albums?include_groups=album,single&limit=${limit}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
-  if (!res.ok) throw new Error(`Spotify track search (by artist name) failed: ${res.status} ${await res.text()}`);
-  const data = await res.json<{ tracks: { items: any[] } }>();
-  return data.tracks.items.filter((track) => track.artists?.some((a: any) => a.id === artistId));
+  if (!res.ok) throw new Error(`Spotify artist albums fetch failed: ${res.status} ${await res.text()}`);
+  const data = await res.json<{ items: Array<{ id: string }> }>();
+  return data.items.map((album) => album.id);
+}
+
+async function fetchAlbumTrackIds(token: string, albumId: string, limit: number): Promise<string[]> {
+  const res = await fetch(`https://api.spotify.com/v1/albums/${albumId}/tracks?limit=${limit}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Spotify album tracks fetch failed: ${res.status} ${await res.text()}`);
+  const data = await res.json<{ items: Array<{ id: string }> }>();
+  return data.items.map((track) => track.id);
+}
+
+async function fetchTracksByIds(token: string, trackIds: string[]) {
+  // GET /v1/albums/{id}/tracks returns simplified track objects with no
+  // `album` field, so no album art -- full details come from fetchTrackById
+  // instead. The batch form of this lookup (GET /v1/tracks?ids=, plural)
+  // also 403s in Development Mode -- confirmed live, even with a single id
+  // -- while the singular GET /v1/tracks/{id} used here works fine, so this
+  // is one request per track rather than one batch request. One id failing
+  // (removed/region-locked track) shouldn't drop the rest of the artist's
+  // tracks, so each fetch is isolated rather than letting one throw wipe out
+  // the whole list.
+  const tracks: any[] = [];
+  for (const id of trackIds) {
+    try {
+      tracks.push(await fetchTrackById(token, id));
+    } catch {
+      // skip -- see comment above
+    }
+  }
+  return tracks;
+}
+
+export async function fetchArtistTracks(token: string, artistId: string, limit: number) {
+  const albumIds = await fetchArtistAlbumIds(token, artistId, Math.min(limit, 20));
+  const trackIds: string[] = [];
+  for (const albumId of albumIds) {
+    if (trackIds.length >= limit) break;
+    trackIds.push(...(await fetchAlbumTrackIds(token, albumId, limit - trackIds.length)));
+  }
+  const tracks = await fetchTracksByIds(token, trackIds.slice(0, limit));
+  // Belt-and-suspenders: a release where this artist is the album artist
+  // should credit them on every track, but this costs nothing and matches
+  // the same defensive check the old search-based path needed for real.
+  return tracks.filter((track) => track.artists?.some((a: any) => a.id === artistId));
 }
 
 export async function searchArtistsByName(token: string, query: string, limit: number) {

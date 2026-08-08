@@ -99,18 +99,29 @@ describe('GET /api/artists/search', () => {
 });
 
 describe('GET /api/artists/:id', () => {
-  // The dedicated "top tracks" endpoint is 403'd for this app (see the
-  // comment on searchTracksByArtistName), so the artist-profile route falls
-  // back to /v1/search?type=track -- shape is { tracks: { items: [...] } },
-  // not { tracks: [...] }.
+  // The dedicated "top tracks" endpoint is 403'd for this app (see
+  // fetchArtistTracks's comment block in spotify.ts), so the artist-profile
+  // route goes via GET /v1/artists/{id}/albums -> GET /v1/albums/{id}/tracks
+  // -> individual GET /v1/tracks/{id} calls for full details (the batch
+  // GET /v1/tracks?ids= form 403s too, even for one id). Simplified here to
+  // a single fake album containing every requested track.
   function stubTrackSearch(trackSearchResponse: any, extra?: (url: string) => Response | null) {
+    const tracks = trackSearchResponse.tracks;
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo) => {
         const url = input.toString();
         if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
-        if (url.includes('/v1/search') && url.includes('type=track')) {
-          return new Response(JSON.stringify({ tracks: { items: trackSearchResponse.tracks } }), { status: 200 });
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: tracks.length > 0 ? [{ id: 'album-1' }] : [] }), { status: 200 });
+        }
+        if (url.includes('/albums/album-1/tracks')) {
+          return new Response(JSON.stringify({ items: tracks.map((t: any) => ({ id: t.id })) }), { status: 200 });
+        }
+        const trackByIdMatch = url.match(/\/v1\/tracks\/([^/?]+)$/);
+        if (trackByIdMatch) {
+          const track = tracks.find((t: any) => t.id === trackByIdMatch[1]);
+          return track ? new Response(JSON.stringify(track), { status: 200 }) : new Response('not found', { status: 404 });
         }
         if (extra) {
           const res = extra(url);

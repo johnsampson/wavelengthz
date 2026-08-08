@@ -4,7 +4,7 @@ import { getValidAccessToken } from '../lib/tokens';
 import {
   searchArtistsByName,
   fetchArtistById,
-  searchTracksByArtistName,
+  fetchArtistTracks,
   searchTracksByArtist,
   fetchTrackById,
   getClientCredentialsToken,
@@ -14,7 +14,6 @@ import { recordCatalogGenres } from '../lib/genreCatalog';
 import { upsertArtist, upsertTrack } from '../lib/catalogUpsert';
 import { haversineKm } from '../lib/scoring';
 
-// Spotify's real max for /v1/search's `limit` param.
 const ARTIST_PROFILE_TRACK_LIMIT = 10;
 
 export function registerCatalogRoutes(router: RouterType) {
@@ -73,7 +72,7 @@ export function registerCatalogRoutes(router: RouterType) {
     }
 
     const artistGenres = genresFromRow(artistRow.genres);
-    const topTracks = await searchTracksByArtistName(token, artistRow.spotify_id, artistRow.name, ARTIST_PROFILE_TRACK_LIMIT);
+    const topTracks = await fetchArtistTracks(token, artistRow.spotify_id, ARTIST_PROFILE_TRACK_LIMIT);
     const now = Date.now();
     // Pairs each live Spotify track with its resolved internal id -- needed
     // because everything downstream (swipe direction lookup, totalLikes,
