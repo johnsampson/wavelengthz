@@ -13,27 +13,50 @@ function parseCookie(request: Request, name: string): string | null {
   return null;
 }
 
+// Hosts OAuth can run on directly: SPOTIFY_REDIRECT_URI's own host, plus
+// anything explicitly opted into via SPOTIFY_ALLOWED_HOSTS (comma-separated,
+// e.g. a Cloudflare Tunnel hostname for testing on a real phone). This is an
+// explicit allowlist, not "trust whatever Host header shows up" -- Spotify
+// enforces its own exact-match allowlist of registered redirect URIs
+// regardless, but blindly trusting the request's own host here would still
+// let this app hand out an oauth-state cookie (and construct a redirect_uri
+// sent to Spotify) for literally any host that reaches it, which is a wider
+// trust surface than intended, not a wider capability than Spotify allows.
+function isAllowedHost(host: string, env: Env): boolean {
+  if (host === new URL(env.SPOTIFY_REDIRECT_URI).host) return true;
+  return (env.SPOTIFY_ALLOWED_HOSTS ?? '')
+    .split(',')
+    .map((h) => h.trim())
+    .filter(Boolean)
+    .includes(host);
+}
+
+function callbackUrlForHost(protocol: string, host: string): string {
+  return `${protocol}//${host}/callback`;
+}
+
 export function registerAuthRoutes(router: RouterType) {
   router.get('/login', async (request: IRequest, env: Env) => {
     // The state cookie set below is host-scoped, but Spotify always redirects
-    // back to whatever host is baked into SPOTIFY_REDIRECT_URI -- if /login is
-    // reached via a *different* host that happens to resolve to the same
-    // server (classically "localhost" vs "127.0.0.1": `wrangler dev` itself
-    // prints "Ready on http://localhost:8787" on every single restart, while
-    // SPOTIFY_REDIRECT_URI is configured as 127.0.0.1), the cookie set here
-    // would never be sent back on the callback, producing "Invalid OAuth
-    // state" 100% of the time with nothing actually wrong server-side.
-    // Funnel onto the canonical host first, before ever setting the cookie.
+    // back to whatever host the redirect_uri we send it names -- if /login is
+    // reached via a host that isn't allowed to complete OAuth (see
+    // isAllowedHost above; classically "localhost" vs "127.0.0.1":
+    // `wrangler dev` itself prints "Ready on http://localhost:8787" on every
+    // single restart, while SPOTIFY_REDIRECT_URI is configured as 127.0.0.1),
+    // a cookie set here would never be sent back on the callback, producing
+    // "Invalid OAuth state" 100% of the time with nothing actually wrong
+    // server-side. Funnel onto the canonical host first, before ever setting
+    // the cookie.
     const url = new URL(request.url);
-    const redirectUri = new URL(env.SPOTIFY_REDIRECT_URI);
-    if (url.host !== redirectUri.host) {
+    if (!isAllowedHost(url.host, env)) {
+      const redirectUri = new URL(env.SPOTIFY_REDIRECT_URI);
       url.protocol = redirectUri.protocol;
       url.host = redirectUri.host;
       return new Response(null, { status: 302, headers: { Location: url.toString() } });
     }
 
     const state = crypto.randomUUID();
-    const authUrl = buildAuthUrl(state, env);
+    const authUrl = buildAuthUrl(state, env, callbackUrlForHost(url.protocol, url.host));
     const secure = requestIsSecure(request);
     return new Response(null, {
       status: 302,
@@ -54,7 +77,14 @@ export function registerAuthRoutes(router: RouterType) {
       return new Response('Invalid OAuth state', { status: 400 });
     }
 
-    const token = await exchangeCodeForToken(code, env);
+    // The redirect_uri sent here must exactly match whichever one /login
+    // used to start this flow -- which, since Spotify only ever redirects
+    // back to a host it was actually told to, is this request's own host
+    // whenever that host is allowed (falling back to the configured default
+    // is just defensive; a callback landing on a non-allowed host shouldn't
+    // happen in practice).
+    const redirectUri = isAllowedHost(url.host, env) ? callbackUrlForHost(url.protocol, url.host) : env.SPOTIFY_REDIRECT_URI;
+    const token = await exchangeCodeForToken(code, env, redirectUri);
     const profile = await fetchSpotifyProfile(token.access_token);
 
     const encryptedAccess = await encrypt(token.access_token, env.TOKEN_ENCRYPTION_KEY);
