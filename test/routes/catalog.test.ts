@@ -124,8 +124,8 @@ describe('GET /api/artists/:id', () => {
   it('returns an already-catalogued artist with its top tracks upserted and no swipe direction yet', async () => {
     stubTrackSearch({
       tracks: [
-        { id: 'trk1', name: 'Track One', album: { images: [{ url: 'https://img.example/trk1.jpg' }] }, preview_url: 'https://prev/trk1' },
-        { id: 'trk2', name: 'Track Two', album: { images: [] }, preview_url: null },
+        { id: 'trk1', name: 'Track One', artists: [{ id: 'spotify-local-1', name: 'Local Artist' }], album: { images: [{ url: 'https://img.example/trk1.jpg' }] }, preview_url: 'https://prev/trk1' },
+        { id: 'trk2', name: 'Track Two', artists: [{ id: 'spotify-local-1', name: 'Local Artist' }], album: { images: [] }, preview_url: null },
       ],
     });
     const cookie = await cookieFor('u1');
@@ -180,7 +180,7 @@ describe('GET /api/artists/:id', () => {
 
   it('reports the current direction for a track the user already swiped on', async () => {
     stubTrackSearch({
-      tracks: [{ id: 'trk1', name: 'Track One', album: { images: [] }, preview_url: null }],
+      tracks: [{ id: 'trk1', name: 'Track One', artists: [{ id: 'spotify-local-1', name: 'Local Artist' }], album: { images: [] }, preview_url: null }],
     });
     // Pre-seed the track under a known internal id so the swipe fixture
     // below can reference it -- upsertTrack finds it via spotify_id and

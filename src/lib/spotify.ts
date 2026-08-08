@@ -143,19 +143,30 @@ export async function searchArtistsByGenre(token: string, genre: string, limit: 
 // Spotify's dedicated "Get Artist's Top Tracks" endpoint (GET
 // /v1/artists/{id}/top-tracks) now returns a blanket 403 Forbidden for this
 // app -- confirmed directly against the live API (every artist tried, both
-// with a client-credentials token and a real user token), consistent with
-// Spotify having moved that endpoint behind Extended Quota Mode access that
-// this app doesn't have. There is no token or scope that fixes this from our
-// side, so this falls back to the still-open track search endpoint instead,
-// searching by artist name rather than id.
-export async function searchTracksByArtistName(token: string, artistName: string, limit: number) {
+// with a client-credentials token and a real user token). This is Spotify's
+// February 2026 Web API change, which removed the endpoint entirely for apps
+// in Development Mode (not the earlier Nov 2024 round, which only hit
+// Related Artists/Recommendations/Audio Features/Analysis). It's a hard
+// removal, not a smaller result set or a client-credentials-only gap -- the
+// only way back is Extended Quota Mode (see docs/spotify-extended-quota.md),
+// which needs an approved org + 250k+ MAU we don't have yet. Until then this
+// falls back to the still-open track search endpoint instead, searching by
+// artist name rather than id.
+//
+// `artist:"NAME"` is still a fuzzy text match, not an exact filter -- two
+// unrelated Spotify artists can share a name, and the search happily returns
+// tracks from either. Each result carries its own `artists` list with real
+// Spotify ids, so that's checked against the artist id we actually asked
+// about and anything that doesn't match is dropped, rather than trusting the
+// search to have disambiguated correctly.
+export async function searchTracksByArtistName(token: string, artistId: string, artistName: string, limit: number) {
   const res = await fetch(
     `https://api.spotify.com/v1/search?type=track&limit=${limit}&q=${encodeURIComponent(`artist:"${artistName}"`)}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
   if (!res.ok) throw new Error(`Spotify track search (by artist name) failed: ${res.status} ${await res.text()}`);
   const data = await res.json<{ tracks: { items: any[] } }>();
-  return data.tracks.items;
+  return data.tracks.items.filter((track) => track.artists?.some((a: any) => a.id === artistId));
 }
 
 export async function searchArtistsByName(token: string, query: string, limit: number) {
