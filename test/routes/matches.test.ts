@@ -67,6 +67,24 @@ describe('GET /api/matches', () => {
     expect(body.matches.length).toBe(0);
   });
 
+  it('hides a match from the non-ghosted participant once the other side is ghosted, but not from the ghosted side itself', async () => {
+    // Ghosting (src/lib/reports.ts) is asymmetric, unlike a soft-delete: the
+    // ghosted user keeps using the app completely normally, unaware -- only
+    // OTHERS lose the ability to see or interact with them.
+    await env.DB.prepare('UPDATE users SET ghosted_at = ? WHERE id = ?').bind(2000, 'u2').run();
+
+    const u1Cookie = await cookieFor('u1');
+    const u1Res = await worker.fetch(new Request('http://localhost/api/matches', { headers: { Cookie: u1Cookie } }), env, {} as ExecutionContext);
+    const u1Body = await u1Res.json<any>();
+    expect(u1Body.matches.length).toBe(0);
+
+    const u2Cookie = await cookieFor('u2');
+    const u2Res = await worker.fetch(new Request('http://localhost/api/matches', { headers: { Cookie: u2Cookie } }), env, {} as ExecutionContext);
+    const u2Body = await u2Res.json<any>();
+    expect(u2Body.matches.length).toBe(1);
+    expect(u2Body.matches[0].otherUserId).toBe('u1');
+  });
+
   it('hides a match less than the delay old -- passive discovery only, per getMatchNotificationDelayMs', async () => {
     const delayMs = getMatchNotificationDelayMs(env);
     await env.DB.prepare('UPDATE matches SET created_at = ? WHERE id = ?').bind(Date.now() - (delayMs - 60 * 1000), 'm1').run(); // 1 minute inside the window
@@ -111,6 +129,20 @@ describe('GET /api/matches/:id', () => {
     const cookie = await cookieFor('u1');
     const res = await worker.fetch(new Request('http://localhost/api/matches/m1', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
     expect(res.status).toBe(403);
+  });
+
+  it('blocks the non-ghosted participant from viewing the match, but not the ghosted participant themselves', async () => {
+    await env.DB.prepare('UPDATE users SET ghosted_at = ? WHERE id = ?').bind(2000, 'u2').run();
+
+    const u1Cookie = await cookieFor('u1');
+    const u1Res = await worker.fetch(new Request('http://localhost/api/matches/m1', { headers: { Cookie: u1Cookie } }), env, {} as ExecutionContext);
+    expect(u1Res.status).toBe(403);
+
+    const u2Cookie = await cookieFor('u2');
+    const u2Res = await worker.fetch(new Request('http://localhost/api/matches/m1', { headers: { Cookie: u2Cookie } }), env, {} as ExecutionContext);
+    expect(u2Res.status).toBe(200);
+    const u2Body = await u2Res.json<any>();
+    expect(u2Body.match.otherUserId).toBe('u1');
   });
 
   it('returns the other participant', async () => {

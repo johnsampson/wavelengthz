@@ -203,4 +203,45 @@ describe('POST /api/report', () => {
     expect(row.status).toBe('open');
     expect(row.details).toBe('rude messages');
   });
+
+  async function report(reporterId: string, targetId: string, reason = 'other') {
+    const cookie = await cookieFor(reporterId);
+    return worker.fetch(
+      new Request('http://localhost/api/report', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: targetId, reason }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+  }
+
+  it('ghosts a user once 3 distinct people have reported them', async () => {
+    await makeUser('u3');
+    await makeUser('u4');
+
+    await report('u1', 'u2');
+    let target = await env.DB.prepare('SELECT ghosted_at FROM users WHERE id = ?').bind('u2').first<any>();
+    expect(target.ghosted_at).toBeNull();
+
+    await report('u3', 'u2');
+    target = await env.DB.prepare('SELECT ghosted_at FROM users WHERE id = ?').bind('u2').first<any>();
+    expect(target.ghosted_at).toBeNull();
+
+    await report('u4', 'u2');
+    target = await env.DB.prepare('SELECT ghosted_at FROM users WHERE id = ?').bind('u2').first<any>();
+    expect(target.ghosted_at).not.toBeNull();
+  });
+
+  it('does not ghost from repeated reports by the same person -- distinct reporters only', async () => {
+    // Otherwise one person could unilaterally ghost someone just by filing
+    // the same report three times.
+    await report('u1', 'u2');
+    await report('u1', 'u2');
+    await report('u1', 'u2');
+
+    const target = await env.DB.prepare('SELECT ghosted_at FROM users WHERE id = ?').bind('u2').first<any>();
+    expect(target.ghosted_at).toBeNull();
+  });
 });

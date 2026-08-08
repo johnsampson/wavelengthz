@@ -93,6 +93,16 @@ export async function createMatchIfMutual(
     .first();
   if (blocked) return null;
 
+  // Defense in depth: never create a match involving a ghosted user
+  // (src/lib/reports.ts), even with mutual right-swipes recorded -- ghosting
+  // is meant to be invisible to the ghosted person, which specifically means
+  // no new interaction (a match) can ever form on their side either.
+  const ghosted = await db
+    .prepare(`SELECT 1 FROM users WHERE id IN (?, ?) AND ghosted_at IS NOT NULL`)
+    .bind(swiperId, targetId)
+    .first();
+  if (ghosted) return null;
+
   const [userA, userB] = [swiperId, targetId].sort();
   const matchId = crypto.randomUUID();
   const now = Date.now();
