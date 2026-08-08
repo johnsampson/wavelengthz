@@ -15,6 +15,23 @@ function parseCookie(request: Request, name: string): string | null {
 
 export function registerAuthRoutes(router: RouterType) {
   router.get('/login', async (request: IRequest, env: Env) => {
+    // The state cookie set below is host-scoped, but Spotify always redirects
+    // back to whatever host is baked into SPOTIFY_REDIRECT_URI -- if /login is
+    // reached via a *different* host that happens to resolve to the same
+    // server (classically "localhost" vs "127.0.0.1": `wrangler dev` itself
+    // prints "Ready on http://localhost:8787" on every single restart, while
+    // SPOTIFY_REDIRECT_URI is configured as 127.0.0.1), the cookie set here
+    // would never be sent back on the callback, producing "Invalid OAuth
+    // state" 100% of the time with nothing actually wrong server-side.
+    // Funnel onto the canonical host first, before ever setting the cookie.
+    const url = new URL(request.url);
+    const redirectUri = new URL(env.SPOTIFY_REDIRECT_URI);
+    if (url.host !== redirectUri.host) {
+      url.protocol = redirectUri.protocol;
+      url.host = redirectUri.host;
+      return new Response(null, { status: 302, headers: { Location: url.toString() } });
+    }
+
     const state = crypto.randomUUID();
     const authUrl = buildAuthUrl(state, env);
     const secure = requestIsSecure(request);
