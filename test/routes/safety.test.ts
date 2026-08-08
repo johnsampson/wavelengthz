@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
+import { insertTestUser } from '../helpers/createUser';
 import worker from '../../src/index';
 
 beforeAll(async () => {
@@ -9,10 +10,15 @@ beforeAll(async () => {
 });
 
 async function makeUser(id: string) {
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES (?, ?, 'a', 'r', 9999999999999, 1000, 1000)`
-  ).bind(id, `sp-${id}`).run();
+  await insertTestUser(env.DB, {
+    id,
+    spotifyId: `sp-${id}`,
+    accessToken: 'a',
+    refreshToken: 'r',
+    tokenExpiresAt: 9999999999999,
+    createdAt: 1000,
+    updatedAt: 1000,
+  });
 }
 
 async function cookieFor(userId: string) {
@@ -23,7 +29,7 @@ async function cookieFor(userId: string) {
 beforeEach(async () => {
   // Child rows before parent `users` rows -- D1 enforces FK constraints here.
   // blocks, reports, matches, sessions, and people_swipes all reference users(id).
-  await env.DB.exec('DELETE FROM blocks; DELETE FROM reports; DELETE FROM matches; DELETE FROM people_swipes; DELETE FROM sessions; DELETE FROM users;');
+  await env.DB.exec('DELETE FROM blocks; DELETE FROM reports; DELETE FROM matches; DELETE FROM people_swipes; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM sessions; DELETE FROM users;');
   await makeUser('u1');
   await makeUser('u2');
 });

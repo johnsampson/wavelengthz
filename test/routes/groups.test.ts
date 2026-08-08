@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
+import { insertTestUser } from '../helpers/createUser';
 import worker from '../../src/index';
 
 beforeAll(async () => {
@@ -9,10 +10,19 @@ beforeAll(async () => {
 });
 
 async function makeUser(id: string, lat = 30.27, lng = -97.74, maxDistanceKm = 80) {
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, onboarded_at, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 1000, 'a', 'r', 9999999999999, 1000, 1000)`
-  ).bind(id, `sp-${id}`, lat, lng, maxDistanceKm).run();
+  await insertTestUser(env.DB, {
+    id,
+    spotifyId: `sp-${id}`,
+    lat,
+    lng,
+    maxDistanceKm,
+    onboardedAt: 1000,
+    accessToken: 'a',
+    refreshToken: 'r',
+    tokenExpiresAt: 9999999999999,
+    createdAt: 1000,
+    updatedAt: 1000,
+  });
 }
 
 async function cookieFor(userId: string) {
@@ -23,7 +33,7 @@ async function cookieFor(userId: string) {
 beforeEach(async () => {
   // Children before parents -- D1 enforces FK constraints.
   await env.DB.exec(
-    'DELETE FROM group_messages; DELETE FROM group_members; DELETE FROM groups; DELETE FROM blocks; DELETE FROM sessions; DELETE FROM users;'
+    'DELETE FROM group_messages; DELETE FROM group_members; DELETE FROM groups; DELETE FROM blocks; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM sessions; DELETE FROM users;'
   );
   await makeUser('u1');
 });
@@ -85,9 +95,15 @@ describe('POST /api/groups', () => {
   });
 
   it('rejects when the caller has not completed onboarding', async () => {
-    await env.DB.prepare(
-      `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at) VALUES ('u2', 'sp2', 'a', 'r', 9999999999999, 1000, 1000)`
-    ).run();
+    await insertTestUser(env.DB, {
+      id: 'u2',
+      spotifyId: 'sp2',
+      accessToken: 'a',
+      refreshToken: 'r',
+      tokenExpiresAt: 9999999999999,
+      createdAt: 1000,
+      updatedAt: 1000,
+    });
     const cookie = await cookieFor('u2');
     const res = await worker.fetch(
       new Request('http://localhost/api/groups', {

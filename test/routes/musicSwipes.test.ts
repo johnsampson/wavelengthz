@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
+import { insertTestUser } from '../helpers/createUser';
 import { genresToObject } from '../../src/lib/genres';
 import worker from '../../src/index';
 
@@ -11,12 +12,17 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await env.DB.exec(
-    'DELETE FROM user_genres; DELETE FROM music_swipes; DELETE FROM sessions; DELETE FROM tracks; DELETE FROM users; DELETE FROM artists;'
+    'DELETE FROM user_genres; DELETE FROM music_swipes; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM sessions; DELETE FROM tracks; DELETE FROM users; DELETE FROM artists;'
   );
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES ('u1', 'sp1', 'a', 'r', 9999999999999, 1000, 1000)`
-  ).run();
+  await insertTestUser(env.DB, {
+    id: 'u1',
+    spotifyId: 'sp1',
+    accessToken: 'a',
+    refreshToken: 'r',
+    tokenExpiresAt: 9999999999999,
+    createdAt: 1000,
+    updatedAt: 1000,
+  });
   await env.DB.prepare(
     `INSERT INTO artists (id, name, genres, image_url, source, approved, created_at) VALUES ('a1', 'Artist One', '{}', 'https://img.example/a1.jpg', 'seed', 1, 1000)`
   ).run();
@@ -528,10 +534,15 @@ describe('GET /api/swipes/music and PATCH', () => {
   });
 
   it('rejects patching a swipe owned by another user', async () => {
-    await env.DB.prepare(
-      `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-       VALUES ('u2', 'sp2', 'a', 'r', 9999999999999, 1000, 1000)`
-    ).run();
+    await insertTestUser(env.DB, {
+      id: 'u2',
+      spotifyId: 'sp2',
+      accessToken: 'a',
+      refreshToken: 'r',
+      tokenExpiresAt: 9999999999999,
+      createdAt: 1000,
+      updatedAt: 1000,
+    });
     await env.DB.prepare(
       `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s1', 'u1', 'artist', 'a1', 'left', 1000, 1000)`
     ).run();

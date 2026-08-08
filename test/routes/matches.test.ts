@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
+import { insertTestUser } from '../helpers/createUser';
 import { getMatchNotificationDelayMs } from '../../src/lib/notifications';
 import worker from '../../src/index';
 
@@ -10,10 +11,17 @@ beforeAll(async () => {
 });
 
 async function makeUser(id: string, email: string | null, displayName: string | null = null) {
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, email, display_name, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'a', 'r', 9999999999999, 1000, 1000)`
-  ).bind(id, `sp-${id}`, email, displayName).run();
+  await insertTestUser(env.DB, {
+    id,
+    spotifyId: `sp-${id}`,
+    email,
+    displayName,
+    accessToken: 'a',
+    refreshToken: 'r',
+    tokenExpiresAt: 9999999999999,
+    createdAt: 1000,
+    updatedAt: 1000,
+  });
 }
 
 async function cookieFor(userId: string) {
@@ -26,7 +34,7 @@ beforeEach(async () => {
   // messages -> matches, users; notifications -> users; matches -> users; sessions -> users.
   await env.DB.exec(
     'DELETE FROM messages; DELETE FROM notifications; DELETE FROM sessions; DELETE FROM matches; ' +
-      'DELETE FROM music_swipes; DELETE FROM user_genres; DELETE FROM tracks; DELETE FROM artists; DELETE FROM users;'
+      'DELETE FROM music_swipes; DELETE FROM user_genres; DELETE FROM tracks; DELETE FROM artists; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;'
   );
   await makeUser('u1', 'u1@example.com', 'User One');
   await makeUser('u2', 'u2@example.com', 'User Two');
