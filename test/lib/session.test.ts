@@ -2,17 +2,15 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession, getSessionUser, sessionCookieHeader, requestIsSecure, requestProtocol } from '../../src/lib/session';
+import { insertTestUser } from '../helpers/createUser';
 
 beforeAll(async () => {
   await applySchema(env.DB);
 });
 
 beforeEach(async () => {
-  await env.DB.exec('DELETE FROM sessions; DELETE FROM users;');
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES ('u1', 'spotify-u1', 'enc-access', 'enc-refresh', 9999999999, 1000, 1000)`
-  ).run();
+  await env.DB.exec('DELETE FROM sessions; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;');
+  await insertTestUser(env.DB, { id: 'u1' });
 });
 
 describe('session', () => {

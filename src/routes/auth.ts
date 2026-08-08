@@ -95,35 +95,62 @@ export function registerAuthRoutes(router: RouterType) {
     const encryptedRefresh = await encrypt(token.refresh_token, env.TOKEN_ENCRYPTION_KEY);
     const now = Date.now();
     const expiresAt = now + token.expires_in * 1000;
-
-    // Deliberately not filtered by deleted_at IS NULL: spotify_id is UNIQUE, so a
-    // soft-deleted row permanently occupies that Spotify account's slot. Signing
-    // back in during the grace period (before the nightly hard-delete purge)
-    // reactivates the account below rather than leaving it stuck -- found with
-    // deleted_at still set, but with no way to ever pass getSessionUser's
-    // deleted_at IS NULL check, and no way to re-register the same Spotify
-    // account as "new" either.
-    const existing = await env.DB.prepare('SELECT id, onboarded_at, deleted_at FROM users WHERE spotify_id = ?')
-      .bind(profile.id)
-      .first<{ id: string; onboarded_at: number | null; deleted_at: number | null }>();
-
-    const userId = existing?.id ?? crypto.randomUUID();
-    // A brand-new insert always has onboarded_at NULL (not set on insert), so this
-    // single check naturally covers both the new-user and abandoned-onboarding cases.
-    const onboarded = existing?.onboarded_at != null;
     const avatarUrl = profile.images?.[0]?.url ?? null;
     const product = profile.product ?? null;
 
-    if (existing) {
-      await env.DB.prepare(
-        `UPDATE users SET access_token = ?, refresh_token = ?, token_expires_at = ?, spotify_avatar_url = ?, spotify_product = ?, deleted_at = NULL, updated_at = ?
-         WHERE id = ?`
-      ).bind(encryptedAccess, encryptedRefresh, expiresAt, avatarUrl, product, now, userId).run();
+    // Deliberately not filtered by deleted_at IS NULL: (provider, provider_id) is
+    // UNIQUE, so a soft-deleted row's identity permanently occupies that Spotify
+    // account's slot. Signing back in during the grace period (before the nightly
+    // hard-delete purge) reactivates the account below rather than leaving it
+    // stuck -- found with deleted_at still set, but with no way to ever pass
+    // getSessionUser's deleted_at IS NULL check, and no way to re-register the
+    // same Spotify account as "new" either.
+    const existingIdentity = await env.DB.prepare(
+      `SELECT ai.user_id, u.onboarded_at FROM auth_identities ai
+       JOIN users u ON u.id = ai.user_id
+       WHERE ai.provider = 'spotify' AND ai.provider_id = ?`
+    )
+      .bind(profile.id)
+      .first<{ user_id: string; onboarded_at: number | null }>();
+
+    let userId: string;
+    let onboarded: boolean;
+
+    const tokenStatement = (uid: string) =>
+      env.DB.prepare(
+        `INSERT INTO music_source_tokens (id, user_id, provider, provider_user_id, access_token, refresh_token, token_expires_at, avatar_url, product_tier, created_at, updated_at)
+         VALUES (?, ?, 'spotify', ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, provider) DO UPDATE SET
+           access_token = excluded.access_token, refresh_token = excluded.refresh_token, token_expires_at = excluded.token_expires_at,
+           avatar_url = excluded.avatar_url, product_tier = excluded.product_tier, updated_at = excluded.updated_at`
+      ).bind(crypto.randomUUID(), uid, profile.id, encryptedAccess, encryptedRefresh, expiresAt, avatarUrl, product, now, now);
+
+    if (existingIdentity) {
+      userId = existingIdentity.user_id;
+      onboarded = existingIdentity.onboarded_at != null;
+
+      await env.DB.batch([
+        env.DB.prepare('UPDATE users SET deleted_at = NULL, updated_at = ? WHERE id = ?').bind(now, userId),
+        tokenStatement(userId),
+      ]);
     } else {
-      await env.DB.prepare(
-        `INSERT INTO users (id, spotify_id, email, spotify_avatar_url, spotify_product, access_token, refresh_token, token_expires_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(userId, profile.id, profile.email ?? null, avatarUrl, product, encryptedAccess, encryptedRefresh, expiresAt, now, now).run();
+      userId = crypto.randomUUID();
+      onboarded = false;
+
+      // spotify_id is still a required, still-UNIQUE column on users (see
+      // Task 1's migration note -- it's a platform constraint, not an
+      // oversight, that it can't be dropped). Keep writing the real value
+      // here for constraint satisfaction; auth_identities is what the
+      // application actually reads going forward.
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO users (id, spotify_id, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`)
+          .bind(userId, profile.id, profile.email ?? null, now, now),
+        env.DB.prepare(
+          `INSERT INTO auth_identities (id, user_id, provider, provider_id, email, created_at, updated_at)
+           VALUES (?, ?, 'spotify', ?, ?, ?, ?)`
+        ).bind(crypto.randomUUID(), userId, profile.id, profile.email ?? null, now, now),
+        tokenStatement(userId),
+      ]);
     }
 
     const { cookie } = await createSession(env.DB, userId, requestIsSecure(request));

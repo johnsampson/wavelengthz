@@ -24,11 +24,14 @@ import { reportError } from './sentry';
 const TOMBSTONE_USER_ID = '00000000-0000-0000-0000-000000000000';
 const TOMBSTONE_SPOTIFY_ID = '__wavelengthz_deleted_user_tombstone__';
 
+// access_token/refresh_token/token_expires_at are dropped by Task 1's
+// migration, so they're no longer supplied here. spotify_id stays --
+// Task 1's migration note explains it's a platform constraint that it
+// can't be dropped from users, so it's still UNIQUE NOT NULL. No
+// auth_identities/music_source_tokens row is needed -- the tombstone
+// never logs in, and nothing requires a user to have either.
 async function ensureTombstoneUser(env: Env): Promise<void> {
-  await env.DB.prepare(
-    `INSERT OR IGNORE INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES (?, ?, 'tombstone', 'tombstone', 0, 0, 0)`
-  )
+  await env.DB.prepare(`INSERT OR IGNORE INTO users (id, spotify_id, created_at, updated_at) VALUES (?, ?, 0, 0)`)
     .bind(TOMBSTONE_USER_ID, TOMBSTONE_SPOTIFY_ID)
     .run();
 }
@@ -68,6 +71,8 @@ export async function hardDeleteUser(env: Env, userId: string): Promise<void> {
   await env.DB.prepare('UPDATE artists SET added_by_user_id = NULL WHERE added_by_user_id = ?').bind(userId).run();
   await env.DB.prepare('UPDATE tracks SET added_by_user_id = NULL WHERE added_by_user_id = ?').bind(userId).run();
 
+  await env.DB.prepare('DELETE FROM auth_identities WHERE user_id = ?').bind(userId).run();
+  await env.DB.prepare('DELETE FROM music_source_tokens WHERE user_id = ?').bind(userId).run();
   await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(userId).run();
 }
 

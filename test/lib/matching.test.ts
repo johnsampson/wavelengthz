@@ -2,22 +2,20 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createMatchIfMutual, scoreCandidate } from '../../src/lib/matching';
+import { insertTestUser } from '../helpers/createUser';
 
 beforeAll(async () => {
   await applySchema(env.DB);
 });
 
 async function makeUser(id: string, lat: number, lng: number) {
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 80, 'a', 'r', 9999999999999, 1000, 1000)`
-  ).bind(id, `sp-${id}`, lat, lng).run();
+  await insertTestUser(env.DB, { id, spotifyId: `sp-${id}`, lat, lng, maxDistanceKm: 80, createdAt: 1000, updatedAt: 1000 });
 }
 
 beforeEach(async () => {
   // Child rows before parent `users` rows -- D1 enforces FK constraints here.
   await env.DB.exec(
-    'DELETE FROM notifications; DELETE FROM matches; DELETE FROM blocks; DELETE FROM people_swipes; DELETE FROM users;'
+    'DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM notifications; DELETE FROM matches; DELETE FROM blocks; DELETE FROM people_swipes; DELETE FROM users;'
   );
   await makeUser('u1', 30.27, -97.74);
   await makeUser('u2', 30.28, -97.75);

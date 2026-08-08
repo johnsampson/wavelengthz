@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
+import { insertTestUser } from '../helpers/createUser';
 import worker from '../../src/index';
 
 beforeAll(async () => {
@@ -12,11 +13,16 @@ beforeEach(async () => {
   // Sessions before users: soft-deleting a user (via DELETE /api/account) leaves
   // its session row in place, and D1 enforces the sessions.user_id FK, so a prior
   // test's leftover session would trip the constraint if `users` were wiped first.
-  await env.DB.exec('DELETE FROM sessions; DELETE FROM users;');
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES ('u1', 'sp1', 'a', 'r', 9999999999999, 1000, 1000)`
-  ).run();
+  await env.DB.exec('DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM sessions; DELETE FROM users;');
+  await insertTestUser(env.DB, {
+    id: 'u1',
+    spotifyId: 'sp1',
+    accessToken: 'a',
+    refreshToken: 'r',
+    tokenExpiresAt: 9999999999999,
+    createdAt: 1000,
+    updatedAt: 1000,
+  });
 });
 
 describe('DELETE /api/account', () => {

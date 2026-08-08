@@ -30,7 +30,11 @@ export function registerAdminRoutes(router: RouterType) {
     }
 
     const idParam = request.params.id;
-    const user = await env.DB.prepare('SELECT id FROM users WHERE id = ? OR spotify_id = ?')
+    const user = await env.DB.prepare(
+      `SELECT u.id FROM users u
+       LEFT JOIN auth_identities ai ON ai.user_id = u.id AND ai.provider = 'spotify'
+       WHERE u.id = ? OR ai.provider_id = ?`
+    )
       .bind(idParam, idParam)
       .first<{ id: string }>();
     if (!user) return new Response('Not found', { status: 404 });

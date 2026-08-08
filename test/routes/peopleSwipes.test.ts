@@ -3,6 +3,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vite
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
 import { getMatchNotificationDelayMs } from '../../src/lib/notifications';
+import { insertTestUser } from '../helpers/createUser';
 import worker from '../../src/index';
 
 beforeAll(async () => {
@@ -15,33 +16,30 @@ beforeAll(async () => {
 // tests that specifically exercise gender/seeking filtering override these via
 // makeUserWithGender.
 async function makeUser(id: string) {
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, onboarded_at, gender, seeking, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES (?, ?, 30.27, -97.74, 80, 1000, 'female', 'female', 'a', 'r', 9999999999999, 1000, 1000)`
-  ).bind(id, `sp-${id}`).run();
+  await insertTestUser(env.DB, {
+    id, spotifyId: `sp-${id}`, lat: 30.27, lng: -97.74, maxDistanceKm: 80, onboardedAt: 1000,
+    gender: 'female', seeking: 'female', createdAt: 1000, updatedAt: 1000,
+  });
 }
 
 async function makeUserWithGender(id: string, gender: string, seeking: string) {
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, onboarded_at, gender, seeking, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES (?, ?, 30.27, -97.74, 80, 1000, ?, ?, 'a', 'r', 9999999999999, 1000, 1000)`
-  ).bind(id, `sp-${id}`, gender, seeking).run();
+  await insertTestUser(env.DB, {
+    id, spotifyId: `sp-${id}`, lat: 30.27, lng: -97.74, maxDistanceKm: 80, onboardedAt: 1000,
+    gender, seeking, createdAt: 1000, updatedAt: 1000,
+  });
 }
 
 async function makeUnonboardedUser(id: string) {
   // No lat/lng/onboarded_at -- simulates a session created before onboarding
   // finished, or an account whose location was somehow never set.
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES (?, ?, 'a', 'r', 9999999999999, 1000, 1000)`
-  ).bind(id, `sp-${id}`).run();
+  await insertTestUser(env.DB, { id, spotifyId: `sp-${id}`, createdAt: 1000, updatedAt: 1000 });
 }
 
 async function makeUserWithEmail(id: string, email: string) {
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, onboarded_at, gender, seeking, email, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES (?, ?, 30.27, -97.74, 80, 1000, 'female', 'female', ?, 'a', 'r', 9999999999999, 1000, 1000)`
-  ).bind(id, `sp-${id}`, email).run();
+  await insertTestUser(env.DB, {
+    id, spotifyId: `sp-${id}`, lat: 30.27, lng: -97.74, maxDistanceKm: 80, onboardedAt: 1000,
+    gender: 'female', seeking: 'female', email, createdAt: 1000, updatedAt: 1000,
+  });
 }
 
 async function cookieFor(userId: string) {
@@ -52,7 +50,7 @@ async function cookieFor(userId: string) {
 beforeEach(async () => {
   // Child rows before parent `users` rows -- D1 enforces FK constraints here.
   await env.DB.exec(
-    'DELETE FROM notifications; DELETE FROM matches; DELETE FROM blocks; DELETE FROM people_swipes; DELETE FROM music_swipes; DELETE FROM user_genres; DELETE FROM music_profiles; DELETE FROM user_photos; DELETE FROM sessions; DELETE FROM users;'
+    'DELETE FROM notifications; DELETE FROM matches; DELETE FROM blocks; DELETE FROM people_swipes; DELETE FROM music_swipes; DELETE FROM user_genres; DELETE FROM music_profiles; DELETE FROM user_photos; DELETE FROM sessions; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;'
   );
   await makeUser('u1');
   await makeUser('u2');
@@ -165,10 +163,10 @@ describe('GET /api/candidates/people', () => {
 
 describe('max_distance_km is enforced as a filter, not just a scoring weight', () => {
   async function makeUserAt(id: string, lat: number, lng: number) {
-    await env.DB.prepare(
-      `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, onboarded_at, gender, seeking, access_token, refresh_token, token_expires_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 80, 1000, 'female', 'female', 'a', 'r', 9999999999999, 1000, 1000)`
-    ).bind(id, `sp-${id}`, lat, lng).run();
+    await insertTestUser(env.DB, {
+      id, spotifyId: `sp-${id}`, lat, lng, maxDistanceKm: 80, onboardedAt: 1000,
+      gender: 'female', seeking: 'female', createdAt: 1000, updatedAt: 1000,
+    });
   }
 
   it('never returns a candidate outside the caller\'s radius', async () => {
@@ -219,10 +217,10 @@ describe('max_distance_km is enforced as a filter, not just a scoring weight', (
 
 describe('age_min/age_max are enforced as a filter, not just a scoring weight', () => {
   async function makeUserWithAge(id: string, dateOfBirth: string | null, ageMin = 18, ageMax = 100) {
-    await env.DB.prepare(
-      `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, onboarded_at, gender, seeking, date_of_birth, age_min, age_max, access_token, refresh_token, token_expires_at, created_at, updated_at)
-       VALUES (?, ?, 30.27, -97.74, 80, 1000, 'female', 'female', ?, ?, ?, 'a', 'r', 9999999999999, 1000, 1000)`
-    ).bind(id, `sp-${id}`, dateOfBirth, ageMin, ageMax).run();
+    await insertTestUser(env.DB, {
+      id, spotifyId: `sp-${id}`, lat: 30.27, lng: -97.74, maxDistanceKm: 80, onboardedAt: 1000,
+      gender: 'female', seeking: 'female', dateOfBirth, ageMin, ageMax, createdAt: 1000, updatedAt: 1000,
+    });
   }
 
   // Fixed reference point so age-from-date_of_birth is deterministic
@@ -328,10 +326,10 @@ describe('GET /api/candidates/people query count does not scale with pool size',
   async function seedPool(count: number) {
     for (let i = 0; i < count; i++) {
       const id = `pool${i}`;
-      await env.DB.prepare(
-        `INSERT INTO users (id, spotify_id, lat, lng, max_distance_km, onboarded_at, access_token, refresh_token, token_expires_at, created_at, updated_at)
-         VALUES (?, ?, 30.27, -97.74, 80, 1000, 'a', 'r', 9999999999999, 1000, 1000)`
-      ).bind(id, `sp-${id}`).run();
+      await insertTestUser(env.DB, {
+        id, spotifyId: `sp-${id}`, lat: 30.27, lng: -97.74, maxDistanceKm: 80, onboardedAt: 1000,
+        createdAt: 1000, updatedAt: 1000,
+      });
       await env.DB.prepare(
         `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at)
          VALUES (?, '[{"artist_id":"a1","rank":1}]', '[]', '["pop"]', 'medium_term', 1000)`
@@ -360,7 +358,9 @@ describe('GET /api/candidates/people query count does not scale with pool size',
     const small = await queryCountForPool(4);
 
     await env.DB.exec('DELETE FROM music_swipes; DELETE FROM music_profiles;');
-    await env.DB.exec("DELETE FROM users WHERE id LIKE 'pool%';");
+    await env.DB.exec(
+      "DELETE FROM music_source_tokens WHERE user_id LIKE 'pool%'; DELETE FROM auth_identities WHERE user_id LIKE 'pool%'; DELETE FROM users WHERE id LIKE 'pool%';"
+    );
 
     const large = await queryCountForPool(40);
 

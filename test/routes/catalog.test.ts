@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
+import { insertTestUser } from '../helpers/createUser';
 import worker from '../../src/index';
 
 beforeAll(async () => {
@@ -12,11 +13,10 @@ beforeEach(async () => {
   // Children before parents: tracks/artists reference users via added_by_user_id,
   // and tracks references artists — deleting users/artists first trips the FK constraint
   // once a prior test has left a row with a non-null reference.
-  await env.DB.exec('DELETE FROM genres; DELETE FROM music_swipes; DELETE FROM sessions; DELETE FROM tracks; DELETE FROM artists; DELETE FROM users;');
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES ('u1', 'sp1', 'a', 'r', 9999999999999, 1000, 1000)`
-  ).run();
+  await env.DB.exec(
+    'DELETE FROM genres; DELETE FROM music_swipes; DELETE FROM sessions; DELETE FROM tracks; DELETE FROM artists; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;'
+  );
+  await insertTestUser(env.DB, { id: 'u1', spotifyId: 'sp1', createdAt: 1000, updatedAt: 1000 });
   await env.DB.prepare(
     `INSERT INTO artists (id, spotify_id, name, genres, source, approved, created_at) VALUES ('local-1', 'spotify-local-1', 'Local Artist', '{"pop":true}', 'seed', 1, 1000)`
   ).run();
@@ -215,19 +215,10 @@ describe('GET /api/artists/:id', () => {
       // Austin-area viewer, 80km radius (matches the default fixture in other
       // test files).
       await env.DB.prepare('UPDATE users SET lat = 30.27, lng = -97.74, max_distance_km = 80 WHERE id = ?').bind('u1').run();
-      await env.DB.prepare(
-        `INSERT INTO users (id, spotify_id, lat, lng, access_token, refresh_token, token_expires_at, created_at, updated_at)
-         VALUES ('near1', 'sp-near1', 30.27, -97.74, 'a', 'r', 9999999999999, 1000, 1000)`
-      ).run();
-      await env.DB.prepare(
-        `INSERT INTO users (id, spotify_id, lat, lng, access_token, refresh_token, token_expires_at, created_at, updated_at)
-         VALUES ('near2', 'sp-near2', 30.27, -97.74, 'a', 'r', 9999999999999, 1000, 1000)`
-      ).run();
+      await insertTestUser(env.DB, { id: 'near1', spotifyId: 'sp-near1', lat: 30.27, lng: -97.74, createdAt: 1000, updatedAt: 1000 });
+      await insertTestUser(env.DB, { id: 'near2', spotifyId: 'sp-near2', lat: 30.27, lng: -97.74, createdAt: 1000, updatedAt: 1000 });
       // London -- far outside any reasonable radius from Austin.
-      await env.DB.prepare(
-        `INSERT INTO users (id, spotify_id, lat, lng, access_token, refresh_token, token_expires_at, created_at, updated_at)
-         VALUES ('far1', 'sp-far1', 51.5, -0.12, 'a', 'r', 9999999999999, 1000, 1000)`
-      ).run();
+      await insertTestUser(env.DB, { id: 'far1', spotifyId: 'sp-far1', lat: 51.5, lng: -0.12, createdAt: 1000, updatedAt: 1000 });
       await env.DB.prepare(
         `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('lk1', 'near1', 'artist', 'local-1', 'right', 1000, 1000)`
       ).run();

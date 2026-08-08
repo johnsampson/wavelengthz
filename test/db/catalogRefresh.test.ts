@@ -2,17 +2,15 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { refreshCatalogFromProfiles } from '../../src/db/catalogRefresh';
+import { insertTestUser } from '../helpers/createUser';
 
 beforeAll(async () => {
   await applySchema(env.DB);
 });
 
 beforeEach(async () => {
-  await env.DB.exec('DELETE FROM genres; DELETE FROM music_profiles; DELETE FROM artists; DELETE FROM users;');
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES ('u1', 'sp1', 'a', 'r', 9999999999999, 1000, 1000)`
-  ).run();
+  await env.DB.exec('DELETE FROM genres; DELETE FROM music_profiles; DELETE FROM artists; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;');
+  await insertTestUser(env.DB, { id: 'u1', spotifyId: 'sp1', createdAt: 1000, updatedAt: 1000 });
   await env.DB.prepare(`INSERT INTO artists (id, spotify_id, name, genres, source, approved, created_at) VALUES ('already-known', 'already-known', 'Known Artist', '[]', 'seed', 1, 1000)`).run();
 });
 

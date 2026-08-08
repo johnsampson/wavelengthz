@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
+import { insertTestUser } from '../helpers/createUser';
 import worker from '../../src/index';
 
 beforeAll(async () => {
@@ -15,15 +16,25 @@ async function cookieFor(userId: string) {
 
 beforeEach(async () => {
   // Child rows before parent `users` rows -- D1 enforces FK constraints here.
-  await env.DB.exec('DELETE FROM notifications; DELETE FROM messages; DELETE FROM matches; DELETE FROM sessions; DELETE FROM users;');
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES ('u1', 'sp1', 'a', 'r', 9999999999999, 1000, 1000)`
-  ).run();
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES ('u2', 'sp2', 'a', 'r', 9999999999999, 1000, 1000)`
-  ).run();
+  await env.DB.exec('DELETE FROM notifications; DELETE FROM messages; DELETE FROM matches; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM sessions; DELETE FROM users;');
+  await insertTestUser(env.DB, {
+    id: 'u1',
+    spotifyId: 'sp1',
+    accessToken: 'a',
+    refreshToken: 'r',
+    tokenExpiresAt: 9999999999999,
+    createdAt: 1000,
+    updatedAt: 1000,
+  });
+  await insertTestUser(env.DB, {
+    id: 'u2',
+    spotifyId: 'sp2',
+    accessToken: 'a',
+    refreshToken: 'r',
+    tokenExpiresAt: 9999999999999,
+    createdAt: 1000,
+    updatedAt: 1000,
+  });
   await env.DB.prepare(`INSERT INTO notifications (id, user_id, type, related_id, created_at) VALUES ('n1', 'u1', 'match', 'm1', 1000)`).run();
   await env.DB.prepare(`INSERT INTO notifications (id, user_id, type, related_id, created_at) VALUES ('n2', 'u2', 'match', 'm2', 1000)`).run();
 });

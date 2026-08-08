@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { notifyMatch, notifyMessage, sendDelayedMatchNotificationEmails, getMatchNotificationDelayMs } from '../../src/lib/notifications';
+import { insertTestUser } from '../helpers/createUser';
 
 beforeAll(async () => {
   await applySchema(env.DB);
@@ -10,15 +11,9 @@ beforeAll(async () => {
 beforeEach(async () => {
   // Child rows before parent `users` rows -- D1 enforces FK constraints here.
   // messages -> matches, users; notifications -> users; matches -> users.
-  await env.DB.exec('DELETE FROM messages; DELETE FROM notifications; DELETE FROM matches; DELETE FROM users;');
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, email, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES ('u1', 'sp1', 'u1@example.com', 'a', 'r', 9999999999999, 1000, 1000)`
-  ).run();
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, email, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES ('u2', 'sp2', NULL, 'a', 'r', 9999999999999, 1000, 1000)`
-  ).run();
+  await env.DB.exec('DELETE FROM messages; DELETE FROM notifications; DELETE FROM matches; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;');
+  await insertTestUser(env.DB, { id: 'u1', spotifyId: 'sp1', email: 'u1@example.com', createdAt: 1000, updatedAt: 1000 });
+  await insertTestUser(env.DB, { id: 'u2', spotifyId: 'sp2', email: null, createdAt: 1000, updatedAt: 1000 });
   await env.DB.prepare(`INSERT INTO matches (id, user_a_id, user_b_id, created_at) VALUES ('m1', 'u1', 'u2', 1000)`).run();
   await env.DB.prepare(
     `INSERT INTO notifications (id, user_id, type, related_id, created_at) VALUES ('n1', 'u1', 'match', 'm1', 1000)`

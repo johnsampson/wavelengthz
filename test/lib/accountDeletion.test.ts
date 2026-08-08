@@ -3,16 +3,14 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { hardDeleteUser, purgeExpiredDeletions } from '../../src/lib/accountDeletion';
 import { createSession } from '../../src/lib/session';
+import { insertTestUser } from '../helpers/createUser';
 
 beforeAll(async () => {
   await applySchema(env.DB);
 });
 
 async function seedFullUser(id: string) {
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES (?, ?, 'a', 'r', 9999999999999, 1000, 1000)`
-  ).bind(id, `sp-${id}`).run();
+  await insertTestUser(env.DB, { id, spotifyId: `sp-${id}` });
 }
 
 beforeEach(async () => {
@@ -26,6 +24,7 @@ beforeEach(async () => {
     DELETE FROM people_swipes; DELETE FROM music_swipes; DELETE FROM user_genres; DELETE FROM music_profiles;
     DELETE FROM blocks; DELETE FROM reports; DELETE FROM notifications; DELETE FROM sessions;
     DELETE FROM tracks; DELETE FROM artists;
+    DELETE FROM music_source_tokens; DELETE FROM auth_identities;
     DELETE FROM users;
   `);
 });
@@ -51,6 +50,8 @@ describe('hardDeleteUser', () => {
     await hardDeleteUser(env as any, 'u1');
 
     expect(await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind('u1').first()).toBeNull();
+    expect(await env.DB.prepare('SELECT * FROM auth_identities WHERE user_id = ?').bind('u1').first()).toBeNull();
+    expect(await env.DB.prepare('SELECT * FROM music_source_tokens WHERE user_id = ?').bind('u1').first()).toBeNull();
     expect(await env.DB.prepare('SELECT * FROM user_photos WHERE user_id = ?').bind('u1').first()).toBeNull();
     expect(await env.PHOTOS.get('users/u1/p1.jpg')).toBeNull();
     expect(await env.DB.prepare('SELECT * FROM matches WHERE id = ?').bind('m1').first()).toBeNull();
