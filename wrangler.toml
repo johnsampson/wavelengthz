@@ -16,6 +16,9 @@ bucket_name = "wavelengthz-photos"
 binding = "RATE_LIMIT_KV"
 id = "9234707e75a842fbafb19e20911148d4"
 
+[observability]
+enabled = true
+
 [assets]
 directory = "./public"
 binding = "ASSETS"
@@ -32,6 +35,11 @@ SPOTIFY_REDIRECT_URI = "http://127.0.0.1:8787/callback"
 # notifications.ts's getMatchNotificationDelayMs(). Minutes, not ms, for a
 # human-editable config value.
 MATCH_NOTIFICATION_DELAY_MINUTES = "5"
+# Kill switch for the scheduled artist-catalog-growth job (src/lib/
+# catalogGrowth.ts's runCatalogGrowthJob) -- set to "false" (via `wrangler
+# secret put` or the dashboard) to pause it without a code deploy. Unset or
+# any other value means enabled.
+ARTIST_CATALOG_GROWTH_ENABLED = "true"
 
 [triggers]
 # "0 3 * * *": nightly purgeExpiredDeletions. "0 4 * * sun": weekly catalog
@@ -39,8 +47,11 @@ MATCH_NOTIFICATION_DELAY_MINUTES = "5"
 # 0=Sunday..6=Saturday, so the numeric form (e.g. "0") is a different day
 # than it looks and can even be rejected outright as out of range; the
 # 3-letter name Cloudflare itself recommends sidesteps the whole ambiguity.
-# "*/5 * * * *": sweeps deferred match-notification emails (MATCH_NOTIFICATION_DELAY_MINUTES above).
-crons = ["0 3 * * *", "0 4 * * sun", "*/5 * * * *"]
+# "*/5 * * * *": sweeps deferred match-notification emails
+# (MATCH_NOTIFICATION_DELAY_MINUTES above). "*/15 * * * *": artist catalog
+# growth (src/lib/catalogGrowth.ts's runCatalogGrowthJob). "0 13 * * *":
+# daily artist catalog growth digest email (sendCatalogGrowthDigest).
+crons = ["0 3 * * *", "0 4 * * sun", "*/5 * * * *", "*/15 * * * *", "0 13 * * *"]
 
 [env.test]
 [[env.test.d1_databases]]
@@ -70,3 +81,5 @@ R2_BUCKET_NAME = "wavelengthz-photos-test"
 RESEND_API_KEY = "test-resend-api-key"
 RESEND_FROM_ADDRESS = "matches@wavelengthz.app"
 SENTRY_DSN = "https://testpublickey@o0.ingest.sentry.io/0"
+ARTIST_CATALOG_GROWTH_ENABLED = "true"
+OPS_ALERT_EMAIL = "ops@example.com"
