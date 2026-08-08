@@ -62,6 +62,31 @@ describe('settings page', () => {
     vi.unstubAllGlobals();
   });
 
+  it('round-trips a still-valid intent unchanged', async () => {
+    stubApi(ONBOARDED_USER); // intent: 'dating_around'
+    const app = createSettingsApp();
+
+    await app.init();
+
+    expect(app.intent).toBe('dating_around');
+    vi.unstubAllGlobals();
+  });
+
+  it('resets a retired intent value to unset instead of keeping it stale', async () => {
+    // 'making_friends' was retired from INTENT_OPTIONS (superseded by the
+    // real seeking:'friends' filter) -- a user who set it before that no
+    // longer has a matching button. Silently keeping the stale value would
+    // get their next Save rejected by POST /api/onboarding's INTENT_OPTIONS
+    // check, with no visible button to explain why.
+    stubApi({ ...ONBOARDED_USER, intent: 'making_friends' });
+    const app = createSettingsApp();
+
+    await app.init();
+
+    expect(app.intent).toBe('');
+    vi.unstubAllGlobals();
+  });
+
   it('round-trips the existing bio when saving the distance', async () => {
     // Regression: POST /api/onboarding does an unconditional `SET bio = ?`
     // bound to `body.bio ?? null`. Settings reuses that endpoint, so omitting

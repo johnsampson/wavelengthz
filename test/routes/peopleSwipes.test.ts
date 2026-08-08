@@ -94,6 +94,81 @@ describe('GET /api/candidates/people gender/seeking filtering', () => {
   });
 });
 
+describe('GET /api/candidates/people seeking: friends', () => {
+  it('matches two friends-seekers of different genders, regardless of gender', async () => {
+    await makeUserWithGender('viewer', 'male', 'friends');
+    await makeUserWithGender('other-friend-seeker', 'female', 'friends');
+
+    const cookie = await cookieFor('viewer');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.candidates.find((c: any) => c.id === 'other-friend-seeker')).toBeDefined();
+  });
+
+  it('matches two friends-seekers of the SAME gender too -- gender is not a filter for this bucket', async () => {
+    await makeUserWithGender('viewer', 'male', 'friends');
+    await makeUserWithGender('same-gender-friend-seeker', 'male', 'friends');
+
+    const cookie = await cookieFor('viewer');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.candidates.find((c: any) => c.id === 'same-gender-friend-seeker')).toBeDefined();
+  });
+
+  it('never shows a friends-seeker to a romantic seeker, even if gender would otherwise line up', async () => {
+    await makeUserWithGender('viewer', 'male', 'female'); // male, seeking female (romantic)
+    await makeUserWithGender('friend-seeker', 'female', 'friends'); // right gender, wrong bucket
+
+    const cookie = await cookieFor('viewer');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.candidates.find((c: any) => c.id === 'friend-seeker')).toBeUndefined();
+  });
+
+  it('never shows a romantic seeker to a friends-seeker', async () => {
+    await makeUserWithGender('viewer', 'male', 'friends');
+    await makeUserWithGender('romantic-seeker', 'female', 'male'); // seeking male, not friends
+
+    const cookie = await cookieFor('viewer');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.candidates.find((c: any) => c.id === 'romantic-seeker')).toBeUndefined();
+  });
+
+  it('excludes an out-of-bucket liker from the like-priority queue too', async () => {
+    await makeUserWithGender('viewer', 'male', 'friends');
+    await makeUserWithGender('romantic-liker', 'female', 'male');
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, match_score, created_at, updated_at) VALUES ('s1', 'romantic-liker', 'viewer', 'right', 0.99, 1000, 1000)`
+    ).run();
+
+    const cookie = await cookieFor('viewer');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.candidates.find((c: any) => c.id === 'romantic-liker')).toBeUndefined();
+  });
+
+  it('includes a friends-seeking liker in the like-priority queue', async () => {
+    await makeUserWithGender('viewer', 'male', 'friends');
+    await makeUserWithGender('friend-liker', 'male', 'friends');
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, match_score, created_at, updated_at) VALUES ('s1', 'friend-liker', 'viewer', 'right', 0.99, 1000, 1000)`
+    ).run();
+
+    const cookie = await cookieFor('viewer');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.candidates[0].id).toBe('friend-liker');
+    expect(body.candidates[0].likedYou).toBe(true);
+  });
+});
+
 describe('GET /api/candidates/people', () => {
   it('never exposes raw lat/lng, only a distance label', async () => {
     const cookie = await cookieFor('u1');
