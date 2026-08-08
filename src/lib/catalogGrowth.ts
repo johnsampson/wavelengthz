@@ -128,12 +128,21 @@ export async function growArtistCatalog(
     exhaustedByGenre = new Map(GROWTH_GENRES.map((genre) => [genre, false]));
   }
 
+  // Rotate the starting point so successive calls (15 minutes apart, per
+  // the cron cadence) reach different genres over time instead of always
+  // restarting from GROWTH_GENRES[0] and stalling on the first few -- the
+  // whole point of widening this list past the original 12 is defeated if
+  // genres 6+ are never reached until 1-5 are each individually exhausted.
+  const ROTATION_INTERVAL_MS = 15 * 60 * 1000;
+  const startIndex = Math.floor(now / ROTATION_INTERVAL_MS) % GROWTH_GENRES.length;
+  const orderedGenres = [...GROWTH_GENRES.slice(startIndex), ...GROWTH_GENRES.slice(0, startIndex)];
+
   const token = await getClientCredentialsToken(env);
   let inserted = 0;
   const genresTried: string[] = [];
   const errors: Record<string, string> = {};
 
-  for (const genre of GROWTH_GENRES) {
+  for (const genre of orderedGenres) {
     if (inserted >= options.maxInserted) break;
     if (options.maxGenres !== undefined && genresTried.length >= options.maxGenres) break;
     if (exhaustedByGenre.get(genre)) continue;

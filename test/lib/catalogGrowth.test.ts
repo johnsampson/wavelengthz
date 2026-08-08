@@ -212,6 +212,23 @@ describe('growArtistCatalog', () => {
     expect(result.inserted).toBe(1); // second genre still succeeded
     vi.unstubAllGlobals();
   });
+
+  it('rotates the starting genre based on now instead of always starting at GROWTH_GENRES[0]', async () => {
+    const genresCalled: string[] = [];
+    stubArtistSearchByGenre((genre) => {
+      genresCalled.push(genre);
+      return [{ id: `${genre}-1`, name: genre, genres: [genre], images: [{ url: `https://img/${genre}.jpg` }], popularity: 50 }];
+    });
+
+    // Math.floor(20 * 60 * 1000 / (15 * 60 * 1000)) = 1, so the rotation
+    // should start at GROWTH_GENRES[1], not GROWTH_GENRES[0].
+    const now = 20 * 60 * 1000;
+    const result = await growArtistCatalog(env as any, now, { maxInserted: 1 });
+
+    expect(result.inserted).toBe(1);
+    expect(genresCalled[0]).toBe(GROWTH_GENRES[1]);
+    vi.unstubAllGlobals();
+  });
 });
 
 import { runCatalogGrowthJob } from '../../src/lib/catalogGrowth';

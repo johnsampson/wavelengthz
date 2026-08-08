@@ -95,8 +95,11 @@ export function registerMusicSwipeRoutes(router: RouterType) {
     // (src/lib/catalogGrowth.ts's runCatalogGrowthJob, wired in
     // src/index.ts's scheduled()). This is only a last-resort safety net
     // for the rare case a user's pool hits zero between runs -- bounded to
-    // 2 real Spotify searches so a live request never pays for more than
-    // that much added latency.
+    // 2 genre searches (maxGenres: 2), though each newly-inserted artist
+    // also costs one track-search call, so a worst case is still several
+    // sequential Spotify round-trips inline in this request. Accepted as
+    // rare-path latency, same shape as the topUpArtistsForUser code this
+    // replaced.
     if (itemType === 'artist') {
       const remainingRow = await env.DB.prepare(
         `SELECT COUNT(*) as c FROM ${table}
