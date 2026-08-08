@@ -291,6 +291,7 @@ git commit -m "feat: add auth_identities/music_source_tokens tables and test hel
 **Files:**
 - Modify: `src/lib/session.ts`
 - Modify: `src/lib/tokens.ts`
+- Modify: `src/routes/me.ts`
 - Modify: `test/lib/tokens.test.ts`
 - Modify: `test/lib/session.test.ts`
 
@@ -433,20 +434,30 @@ beforeEach(async () => {
 
 Add the import at the top: `import { insertTestUser } from '../helpers/createUser';`
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [ ] **Step 6: Fix the resulting compile break in `src/routes/me.ts`**
+
+`me.ts:53` currently does `const { access_token, refresh_token, ...safeUser } = user;` to strip tokens before returning `user` to the client. Now that `UserRow` no longer has those two fields at all (Step 1 above), this line fails to compile (`Property 'access_token' does not exist on type 'UserRow'`). There's nothing left to strip — tokens live in `music_source_tokens` and were never fetched into `user` in the first place — so replace that line with:
+
+```typescript
+    const safeUser = user;
+```
+
+This is not a functional change: the client-visible response shape is identical either way. This is the only change `me.ts` needs in this task — its "no Spotify linked" guard (Step 1's `getValidAccessToken` call at `me.ts:18`) is explicitly out of scope until the Google Sign-On follow-up actually introduces users who can have zero `music_source_tokens` rows.
+
+- [ ] **Step 7: Run tests to verify they pass**
 
 Run: `npx vitest run test/lib/tokens.test.ts test/lib/session.test.ts`
 Expected: PASS (3/3 and 5/5)
 
-- [ ] **Step 7: Run the full suite and type-check**
+- [ ] **Step 8: Run the full suite and type-check**
 
 Run: `npx vitest run`
-Expected: Failures in `test/routes/auth.test.ts` and every file still hand-rolling `INSERT INTO users` with the six now-dropped columns — these are addressed by Tasks 3-7. Confirm the failures are ONLY in those known files, not somewhere unexpected.
+Expected: Failures in `test/routes/auth.test.ts` and every file still hand-rolling `INSERT INTO users` with the five now-dropped columns — these are addressed by Tasks 3-7. Confirm the failures are ONLY in those known files, not somewhere unexpected (`test/routes/me.test.ts` should NOT be among the newly-broken files, since Step 6 fixed the only thing that referenced the removed fields there).
 
 Run: `npx tsc --noEmit`
-Expected: Clean, or errors only in files this plan hasn't reached yet (Tasks 3-7) — confirm nothing outside that known set.
+Expected: Clean. Unlike the test suite, there should be no remaining compile errors anywhere — `me.ts` was the only other file (besides Tasks 1's own files) that referenced the five removed `UserRow` fields directly.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add src/lib/session.ts src/lib/tokens.ts test/lib/tokens.test.ts test/lib/session.test.ts
