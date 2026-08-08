@@ -3,6 +3,7 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
 import { encrypt } from '../../src/lib/crypto';
+import { insertTestUser } from '../helpers/createUser';
 import worker from '../../src/index';
 
 beforeAll(async () => {
@@ -12,7 +13,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   // music_profiles and sessions both FK-reference users(id), so they must be
   // cleared before users to avoid a foreign key constraint violation.
-  await env.DB.exec('DELETE FROM sessions; DELETE FROM music_profiles; DELETE FROM users;');
+  await env.DB.exec('DELETE FROM sessions; DELETE FROM music_profiles; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;');
 });
 
 describe('GET /api/me', () => {
@@ -23,10 +24,10 @@ describe('GET /api/me', () => {
 
   it('returns the user and pulls a music profile on first call', async () => {
     const encToken = await encrypt('access-tok', env.TOKEN_ENCRYPTION_KEY);
-    await env.DB.prepare(
-      `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-       VALUES ('u1', 'sp1', ?, ?, ?, 1000, 1000)`
-    ).bind(encToken, encToken, Date.now() + 100000).run();
+    await insertTestUser(env.DB, {
+      id: 'u1', spotifyId: 'sp1', accessToken: encToken, refreshToken: encToken,
+      tokenExpiresAt: Date.now() + 100000, createdAt: 1000, updatedAt: 1000,
+    });
     const { cookie } = await createSession(env.DB, 'u1');
     const sessionId = cookie.split(';')[0].split('=')[1];
 
@@ -69,10 +70,10 @@ describe('GET /api/me', () => {
 
   it('does not throw when a concurrent request wins the music_profiles insert race', async () => {
     const encToken = await encrypt('access-tok', env.TOKEN_ENCRYPTION_KEY);
-    await env.DB.prepare(
-      `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-       VALUES ('u2', 'sp2', ?, ?, ?, 1000, 1000)`
-    ).bind(encToken, encToken, Date.now() + 100000).run();
+    await insertTestUser(env.DB, {
+      id: 'u2', spotifyId: 'sp2', accessToken: encToken, refreshToken: encToken,
+      tokenExpiresAt: Date.now() + 100000, createdAt: 1000, updatedAt: 1000,
+    });
     const { cookie } = await createSession(env.DB, 'u2');
     const sessionId = cookie.split(';')[0].split('=')[1];
 
@@ -146,10 +147,10 @@ describe('GET /api/me', () => {
   // clean 500 with no internal error details leaked into the response body.
   it('returns a clean 500 with no leaked error details when the Spotify API call throws', async () => {
     const encToken = await encrypt('access-tok', env.TOKEN_ENCRYPTION_KEY);
-    await env.DB.prepare(
-      `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-       VALUES ('u3', 'sp3', ?, ?, ?, 1000, 1000)`
-    ).bind(encToken, encToken, Date.now() + 100000).run();
+    await insertTestUser(env.DB, {
+      id: 'u3', spotifyId: 'sp3', accessToken: encToken, refreshToken: encToken,
+      tokenExpiresAt: Date.now() + 100000, createdAt: 1000, updatedAt: 1000,
+    });
     const { cookie } = await createSession(env.DB, 'u3');
     const sessionId = cookie.split(';')[0].split('=')[1];
 
@@ -179,10 +180,10 @@ describe('GET /api/me', () => {
   // "artist.genres is not iterable" the first time that happened.
   it('does not throw when Spotify returns an artist with no genres field', async () => {
     const encToken = await encrypt('access-tok', env.TOKEN_ENCRYPTION_KEY);
-    await env.DB.prepare(
-      `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-       VALUES ('u4', 'sp4', ?, ?, ?, 1000, 1000)`
-    ).bind(encToken, encToken, Date.now() + 100000).run();
+    await insertTestUser(env.DB, {
+      id: 'u4', spotifyId: 'sp4', accessToken: encToken, refreshToken: encToken,
+      tokenExpiresAt: Date.now() + 100000, createdAt: 1000, updatedAt: 1000,
+    });
     const { cookie } = await createSession(env.DB, 'u4');
     const sessionId = cookie.split(';')[0].split('=')[1];
 

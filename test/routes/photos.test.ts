@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
+import { insertTestUser } from '../helpers/createUser';
 import worker from '../../src/index';
 
 beforeAll(async () => {
@@ -9,11 +10,10 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await env.DB.exec('DELETE FROM sessions; DELETE FROM user_photos; DELETE FROM users;');
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES ('u1', 'sp1', 'a', 'r', 9999999999999, 1000, 1000)`
-  ).run();
+  await env.DB.exec(
+    'DELETE FROM sessions; DELETE FROM user_photos; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;'
+  );
+  await insertTestUser(env.DB, { id: 'u1', spotifyId: 'sp1', createdAt: 1000, updatedAt: 1000 });
 });
 
 async function cookieFor(userId: string) {
@@ -115,10 +115,7 @@ describe('GET /api/photos', () => {
   });
 
   it('never lists another user\'s photos', async () => {
-    await env.DB.prepare(
-      `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-       VALUES ('u2', 'sp2', 'a', 'r', 9999999999999, 1000, 1000)`
-    ).run();
+    await insertTestUser(env.DB, { id: 'u2', spotifyId: 'sp2', createdAt: 1000, updatedAt: 1000 });
     await env.DB.prepare(
       `INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES ('q1', 'u2', 'users/u2/q1.jpg', 0, 1000)`
     ).run();
@@ -175,10 +172,7 @@ describe('DELETE /api/photos/:id', () => {
   });
 
   it('leaves another user\'s photo positions untouched when renumbering', async () => {
-    await env.DB.prepare(
-      `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-       VALUES ('u2', 'sp2', 'a', 'r', 9999999999999, 1000, 1000)`
-    ).run();
+    await insertTestUser(env.DB, { id: 'u2', spotifyId: 'sp2', createdAt: 1000, updatedAt: 1000 });
     await env.DB.prepare(
       `INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES ('p1', 'u1', 'users/u1/p1.jpg', 0, 1000)`
     ).run();
