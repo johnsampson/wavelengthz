@@ -1,6 +1,7 @@
 import { searchArtistsByGenre, searchTracksByArtistName, getClientCredentialsToken } from './spotify';
 import { recordCatalogGenres } from './genreCatalog';
 import { upsertArtist, upsertTrack } from './catalogUpsert';
+import { sendEmail } from './email';
 
 // Wider than src/db/seed.ts's SEED_GENRES (used only for the one-time
 // initial catalog build). Growth runs forever and must never let a user
@@ -147,4 +148,50 @@ export async function growArtistCatalog(
   }
 
   return { inserted, genresTried, errors };
+}
+
+/**
+ * The scheduled entry point (wired in src/index.ts's scheduled()). Writes
+ * one row to catalog_growth_runs per invocation regardless of outcome --
+ * that table is the source of truth the daily digest reads from. On a
+ * whole-job failure (as opposed to a per-genre error, which growArtistCatalog
+ * already isolates), sends an immediate email in addition to rethrowing so
+ * the outer scheduled() handler's existing Sentry reporting still fires.
+ */
+export async function runCatalogGrowthJob(env: Env, now: number): Promise<void> {
+  // Cast to string: wrangler.toml declares this var as the literal "true" in
+  // both [vars] and [env.test.vars], so `wrangler types` infers the Env
+  // field as the literal type "true" rather than `string` -- without this,
+  // tsc flags the comparison below as unintentional (the two literal types
+  // "true" and "false" can never overlap), even though the real deployed
+  // value can be set to "false" out-of-band via `wrangler secret put` or the
+  // dashboard (see the comment on ARTIST_CATALOG_GROWTH_ENABLED there).
+  if ((env.ARTIST_CATALOG_GROWTH_ENABLED as string) === 'false') return;
+
+  const id = crypto.randomUUID();
+  try {
+    const result = await growArtistCatalog(env, now, { maxInserted: 50 });
+    const errorSummary = Object.keys(result.errors).length > 0 ? JSON.stringify(result.errors) : null;
+    await env.DB.prepare(
+      `INSERT INTO catalog_growth_runs (id, started_at, finished_at, genres_tried, inserted_count, error, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(id, now, Date.now(), JSON.stringify(result.genresTried), result.inserted, errorSummary, now).run();
+    console.log('catalog growth run', { inserted: result.inserted, genresTried: result.genresTried, errors: result.errors });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('runCatalogGrowthJob failed', error);
+    await env.DB.prepare(
+      `INSERT INTO catalog_growth_runs (id, started_at, finished_at, genres_tried, inserted_count, error, created_at)
+       VALUES (?, ?, ?, '[]', 0, ?, ?)`
+    ).bind(id, now, Date.now(), message, now).run();
+
+    if (env.OPS_ALERT_EMAIL) {
+      await sendEmail(env, {
+        to: env.OPS_ALERT_EMAIL,
+        subject: 'Wavelengthz: artist catalog growth job failed',
+        html: `<p>The scheduled artist catalog growth job failed:</p><pre>${message}</pre>`,
+      }).catch(() => {});
+    }
+    throw error;
+  }
 }

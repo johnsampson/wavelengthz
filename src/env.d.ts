@@ -32,6 +32,10 @@ interface Env {
   // shared Basic Auth prompt.
   SITE_BASIC_AUTH_USER?: string;
   SITE_BASIC_AUTH_PASSWORD?: string;
+  // Recipient for ops alerts from scheduled jobs (src/lib/catalogGrowth.ts)
+  // -- failure emails and the daily growth digest. Optional: unset means
+  // both are silent no-ops, never a crash.
+  OPS_ALERT_EMAIL?: string;
 }
 
 // `cloudflare:test`'s `env` export is typed as `Cloudflare.Env` (a separate
@@ -53,5 +57,6 @@ declare namespace Cloudflare {
     SENTRY_DSN: string;
     SITE_BASIC_AUTH_USER?: string;
     SITE_BASIC_AUTH_PASSWORD?: string;
+    OPS_ALERT_EMAIL?: string;
   }
 }

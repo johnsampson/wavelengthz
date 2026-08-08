@@ -213,3 +213,65 @@ describe('growArtistCatalog', () => {
     vi.unstubAllGlobals();
   });
 });
+
+import { runCatalogGrowthJob } from '../../src/lib/catalogGrowth';
+
+describe('runCatalogGrowthJob', () => {
+  it('does nothing when ARTIST_CATALOG_GROWTH_ENABLED is "false"', async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error('should not be called');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await runCatalogGrowthJob({ ...env, ARTIST_CATALOG_GROWTH_ENABLED: 'false' } as any, 1000);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    const rows = await env.DB.prepare('SELECT * FROM catalog_growth_runs').all();
+    expect(rows.results.length).toBe(0);
+    vi.unstubAllGlobals();
+  });
+
+  it('runs growth and records a successful run', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+        if (url.includes('type=artist')) {
+          return new Response(
+            JSON.stringify({ artists: { items: [{ id: 'a1', name: 'Fresh', genres: ['pop'], images: [{ url: 'https://img/a1.jpg' }], popularity: 50 }] } }),
+            { status: 200 }
+          );
+        }
+        if (url.includes('type=track')) return new Response(JSON.stringify({ tracks: { items: [] } }), { status: 200 });
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+
+    await runCatalogGrowthJob(env as any, 1000);
+
+    const row = await env.DB.prepare('SELECT * FROM catalog_growth_runs').first<any>();
+    expect(row.inserted_count).toBe(1);
+    expect(row.error).toBeNull();
+    expect(JSON.parse(row.genres_tried).length).toBeGreaterThan(0);
+    vi.unstubAllGlobals();
+  });
+
+  it('records a failed run, emails OPS_ALERT_EMAIL, and rethrows when the job fails outright', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo) => {
+      const url = input.toString();
+      if (url.includes('api/token')) return new Response('invalid client', { status: 401 });
+      if (url.includes('api.resend.com')) return new Response('{}', { status: 200 });
+      throw new Error(`unexpected ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(runCatalogGrowthJob(env as any, 1000)).rejects.toThrow();
+
+    const row = await env.DB.prepare('SELECT * FROM catalog_growth_runs').first<any>();
+    expect(row.inserted_count).toBe(0);
+    expect(row.error).toContain('401');
+    expect(fetchMock.mock.calls.some((c) => c[0].toString().includes('api.resend.com'))).toBe(true);
+    vi.unstubAllGlobals();
+  });
+});
