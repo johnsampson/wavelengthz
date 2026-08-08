@@ -24,16 +24,24 @@ Two rounds of Spotify Web API restrictions affect this app:
   just gone. Development Mode apps also gained restrictions on artist
   popularity scores, follower counts, and new-releases browsing as part of
   the same change.
+- Also confirmed directly (not part of either announced round, but real):
+  `GET /v1/tracks?ids=` -- the *batch* "Get Several Tracks" endpoint -- 403s
+  too, even when passed a single id. The singular `GET /v1/tracks/{id}`
+  works fine. Same pattern held for artist albums/album-tracks: the
+  singular-resource endpoints stayed open while the aggregate one didn't.
 
-**Current workaround:** `searchTracksByArtistName` (`src/lib/spotify.ts`)
-falls back to `GET /v1/search?type=track&q=artist:"NAME"`, which is still
-open in Development Mode. This is a fuzzy text search, not an exact filter,
-so results are now cross-checked against the target artist's actual Spotify
-id (each search result carries its own `artists` list) and anything that
-doesn't match is dropped -- see the "wrong songs" fix this doc ships
-alongside. It's a workaround, not parity: name search can legitimately return
-fewer tracks than the real top-tracks endpoint would for an artist with a
-common name, since anything ambiguous gets filtered out rather than guessed.
+**Current mechanism:** `fetchArtistTracks` (`src/lib/spotify.ts`) goes via
+`GET /v1/artists/{id}/albums` -> `GET /v1/albums/{id}/tracks` -> individual
+`GET /v1/tracks/{id}` calls, all id-scoped, none of them fuzzy text matching.
+This replaced an earlier fallback (`GET
+/v1/search?type=track&q=artist:"NAME"`, filtered to results whose `artists`
+list actually contained the target id) that could come back completely
+empty for a real artist -- confirmed live for "Cirez D" (Eric Prydz's alias):
+the query `artist:"Cirez D"` returned 10 results, and Spotify's search index
+attributed every one of them to Eric Prydz's mainline catalog, zero Cirez D
+credit on any of them. The id-scoped albums/tracks path has no such ambiguity
+-- costs more subrequests per artist (see `SAFE_ARTISTS_PER_RUN` in
+`src/db/seed.ts`), but is actually correct.
 
 ## Extended Quota Mode: the actual fix, once we qualify
 
@@ -54,15 +62,16 @@ usage numbers exist" item, not a near-term blocker to chase.
 
 1. Register/verify the organization in the Spotify Developer Dashboard and
    submit the Extended Quota Mode application.
-2. Once approved, replace the `searchTracksByArtistName` fallback in
+2. Once approved, replace `fetchArtistTracks`'s internals in
    `src/lib/spotify.ts` with a direct call to `GET
-   /v1/artists/{id}/top-tracks` at all three call sites
-   (`src/lib/artistTopUp.ts`, `src/routes/catalog.ts`,
-   `src/db/seed.ts`) -- this gets real per-market top-tracks ranking back,
-   not just "some tracks that matched a name search."
-3. The artist-id filter added alongside the name-search workaround can be
-   dropped at that point (the dedicated endpoint takes an artist id directly,
-   so there's no ambiguity to filter), but there's no urgency to remove it --
+   /v1/artists/{id}/top-tracks` -- same exported function signature, so
+   none of its three callers (`src/lib/artistTopUp.ts`,
+   `src/routes/catalog.ts`, `src/db/seed.ts`) need to change. This
+   gets real per-market top-tracks ranking back, and collapses several
+   subrequests per artist down to one.
+3. The defensive artist-id filter in `fetchArtistTracks` can be dropped at
+   that point (the dedicated endpoint takes an artist id directly, so
+   there's no ambiguity to filter), but there's no urgency to remove it --
    it's harmless dead code until the migration actually happens.
 4. Re-evaluate whether Related Artists / Recommendations are worth adding to
    match scoring now that they'd be available again.

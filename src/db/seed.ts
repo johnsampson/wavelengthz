@@ -1,4 +1,4 @@
-import { getClientCredentialsToken, searchArtistsByGenre, searchTracksByArtistName } from '../lib/spotify';
+import { fetchArtistTracks, getClientCredentialsToken, searchArtistsByGenre } from '../lib/spotify';
 import { recordCatalogGenres } from '../lib/genreCatalog';
 import { upsertArtist, upsertTrack } from '../lib/catalogUpsert';
 
@@ -18,16 +18,20 @@ const SPOTIFY_MAX_OFFSET = 950; // Spotify caps offset+limit at 1000 for search
 
 // Cloudflare Workers cap outbound calls (fetch + D1 queries share the same
 // budget) per request at 1000 (Paid) / 50 (Free). Fully processing one new
-// artist costs up to 4 subrequests (artist insert, top-tracks fetch, up to 2
-// track inserts), on top of periodic search-page calls and the initial
-// client-credentials call. This keeps a single run comfortably under that
-// ceiling on a deployed Worker, so a large requested count degrades to "seed
-// as many as safely fit in this run, report the rest" (see `reachedTarget`)
-// rather than risking a mid-run platform failure. Already-known artists are
-// skipped via a cheap existence check before any of that per-artist cost is
-// paid, so re-running the same request makes real incremental progress
-// toward a larger cumulative total across multiple calls.
-export const SAFE_ARTISTS_PER_RUN = 200;
+// artist costs up to 8 subrequests (existence check + artist insert, an
+// artist-albums fetch, up to 2 album-tracks fetches, a batch track-details
+// fetch, up to 2 track inserts -- fetchArtistTracks's albums-based lookup
+// costs more round trips than the single search call it replaced, but is
+// actually reliable; see spotify.ts), on top of periodic search-page calls
+// and the initial client-credentials call. This keeps a single run
+// comfortably under that ceiling on a deployed Worker, so a large requested
+// count degrades to "seed as many as safely fit in this run, report the
+// rest" (see `reachedTarget`) rather than risking a mid-run platform
+// failure. Already-known artists are skipped via a cheap existence check
+// before any of that per-artist cost is paid, so re-running the same
+// request makes real incremental progress toward a larger cumulative total
+// across multiple calls.
+export const SAFE_ARTISTS_PER_RUN = 100;
 
 export async function seedCatalog(
   env: Env,
@@ -118,7 +122,7 @@ export async function seedCatalog(
             await recordCatalogGenres(env.DB, artist.genres ?? [], 'artist', now);
           }
 
-          const tracks = await searchTracksByArtistName(token, artist.id, artist.name, TRACKS_PER_ARTIST);
+          const tracks = await fetchArtistTracks(token, artist.id, TRACKS_PER_ARTIST);
           for (const track of tracks) {
             const trackResult = await upsertTrack(env.DB, track, artistResult.id, 'seed', null, now);
             if (trackResult.inserted) {

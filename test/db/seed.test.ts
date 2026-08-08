@@ -33,16 +33,21 @@ describe('seedCatalog', () => {
             { status: 200 }
           );
         }
-        if (url.includes('/v1/search') && url.includes('type=track')) {
+        if (url.includes('/artists/artist-1/albums')) {
+          return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+        }
+        if (url.includes('/albums/album-1/tracks')) {
+          return new Response(JSON.stringify({ items: [{ id: 'track-1' }, { id: 'track-2' }] }), { status: 200 });
+        }
+        if (url.includes('/v1/tracks/track-1')) {
           return new Response(
-            JSON.stringify({
-              tracks: {
-                items: [
-                  { id: 'track-1', name: 'Song One', artists: [{ id: 'artist-1', name: 'Shared Artist' }], album: { images: [{ url: 'http://img/t1' }] }, preview_url: 'http://preview/1' },
-                  { id: 'track-2', name: 'Song Two', artists: [{ id: 'artist-1', name: 'Shared Artist' }], album: { images: [{ url: 'http://img/t2' }] }, preview_url: null },
-                ],
-              },
-            }),
+            JSON.stringify({ id: 'track-1', name: 'Song One', artists: [{ id: 'artist-1', name: 'Shared Artist' }], album: { images: [{ url: 'http://img/t1' }] }, preview_url: 'http://preview/1' }),
+            { status: 200 }
+          );
+        }
+        if (url.includes('/v1/tracks/track-2')) {
+          return new Response(
+            JSON.stringify({ id: 'track-2', name: 'Song Two', artists: [{ id: 'artist-1', name: 'Shared Artist' }], album: { images: [{ url: 'http://img/t2' }] }, preview_url: null }),
             { status: 200 }
           );
         }
@@ -102,20 +107,25 @@ describe('seedCatalog', () => {
             { status: 200 }
           );
         }
-        if (url.includes('/v1/search') && url.includes('type=track')) {
-          if (url.includes('Flaky')) {
-            // simulate a transient upstream failure (e.g. 500/429) for this one artist
-            return new Response('server error', { status: 500 });
-          }
+        if (url.includes('/artists/artist-fail/albums')) {
+          // simulate a transient upstream failure (e.g. 500/429) for this one artist
+          return new Response('server error', { status: 500 });
+        }
+        if (url.includes('/artists/artist-ok/albums')) {
+          return new Response(JSON.stringify({ items: [{ id: 'album-ok' }] }), { status: 200 });
+        }
+        if (url.includes('/albums/album-ok/tracks')) {
+          return new Response(JSON.stringify({ items: [{ id: 'track-1' }, { id: 'track-2' }] }), { status: 200 });
+        }
+        if (url.includes('/v1/tracks/track-1')) {
           return new Response(
-            JSON.stringify({
-              tracks: {
-                items: [
-                  { id: 'track-1', name: 'Song One', artists: [{ id: 'artist-ok', name: 'Reliable Artist' }], album: { images: [{ url: 'http://img/t1' }] }, preview_url: 'http://preview/1' },
-                  { id: 'track-2', name: 'Song Two', artists: [{ id: 'artist-ok', name: 'Reliable Artist' }], album: { images: [{ url: 'http://img/t2' }] }, preview_url: null },
-                ],
-              },
-            }),
+            JSON.stringify({ id: 'track-1', name: 'Song One', artists: [{ id: 'artist-ok', name: 'Reliable Artist' }], album: { images: [{ url: 'http://img/t1' }] }, preview_url: 'http://preview/1' }),
+            { status: 200 }
+          );
+        }
+        if (url.includes('/v1/tracks/track-2')) {
+          return new Response(
+            JSON.stringify({ id: 'track-2', name: 'Song Two', artists: [{ id: 'artist-ok', name: 'Reliable Artist' }], album: { images: [{ url: 'http://img/t2' }] }, preview_url: null }),
             { status: 200 }
           );
         }
@@ -160,16 +170,21 @@ describe('seedCatalog', () => {
           { status: 200 }
         );
       }
-      if (url.includes('/v1/search') && url.includes('type=track')) {
+      if (url.includes('/artists/artist-1/albums')) {
+        return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+      }
+      if (url.includes('/albums/album-1/tracks')) {
+        return new Response(JSON.stringify({ items: [{ id: 'track-1' }, { id: 'track-2' }] }), { status: 200 });
+      }
+      if (url.includes('/v1/tracks/track-1')) {
         return new Response(
-          JSON.stringify({
-            tracks: {
-              items: [
-                { id: 'track-1', name: 'Song One', artists: [{ id: 'artist-1', name: 'Shared Artist' }], album: { images: [{ url: 'http://img/t1' }] }, preview_url: 'http://preview/1' },
-                { id: 'track-2', name: 'Song Two', artists: [{ id: 'artist-1', name: 'Shared Artist' }], album: { images: [{ url: 'http://img/t2' }] }, preview_url: null },
-              ],
-            },
-          }),
+          JSON.stringify({ id: 'track-1', name: 'Song One', artists: [{ id: 'artist-1', name: 'Shared Artist' }], album: { images: [{ url: 'http://img/t1' }] }, preview_url: 'http://preview/1' }),
+          { status: 200 }
+        );
+      }
+      if (url.includes('/v1/tracks/track-2')) {
+        return new Response(
+          JSON.stringify({ id: 'track-2', name: 'Song Two', artists: [{ id: 'artist-1', name: 'Shared Artist' }], album: { images: [{ url: 'http://img/t2' }] }, preview_url: null }),
           { status: 200 }
         );
       }
@@ -207,9 +222,14 @@ describe('seedCatalog', () => {
             { status: 200 }
           );
         }
-        if (url.includes('/v1/search') && url.includes('type=track')) {
+        if (url.includes('/artists/artist-1/albums')) {
+          // The entry point of track-fetching for this artist -- an empty
+          // albums list here means no further album-tracks/batch-details
+          // calls ever happen, keeping this test's "called once" count
+          // meaningful regardless of how many follow-up calls a non-empty
+          // discography would require.
           trackSearchCalls.push(url);
-          return new Response(JSON.stringify({ tracks: { items: [] } }), { status: 200 });
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
         }
         throw new Error(`unexpected fetch ${url}`);
       })
@@ -255,8 +275,8 @@ describe('seedCatalog', () => {
           }));
           return new Response(JSON.stringify({ artists: { items } }), { status: 200 });
         }
-        if (url.includes('/v1/search') && url.includes('type=track')) {
-          return new Response(JSON.stringify({ tracks: { items: [] } }), { status: 200 });
+        if (url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
         }
         throw new Error(`unexpected fetch ${url}`);
       })
@@ -299,8 +319,8 @@ describe('seedCatalog', () => {
           });
           return new Response(JSON.stringify({ artists: { items } }), { status: 200 });
         }
-        if (url.includes('/v1/search') && url.includes('type=track')) {
-          return new Response(JSON.stringify({ tracks: { items: [] } }), { status: 200 });
+        if (url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
         }
         throw new Error(`unexpected fetch ${url}`);
       })

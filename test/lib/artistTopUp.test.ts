@@ -31,8 +31,8 @@ function stubSpotify(artistsByGenre: Record<string, any[]>) {
         const genre = match ? match[1] : '';
         return new Response(JSON.stringify({ artists: { items: artistsByGenre[genre] ?? [] } }), { status: 200 });
       }
-      if (url.includes('type=track')) {
-        return new Response(JSON.stringify({ tracks: { items: [] } }), { status: 200 });
+      if (url.includes('/albums')) {
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
       }
       throw new Error(`unexpected ${url}`);
     })

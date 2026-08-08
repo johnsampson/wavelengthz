@@ -101,8 +101,8 @@ describe('GET /api/candidates/music', () => {
             { status: 200 }
           );
         }
-        if (url.includes('type=track')) {
-          return new Response(JSON.stringify({ tracks: { items: [] } }), { status: 200 });
+        if (url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
         }
         throw new Error(`unexpected ${url}`);
       })
@@ -153,7 +153,7 @@ describe('GET /api/candidates/music', () => {
             { status: 200 }
           );
         }
-        if (url.includes('type=track')) return new Response(JSON.stringify({ tracks: { items: [] } }), { status: 200 });
+        if (url.includes('/albums')) return new Response(JSON.stringify({ items: [] }), { status: 200 });
         throw new Error(`unexpected ${url}`);
       })
     );

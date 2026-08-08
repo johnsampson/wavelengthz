@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { buildAuthUrl, fetchSpotifyProfile, searchTracksByArtistName } from '../../src/lib/spotify';
+import { buildAuthUrl, fetchSpotifyProfile, fetchArtistTracks } from '../../src/lib/spotify';
 
 const env = {
   SPOTIFY_CLIENT_ID: 'client123',
@@ -43,33 +43,103 @@ describe('fetchSpotifyProfile', () => {
   });
 });
 
-describe('searchTracksByArtistName', () => {
-  it('excludes tracks whose artists do not actually include the requested artist id', async () => {
-    // Spotify's name-based `artist:"X"` search is a fuzzy text match, not an
-    // exact filter -- it can return tracks by an unrelated artist that
-    // happens to share a name. Each returned track carries its real
-    // `artists` list (with Spotify ids), which is the only reliable way to
-    // confirm a result actually belongs to the artist we asked about.
+describe('fetchArtistTracks', () => {
+  function stubSpotify({ albums = [], albumTracks = {}, tracksById = {} }: { albums?: any[]; albumTracks?: Record<string, any[]>; tracksById?: Record<string, any> }) {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            tracks: {
-              items: [
-                { id: 't1', name: 'Right Song', artists: [{ id: 'artist-1', name: 'Real Artist' }] },
-                { id: 't2', name: 'Wrong Song', artists: [{ id: 'artist-2', name: 'Same Name, Different Act' }] },
-              ],
-            },
-          }),
-          { status: 200 }
-        )
-      )
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: albums }), { status: 200 });
+        }
+        const albumTracksMatch = url.match(/\/albums\/([^/?]+)\/tracks/);
+        if (albumTracksMatch) {
+          return new Response(JSON.stringify({ items: albumTracks[albumTracksMatch[1]] ?? [] }), { status: 200 });
+        }
+        const trackByIdMatch = url.match(/\/v1\/tracks\/([^/?]+)$/);
+        if (trackByIdMatch) {
+          const track = tracksById[trackByIdMatch[1]];
+          return track ? new Response(JSON.stringify(track), { status: 200 }) : new Response('not found', { status: 404 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
     );
+  }
 
-    const tracks = await searchTracksByArtistName('token', 'artist-1', 'Real Artist', 10);
+  it("fetches an artist's own tracks via their albums, with full track details", async () => {
+    // GET /v1/artists/{id}/top-tracks is 403'd in Development Mode (see the
+    // comment above fetchArtistAlbumIds in spotify.ts), and the previous
+    // name-search fallback could come back completely empty for a real
+    // artist whose name overlaps a more famous identity (verified live for
+    // "Cirez D", Eric Prydz's alias). Going via albums -> album tracks is
+    // id-scoped end to end, so there's no name ambiguity to get wrong.
+    stubSpotify({
+      albums: [{ id: 'album-1' }],
+      albumTracks: { 'album-1': [{ id: 't1' }, { id: 't2' }] },
+      tracksById: {
+        t1: { id: 't1', name: 'Valborg', artists: [{ id: 'artist-1', name: 'Cirez D' }] },
+        t2: { id: 't2', name: 'The Raid', artists: [{ id: 'artist-1', name: 'Cirez D' }] },
+      },
+    });
+
+    const tracks = await fetchArtistTracks('token', 'artist-1', 10);
+
+    expect(tracks.map((t: any) => t.name)).toEqual(['Valborg', 'The Raid']);
+    vi.unstubAllGlobals();
+  });
+
+  it('excludes any track that does not actually credit the requested artist id', async () => {
+    stubSpotify({
+      albums: [{ id: 'album-1' }],
+      albumTracks: { 'album-1': [{ id: 't1' }, { id: 't2' }] },
+      tracksById: {
+        t1: { id: 't1', name: 'Right Song', artists: [{ id: 'artist-1', name: 'Real Artist' }] },
+        t2: { id: 't2', name: 'Wrong Song', artists: [{ id: 'artist-2', name: 'Someone Else' }] },
+      },
+    });
+
+    const tracks = await fetchArtistTracks('token', 'artist-1', 10);
 
     expect(tracks.map((t: any) => t.id)).toEqual(['t1']);
+    vi.unstubAllGlobals();
+  });
+
+  it('stops fetching once the requested limit is reached, without querying later albums', async () => {
+    const secondAlbumCalls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: [{ id: 'album-1' }, { id: 'album-2' }] }), { status: 200 });
+        }
+        if (url.includes('/albums/album-1/tracks')) {
+          return new Response(JSON.stringify({ items: [{ id: 't1' }] }), { status: 200 });
+        }
+        if (url.includes('/albums/album-2/tracks')) {
+          secondAlbumCalls.push(url);
+          return new Response(JSON.stringify({ items: [{ id: 't2' }] }), { status: 200 });
+        }
+        if (url.includes('/v1/tracks/t1')) {
+          return new Response(JSON.stringify({ id: 't1', name: 'Track One', artists: [{ id: 'artist-1', name: 'X' }] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+
+    const tracks = await fetchArtistTracks('token', 'artist-1', 1);
+
+    expect(tracks).toHaveLength(1);
+    expect(secondAlbumCalls).toHaveLength(0);
+    vi.unstubAllGlobals();
+  });
+
+  it('returns no tracks when the artist has no albums', async () => {
+    stubSpotify({ albums: [] });
+
+    const tracks = await fetchArtistTracks('token', 'artist-1', 10);
+
+    expect(tracks).toEqual([]);
     vi.unstubAllGlobals();
   });
 });
