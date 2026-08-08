@@ -67,6 +67,27 @@ describe('GET /login', () => {
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     expect(res.headers.get('Location')).toBe('http://127.0.0.1:8787/login?foo=bar');
   });
+
+  it('serves OAuth directly (no redirect) on a host listed in SPOTIFY_ALLOWED_HOSTS, using that host as the redirect_uri', async () => {
+    // env.test.vars sets SPOTIFY_ALLOWED_HOSTS=allowed.example.com -- e.g. a
+    // Cloudflare Tunnel hostname someone's opted into for testing on a real
+    // phone, distinct from the SPOTIFY_REDIRECT_URI default.
+    const req = new Request('https://allowed.example.com/login');
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(302);
+    const location = res.headers.get('Location')!;
+    expect(location).toContain('https://accounts.spotify.com/authorize');
+    expect(location).toContain(encodeURIComponent('https://allowed.example.com/callback'));
+    expect(res.headers.get('Set-Cookie')).toContain('wl_oauth_state=');
+  });
+
+  it('still redirects to the canonical host when reached via a host that is neither SPOTIFY_REDIRECT_URI nor in SPOTIFY_ALLOWED_HOSTS', async () => {
+    const req = new Request('https://not-allowed.example.com/login');
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('http://127.0.0.1:8787/login');
+    expect(res.headers.get('Set-Cookie')).toBeNull();
+  });
 });
 
 describe('GET /callback', () => {
@@ -76,6 +97,37 @@ describe('GET /callback', () => {
     });
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     expect(res.status).toBe(400);
+  });
+
+  it('sends a redirect_uri matching the allowlisted host to the token exchange, not the SPOTIFY_REDIRECT_URI default', async () => {
+    // Spotify requires the token exchange's redirect_uri to exactly match
+    // whatever /login sent to /authorize -- which, for a request landing on
+    // an allowlisted host, is that host's own callback URL (see
+    // callbackUrlForHost in src/routes/auth.ts), not the configured default.
+    let tokenExchangeBody = '';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('accounts.spotify.com/api/token')) {
+          tokenExchangeBody = String(init?.body ?? '');
+          return new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 }), { status: 200 });
+        }
+        if (url.includes('api.spotify.com/v1/me')) {
+          return new Response(JSON.stringify({ id: 'spotify-allowed-host-user' }), { status: 200 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    const req = new Request('https://allowed.example.com/callback?code=abc&state=match', {
+      headers: { Cookie: 'wl_oauth_state=match' },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(302);
+    expect(new URLSearchParams(tokenExchangeBody).get('redirect_uri')).toBe('https://allowed.example.com/callback');
+
+    vi.unstubAllGlobals();
   });
 
   it('creates a user and session on a valid callback', async () => {
