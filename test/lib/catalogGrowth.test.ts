@@ -290,7 +290,7 @@ describe('sendCatalogGrowthDigest', () => {
     const now = 100 * 60 * 60 * 1000; // arbitrary "now" comfortably past 24h from epoch
     await insertRun('r1', now - 1000, 5, null);
     await insertRun('r2', now - 2000, 3, 'boom');
-    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    const fetchMock = vi.fn(async (_input: RequestInfo, _init?: RequestInit) => new Response('{}', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
     await sendCatalogGrowthDigest(env as any, now);
@@ -305,7 +305,7 @@ describe('sendCatalogGrowthDigest', () => {
   it('excludes runs older than 24h', async () => {
     const now = 100 * 60 * 60 * 1000;
     await insertRun('old', now - 25 * 60 * 60 * 1000, 99, null);
-    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    const fetchMock = vi.fn(async (_input: RequestInfo, _init?: RequestInit) => new Response('{}', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
     await sendCatalogGrowthDigest(env as any, now);
@@ -316,7 +316,7 @@ describe('sendCatalogGrowthDigest', () => {
   });
 
   it('does nothing when OPS_ALERT_EMAIL is not configured', async () => {
-    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    const fetchMock = vi.fn(async (_input: RequestInfo, _init?: RequestInit) => new Response('{}', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
     await sendCatalogGrowthDigest({ ...env, OPS_ALERT_EMAIL: undefined } as any, 1000);
