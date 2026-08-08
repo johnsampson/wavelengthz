@@ -1,5 +1,6 @@
 import type { RouterType, IRequest } from 'itty-router';
 import { getSessionUser } from '../lib/session';
+import { maybeGhostUser } from '../lib/reports';
 
 const VALID_REASONS = new Set(['inappropriate_photos', 'harassment', 'fake_profile', 'spam', 'underage', 'other']);
 
@@ -69,9 +70,15 @@ export function registerSafetyRoutes(router: RouterType) {
       return Response.json({ error: 'invalid_reason' }, { status: 400 });
     }
 
+    const now = Date.now();
     await env.DB.prepare(
       `INSERT INTO reports (id, reporter_id, reported_id, reason, details, status, created_at) VALUES (?, ?, ?, ?, ?, 'open', ?)`
-    ).bind(crypto.randomUUID(), user.id, user_id, reason, details ?? null, Date.now()).run();
+    ).bind(crypto.randomUUID(), user.id, user_id, reason, details ?? null, now).run();
+
+    // Ghost removal: once 3+ distinct people have reported the same person,
+    // they silently stop appearing to or interacting with anyone else --
+    // enforced in peopleSwipes.ts/matching.ts/matches.ts, not here.
+    await maybeGhostUser(env.DB, user_id, now);
 
     return Response.json({ ok: true });
   });

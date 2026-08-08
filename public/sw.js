@@ -26,8 +26,11 @@
 // participant's poll -- it only refreshed on a message-count change, and a
 // recall doesn't change the count, just flips recalledAt on an existing row.
 // v18 replaces /profile's photo grid with a single-image carousel (prev/next
-// arrows + a shared index with the full-screen lightbox).
-const CACHE_NAME = 'wavelengthz-shell-v18';
+// arrows + a shared index with the full-screen lightbox). v19 adds a Report
+// button to /profile -- previously the only report entry point anywhere in
+// the app was from an active match (match.html), with no way to report
+// someone from their photos/bio before ever matching.
+const CACHE_NAME = 'wavelengthz-shell-v19';
 const APP_SHELL = [
   '/',
   '/app.js',

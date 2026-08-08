@@ -9,6 +9,12 @@ import { isValidMessageBody } from '../lib/messageFilter';
 // immediately (docs/PLAN.md §9), not linger until the 7-day grace period
 // expires and the hard purge runs. `getSessionUser` already excludes the
 // *caller* if they're deleted; these joins cover the counterpart.
+//
+// The ghosted_at check below is deliberately asymmetric, unlike deleted_at:
+// ghosting (src/lib/reports.ts) only ever hides someone from OTHERS, never
+// from themselves, so this must check whether the OTHER participant is
+// ghosted, not whether either one is -- a ghosted caller still sees their
+// own existing matches completely normally.
 async function loadActiveMatchForParticipant(db: D1Database, matchId: string, userId: string) {
   return db
     .prepare(
@@ -16,9 +22,13 @@ async function loadActiveMatchForParticipant(db: D1Database, matchId: string, us
        JOIN users ua ON ua.id = m.user_a_id
        JOIN users ub ON ub.id = m.user_b_id
        WHERE m.id = ? AND m.unmatched_at IS NULL AND (m.user_a_id = ? OR m.user_b_id = ?)
-         AND ua.deleted_at IS NULL AND ub.deleted_at IS NULL`
+         AND ua.deleted_at IS NULL AND ub.deleted_at IS NULL
+         AND (
+           (m.user_a_id = ? AND ub.ghosted_at IS NULL) OR
+           (m.user_b_id = ? AND ua.ghosted_at IS NULL)
+         )`
     )
-    .bind(matchId, userId, userId)
+    .bind(matchId, userId, userId, userId, userId)
     .first<{ id: string; user_a_id: string; user_b_id: string; created_at: number }>();
 }
 
@@ -33,6 +43,8 @@ export function registerMatchRoutes(router: RouterType) {
     // deliberately already knows the matchId (from the celebration modal, or
     // a message link) can still open the match detail/message it right away;
     // see src/lib/notifications.ts.
+    // See loadActiveMatchForParticipant's comment on why the ghosted_at
+    // check is asymmetric (checks the OTHER participant, not either one).
     const rows = await env.DB.prepare(
       `SELECT m.id, m.user_a_id, m.user_b_id, m.created_at,
               ua.display_name as user_a_display_name, ub.display_name as user_b_display_name
@@ -41,9 +53,13 @@ export function registerMatchRoutes(router: RouterType) {
        JOIN users ub ON ub.id = m.user_b_id
        WHERE m.unmatched_at IS NULL AND (m.user_a_id = ? OR m.user_b_id = ?)
          AND ua.deleted_at IS NULL AND ub.deleted_at IS NULL
+         AND (
+           (m.user_a_id = ? AND ub.ghosted_at IS NULL) OR
+           (m.user_b_id = ? AND ua.ghosted_at IS NULL)
+         )
          AND m.created_at <= ?
        ORDER BY m.created_at DESC`
-    ).bind(user.id, user.id, Date.now() - getMatchNotificationDelayMs(env)).all<any>();
+    ).bind(user.id, user.id, user.id, user.id, Date.now() - getMatchNotificationDelayMs(env)).all<any>();
 
     const matches = rows.results.map((m) => ({
       id: m.id,
