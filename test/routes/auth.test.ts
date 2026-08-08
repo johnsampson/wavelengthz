@@ -14,7 +14,7 @@ beforeEach(async () => {
 
 describe('GET /login', () => {
   it('redirects to Spotify authorize with a state cookie set', async () => {
-    const req = new Request('http://localhost/login');
+    const req = new Request('http://127.0.0.1:8787/login');
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     expect(res.status).toBe(302);
     const location = res.headers.get('Location')!;
@@ -36,10 +36,36 @@ describe('GET /login', () => {
   });
 
   it('keeps Secure on the state cookie over https', async () => {
-    const req = new Request('https://wavelengthz.app/login');
+    // Same host as SPOTIFY_REDIRECT_URI (127.0.0.1:8787) -- only the
+    // protocol differs -- so this isolates the Secure-flag behavior from
+    // the host-canonicalization redirect covered below.
+    const req = new Request('https://127.0.0.1:8787/login');
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     const setCookie = res.headers.get('Set-Cookie')!;
     expect(setCookie).toContain('Secure');
+  });
+
+  it('redirects to the canonical SPOTIFY_REDIRECT_URI host instead of setting the state cookie, when reached via a different host', async () => {
+    // The state cookie is host-scoped. If /login is reached via a host that
+    // doesn't match SPOTIFY_REDIRECT_URI's host (e.g. "localhost", which is
+    // exactly what `wrangler dev` itself prints as "Ready on
+    // http://localhost:8787" every time it (re)starts, while
+    // SPOTIFY_REDIRECT_URI is configured as 127.0.0.1), a cookie set here
+    // would never be sent back when Spotify redirects to /callback on the
+    // *other* host -- producing "Invalid OAuth state" every single time,
+    // with nothing actually wrong server-side. Funnel onto the canonical
+    // host first, before ever setting the cookie.
+    const req = new Request('http://localhost:8787/login');
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('http://127.0.0.1:8787/login');
+    expect(res.headers.get('Set-Cookie')).toBeNull();
+  });
+
+  it('preserves the query string when redirecting to the canonical host', async () => {
+    const req = new Request('http://localhost:8787/login?foo=bar');
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.headers.get('Location')).toBe('http://127.0.0.1:8787/login?foo=bar');
   });
 });
 
