@@ -1,7 +1,7 @@
 import type { IRequest, RouterType } from 'itty-router';
 import { buildAuthUrl, exchangeCodeForToken, fetchSpotifyProfile } from '../lib/spotify';
 import { encrypt } from '../lib/crypto';
-import { createSession, requestIsSecure } from '../lib/session';
+import { createSession, requestIsSecure, requestProtocol } from '../lib/session';
 
 function parseCookie(request: Request, name: string): string | null {
   const header = request.headers.get('Cookie');
@@ -56,7 +56,11 @@ export function registerAuthRoutes(router: RouterType) {
     }
 
     const state = crypto.randomUUID();
-    const authUrl = buildAuthUrl(state, env, callbackUrlForHost(url.protocol, url.host));
+    // requestProtocol, not url.protocol: see the comment on requestIsSecure
+    // in session.ts -- a Cloudflare Tunnel to a local instance reports http
+    // here even when the public/browser side is https, and Spotify rejects
+    // a non-loopback http redirect_uri outright.
+    const authUrl = buildAuthUrl(state, env, callbackUrlForHost(requestProtocol(request), url.host));
     const secure = requestIsSecure(request);
     return new Response(null, {
       status: 302,
@@ -83,7 +87,7 @@ export function registerAuthRoutes(router: RouterType) {
     // whenever that host is allowed (falling back to the configured default
     // is just defensive; a callback landing on a non-allowed host shouldn't
     // happen in practice).
-    const redirectUri = isAllowedHost(url.host, env) ? callbackUrlForHost(url.protocol, url.host) : env.SPOTIFY_REDIRECT_URI;
+    const redirectUri = isAllowedHost(url.host, env) ? callbackUrlForHost(requestProtocol(request), url.host) : env.SPOTIFY_REDIRECT_URI;
     const token = await exchangeCodeForToken(code, env, redirectUri);
     const profile = await fetchSpotifyProfile(token.access_token);
 
