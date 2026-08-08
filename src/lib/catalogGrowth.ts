@@ -195,3 +195,28 @@ export async function runCatalogGrowthJob(env: Env, now: number): Promise<void> 
     throw error;
   }
 }
+
+/**
+ * Reads catalog_growth_runs for the last 24h and emails one summary to
+ * OPS_ALERT_EMAIL -- deliberately not a per-run email (the growth job runs
+ * every 15 minutes; that would be 90+ emails/day). A no-op when
+ * OPS_ALERT_EMAIL isn't configured, same as the failure path above.
+ */
+export async function sendCatalogGrowthDigest(env: Env, now: number): Promise<void> {
+  if (!env.OPS_ALERT_EMAIL) return;
+
+  const since = now - 24 * 60 * 60 * 1000;
+  const rows = await env.DB.prepare(`SELECT inserted_count, error FROM catalog_growth_runs WHERE created_at >= ?`)
+    .bind(since)
+    .all<{ inserted_count: number; error: string | null }>();
+
+  const totalInserted = rows.results.reduce((sum, r) => sum + r.inserted_count, 0);
+  const runCount = rows.results.length;
+  const failedCount = rows.results.filter((r) => r.error !== null).length;
+
+  await sendEmail(env, {
+    to: env.OPS_ALERT_EMAIL,
+    subject: `Wavelengthz: artist catalog growth digest (${totalInserted} new artists today)`,
+    html: `<p>${runCount} run(s) in the last 24h, ${totalInserted} new artist(s) inserted, ${failedCount} failed run(s).</p>`,
+  });
+}

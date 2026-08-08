@@ -275,3 +275,53 @@ describe('runCatalogGrowthJob', () => {
     vi.unstubAllGlobals();
   });
 });
+
+import { sendCatalogGrowthDigest } from '../../src/lib/catalogGrowth';
+
+describe('sendCatalogGrowthDigest', () => {
+  async function insertRun(id: string, createdAt: number, insertedCount: number, error: string | null) {
+    await env.DB.prepare(
+      `INSERT INTO catalog_growth_runs (id, started_at, finished_at, genres_tried, inserted_count, error, created_at)
+       VALUES (?, ?, ?, '[]', ?, ?, ?)`
+    ).bind(id, createdAt, createdAt, insertedCount, error, createdAt).run();
+  }
+
+  it('aggregates the last 24h of runs into one summary email', async () => {
+    const now = 100 * 60 * 60 * 1000; // arbitrary "now" comfortably past 24h from epoch
+    await insertRun('r1', now - 1000, 5, null);
+    await insertRun('r2', now - 2000, 3, 'boom');
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendCatalogGrowthDigest(env as any, now);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.html).toContain('8 new artist(s)');
+    expect(body.html).toContain('1 failed run(s)');
+    vi.unstubAllGlobals();
+  });
+
+  it('excludes runs older than 24h', async () => {
+    const now = 100 * 60 * 60 * 1000;
+    await insertRun('old', now - 25 * 60 * 60 * 1000, 99, null);
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendCatalogGrowthDigest(env as any, now);
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.html).toContain('0 new artist(s)');
+    vi.unstubAllGlobals();
+  });
+
+  it('does nothing when OPS_ALERT_EMAIL is not configured', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendCatalogGrowthDigest({ ...env, OPS_ALERT_EMAIL: undefined } as any, 1000);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+});

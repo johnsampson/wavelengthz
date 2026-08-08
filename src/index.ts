@@ -15,7 +15,7 @@ import { registerGroupRoutes } from './routes/groups';
 import { purgeExpiredDeletions } from './lib/accountDeletion';
 import { refreshCatalogFromProfiles } from './db/catalogRefresh';
 import { sendDelayedMatchNotificationEmails } from './lib/notifications';
-import { runCatalogGrowthJob } from './lib/catalogGrowth';
+import { runCatalogGrowthJob, sendCatalogGrowthDigest } from './lib/catalogGrowth';
 import { checkRateLimit } from './lib/rateLimit';
 import { reportError } from './lib/sentry';
 import { constantTimeEqual } from './lib/crypto';
@@ -194,6 +194,12 @@ export default {
         runCatalogGrowthJob(env, Date.now())
           .then(() => undefined)
           .catch(report('scheduled:runCatalogGrowthJob'))
+      );
+    } else if (event.cron === '0 13 * * *') {
+      ctx.waitUntil(
+        sendCatalogGrowthDigest(env, Date.now())
+          .then(() => undefined)
+          .catch(report('scheduled:sendCatalogGrowthDigest'))
       );
     } else {
       ctx.waitUntil(
