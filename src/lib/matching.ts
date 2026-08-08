@@ -2,6 +2,7 @@ import type { UserRow } from './session';
 import { getMusicProfile, getRightSwipedItemIds } from './profile';
 import type { MusicProfile } from './scoring';
 import { haversineKm, proximityScore, spotifyOverlap, jaccard, computeBlendedScore } from './scoring';
+import { isMutuallyWithinAgeRange, type AgePreferences } from './age';
 
 /** Everything scoring needs about one participant, already loaded. */
 export interface ScoringInputs {
@@ -92,6 +93,18 @@ export async function createMatchIfMutual(
     .bind(swiperId, targetId, targetId, swiperId)
     .first();
   if (blocked) return null;
+
+  // Defense in depth: GET /api/candidates/people already filters out anyone
+  // outside either side's stated age range, but that's a discovery-level
+  // display filter -- a client can still call POST /api/swipe/people
+  // directly with an arbitrary target_id, bypassing it entirely. Never
+  // create a match outside either side's range regardless of how the
+  // mutual right-swipes came to exist.
+  const [swiperAge, targetAge] = await Promise.all([
+    db.prepare('SELECT date_of_birth, age_min, age_max FROM users WHERE id = ?').bind(swiperId).first<AgePreferences>(),
+    db.prepare('SELECT date_of_birth, age_min, age_max FROM users WHERE id = ?').bind(targetId).first<AgePreferences>(),
+  ]);
+  if (swiperAge && targetAge && !isMutuallyWithinAgeRange(swiperAge, targetAge, Date.now())) return null;
 
   const [userA, userB] = [swiperId, targetId].sort();
   const matchId = crypto.randomUUID();

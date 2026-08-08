@@ -8,7 +8,7 @@ import { isBlockedEitherDirection } from '../lib/blocks';
 import { computeMusicOverlap, MusicOverlap } from '../lib/musicOverlap';
 import { getDisplayMusicProfile } from '../lib/profile';
 import { getMatchNotificationDelayMs } from '../lib/notifications';
-import { computeAge } from '../lib/age';
+import { isMutuallyWithinAgeRange } from '../lib/age';
 
 // Hard cap on the like-priority queue. It previously had no LIMIT at all, so a
 // popular account's deck request grew without bound.
@@ -173,14 +173,11 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
       haversineKm(me.lat!, me.lng!, candidate.lat!, candidate.lng!) <= me.max_distance_km;
 
     const now = Date.now();
-    // Unknown DOB never excludes -- can't compute an age to check. Every real
-    // onboarded account has date_of_birth set (enforced at onboarding), this
-    // only matters for legacy/malformed rows.
-    const withinAgeRange = <T extends UserRow>(candidate: T) => {
-      if (candidate.date_of_birth == null) return true;
-      const age = computeAge(candidate.date_of_birth, now);
-      return age >= me.age_min && age <= me.age_max;
-    };
+    // Mutual in both directions -- see isMutuallyWithinAgeRange. Previously
+    // only checked "is the candidate within MY range", which let someone
+    // who set a narrow range for their own safety still be shown to people
+    // far outside it, as long as those people's own ranges were wide enough.
+    const withinAgeRange = <T extends UserRow>(candidate: T) => isMutuallyWithinAgeRange(me, candidate, now);
 
     const likePriority = likePriorityRows.results.filter(withinRadius).filter(withinAgeRange);
     const inRangePool = pool.filter(withinRadius).filter(withinAgeRange);

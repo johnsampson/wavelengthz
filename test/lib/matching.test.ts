@@ -99,4 +99,28 @@ describe('createMatchIfMutual', () => {
     const matchesAfter = await env.DB.prepare('SELECT * FROM matches').all<any>();
     expect(matchesAfter.results.length).toBe(0);
   });
+
+  it('does nothing outside either side\'s stated age range, even with mutual right swipes recorded (defense in depth)', async () => {
+    // GET /api/candidates/people already filters this at the discovery
+    // level, but that's a display filter a client could bypass by calling
+    // POST /api/swipe/people directly with an arbitrary target_id. u2 (20)
+    // is within u1's range (18-100), but u1 (40) is outside u2's own
+    // stated range (18-25) -- the match must not be created regardless of
+    // the mutual right-swipes existing.
+    await env.DB.prepare('UPDATE users SET date_of_birth = ?, age_min = 18, age_max = 100 WHERE id = ?').bind('1986-01-01', 'u1').run();
+    await env.DB.prepare('UPDATE users SET date_of_birth = ?, age_min = 18, age_max = 25 WHERE id = ?').bind('2006-01-01', 'u2').run();
+
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, created_at, updated_at) VALUES ('s1', 'u2', 'u1', 'right', ?, ?)`
+    ).bind(new Date('2026-06-01').getTime(), new Date('2026-06-01').getTime()).run();
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, created_at, updated_at) VALUES ('s2', 'u1', 'u2', 'right', ?, ?)`
+    ).bind(new Date('2026-06-01').getTime(), new Date('2026-06-01').getTime()).run();
+
+    const result = await createMatchIfMutual(env.DB, 'u1', 'u2');
+    expect(result).toBeNull();
+
+    const matches = await env.DB.prepare('SELECT * FROM matches').all<any>();
+    expect(matches.results.length).toBe(0);
+  });
 });
