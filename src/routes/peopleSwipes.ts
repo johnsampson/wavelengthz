@@ -8,7 +8,6 @@ import { isBlockedEitherDirection } from '../lib/blocks';
 import { computeMusicOverlap, MusicOverlap } from '../lib/musicOverlap';
 import { getDisplayMusicProfile } from '../lib/profile';
 import { getMatchNotificationDelayMs } from '../lib/notifications';
-import { computeAge } from '../lib/age';
 
 // Hard cap on the like-priority queue. It previously had no LIMIT at all, so a
 // popular account's deck request grew without bound.
@@ -172,18 +171,12 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
     const withinRadius = <T extends UserRow>(candidate: T) =>
       haversineKm(me.lat!, me.lng!, candidate.lat!, candidate.lng!) <= me.max_distance_km;
 
-    const now = Date.now();
-    // Unknown DOB never excludes -- can't compute an age to check. Every real
-    // onboarded account has date_of_birth set (enforced at onboarding), this
-    // only matters for legacy/malformed rows.
-    const withinAgeRange = <T extends UserRow>(candidate: T) => {
-      if (candidate.date_of_birth == null) return true;
-      const age = computeAge(candidate.date_of_birth, now);
-      return age >= me.age_min && age <= me.age_max;
-    };
-
-    const likePriority = likePriorityRows.results.filter(withinRadius).filter(withinAgeRange);
-    const inRangePool = pool.filter(withinRadius).filter(withinAgeRange);
+    // age_min/age_max (settings.html) is a stored preference only, not a
+    // candidate-search filter -- unlike max_distance_km, it deliberately does
+    // not exclude anyone here. A prior version enforced it and that excluded
+    // people from the "making friends" intent too, which isn't wanted.
+    const likePriority = likePriorityRows.results.filter(withinRadius);
+    const inRangePool = pool.filter(withinRadius);
 
     // Everything the scorer needs, loaded in a fixed number of queries rather
     // than 4-5 per candidate. `me`'s own profile and right-swipes in
