@@ -43,7 +43,11 @@ ARTIST_CATALOG_GROWTH_ENABLED = "true"
 
 [triggers]
 # "0 3 * * *": nightly purgeExpiredDeletions. "0 4 * * sun": weekly catalog
-# refresh. "*/5 * * * *": sweeps deferred match-notification emails
+# refresh -- Cloudflare's day-of-week is 1=Sunday..7=Saturday, NOT the usual
+# 0=Sunday..6=Saturday, so the numeric form (e.g. "0") is a different day
+# than it looks and can even be rejected outright as out of range; the
+# 3-letter name Cloudflare itself recommends sidesteps the whole ambiguity.
+# "*/5 * * * *": sweeps deferred match-notification emails
 # (MATCH_NOTIFICATION_DELAY_MINUTES above). "*/15 * * * *": artist catalog
 # growth (src/lib/catalogGrowth.ts's runCatalogGrowthJob). "0 13 * * *":
 # daily artist catalog growth digest email (sendCatalogGrowthDigest).
