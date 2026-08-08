@@ -6,11 +6,15 @@ export interface SpotifyTokenResponse {
 
 const SCOPES = ['user-top-read', 'user-read-email'].join(' ');
 
-export function buildAuthUrl(state: string, env: Env): string {
+// redirectUri defaults to env.SPOTIFY_REDIRECT_URI, but callers on an
+// allowlisted alternate host (src/routes/auth.ts's SPOTIFY_ALLOWED_HOSTS)
+// pass their own host's callback URL instead -- Spotify's token exchange
+// later requires an exact match against whichever one was used here.
+export function buildAuthUrl(state: string, env: Env, redirectUri: string = env.SPOTIFY_REDIRECT_URI): string {
   const url = new URL('https://accounts.spotify.com/authorize');
   url.searchParams.set('client_id', env.SPOTIFY_CLIENT_ID);
   url.searchParams.set('response_type', 'code');
-  url.searchParams.set('redirect_uri', env.SPOTIFY_REDIRECT_URI);
+  url.searchParams.set('redirect_uri', redirectUri);
   url.searchParams.set('scope', SCOPES);
   url.searchParams.set('state', state);
   return url.toString();
@@ -22,12 +26,13 @@ function basicAuthHeader(env: Env): string {
 
 export async function exchangeCodeForToken(
   code: string,
-  env: Env
+  env: Env,
+  redirectUri: string = env.SPOTIFY_REDIRECT_URI
 ): Promise<SpotifyTokenResponse> {
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     code,
-    redirect_uri: env.SPOTIFY_REDIRECT_URI,
+    redirect_uri: redirectUri,
   });
   const res = await fetch('https://accounts.spotify.com/api/token', {
     method: 'POST',

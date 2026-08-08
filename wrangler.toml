@@ -27,6 +27,17 @@ run_worker_first = true
 
 [vars]
 SPOTIFY_REDIRECT_URI = "http://127.0.0.1:8787/callback"
+# Extra hosts (comma-separated, no scheme -- "host:port" or "host") that
+# /login and /callback (src/routes/auth.ts) will serve OAuth directly on,
+# rather than redirecting to SPOTIFY_REDIRECT_URI's host first. Each one
+# still needs its own "<scheme>://<host>/callback" registered as a valid
+# redirect URI in the Spotify Developer Dashboard -- Spotify enforces an
+# exact-match allowlist of its own regardless of anything here, so this
+# can't be used to send an OAuth flow anywhere Spotify wasn't already told
+# to trust. Empty by default; override in a personal (gitignored) .dev.vars
+# for things like a Cloudflare Tunnel hostname when testing on a real phone
+# -- e.g. SPOTIFY_ALLOWED_HOSTS=local.wavelengthz.com.
+SPOTIFY_ALLOWED_HOSTS = ""
 # How long a new match stays hidden from passive-discovery surfaces (Matches
 # list, profile isMatch badge, notification bell/email) -- src/lib/
 # notifications.ts's getMatchNotificationDelayMs(). Minutes, not ms, for a
@@ -58,6 +69,7 @@ id = "test-kv-id"
 
 [env.test.vars]
 SPOTIFY_REDIRECT_URI = "http://127.0.0.1:8787/callback"
+SPOTIFY_ALLOWED_HOSTS = "allowed.example.com"
 MATCH_NOTIFICATION_DELAY_MINUTES = "5"
 SPOTIFY_CLIENT_ID = "test-client-id"
 SPOTIFY_CLIENT_SECRET = "test-client-secret"
