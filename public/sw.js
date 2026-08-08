@@ -26,8 +26,11 @@
 // participant's poll -- it only refreshed on a message-count change, and a
 // recall doesn't change the count, just flips recalledAt on an existing row.
 // v18 replaces /profile's photo grid with a single-image carousel (prev/next
-// arrows + a shared index with the full-screen lightbox).
-const CACHE_NAME = 'wavelengthz-shell-v18';
+// arrows + a shared index with the full-screen lightbox). v19 adds
+// touch-none to the swipe card (public/index.html) -- without it, a touch
+// drag on mobile could be captured by the browser's native scroll/bounce
+// gesture instead of the custom swipe handler.
+const CACHE_NAME = 'wavelengthz-shell-v19';
 const APP_SHELL = [
   '/',
   '/app.js',
