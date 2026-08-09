@@ -2,7 +2,7 @@ import type { IRequest, RouterType } from 'itty-router';
 import { buildAuthUrl, exchangeCodeForToken, fetchSpotifyProfile } from '../lib/spotify';
 import { encrypt } from '../lib/crypto';
 import { createSession, requestIsSecure, requestProtocol, getSessionUser } from '../lib/session';
-import { buildGoogleAuthUrl } from '../lib/google';
+import { buildGoogleAuthUrl, exchangeGoogleCode, fetchGoogleProfile } from '../lib/google';
 
 function parseCookie(request: Request, name: string): string | null {
   const header = request.headers.get('Cookie');
@@ -84,6 +84,92 @@ export function registerAuthRoutes(router: RouterType) {
       headers: {
         Location: authUrl,
         'Set-Cookie': `wl_oauth_state=${state}; Path=/; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Lax; Max-Age=600`,
+      },
+    });
+  });
+
+  router.get('/callback/google', async (request: Request, env: Env) => {
+    const url = new URL(request.url);
+    const code = url.searchParams.get('code');
+    const state = url.searchParams.get('state');
+    const cookieState = parseCookie(request, 'wl_oauth_state');
+
+    if (!code || !state || !cookieState || state !== cookieState) {
+      return new Response('Invalid OAuth state', { status: 400 });
+    }
+
+    const token = await exchangeGoogleCode(code, env);
+    const profile = await fetchGoogleProfile(token.access_token);
+    const now = Date.now();
+
+    // Same deliberately-unfiltered-by-deleted_at reactivation reasoning as
+    // the Spotify callback's identity lookup.
+    const existingIdentity = await env.DB.prepare(
+      `SELECT ai.user_id, u.onboarded_at FROM auth_identities ai
+       JOIN users u ON u.id = ai.user_id
+       WHERE ai.provider = 'google' AND ai.provider_id = ?`
+    )
+      .bind(profile.sub)
+      .first<{ user_id: string; onboarded_at: number | null }>();
+
+    let userId: string;
+    let onboarded: boolean;
+
+    if (existingIdentity) {
+      userId = existingIdentity.user_id;
+      onboarded = existingIdentity.onboarded_at != null;
+      await env.DB.prepare('UPDATE users SET deleted_at = NULL, updated_at = ? WHERE id = ?').bind(now, userId).run();
+    } else {
+      // Only trust the email if Google itself vouches for it -- unlike
+      // Spotify (no verification flag exposed at all), Google's userinfo
+      // response says explicitly whether the email is verified.
+      const existingByEmail = profile.email_verified && profile.email
+        ? await env.DB.prepare(`SELECT id, onboarded_at, deleted_at FROM users WHERE email = ?`)
+            .bind(profile.email)
+            .first<{ id: string; onboarded_at: number | null; deleted_at: number | null }>()
+        : null;
+
+      if (existingByEmail) {
+        userId = existingByEmail.id;
+        onboarded = existingByEmail.onboarded_at != null;
+
+        const statements = [
+          env.DB.prepare(
+            `INSERT INTO auth_identities (id, user_id, provider, provider_id, email, created_at, updated_at)
+             VALUES (?, ?, 'google', ?, ?, ?, ?)`
+          ).bind(crypto.randomUUID(), userId, profile.sub, profile.email ?? null, now, now),
+        ];
+        if (existingByEmail.deleted_at != null) {
+          statements.unshift(env.DB.prepare('UPDATE users SET deleted_at = NULL, updated_at = ? WHERE id = ?').bind(now, userId));
+        }
+        await env.DB.batch(statements);
+      } else {
+        userId = crypto.randomUUID();
+        onboarded = false;
+
+        // A Google-only user has no real Spotify id -- spotify_id is still
+        // UNIQUE NOT NULL, so this user's own id (guaranteed unique, already
+        // generated) is written as a harmless placeholder. auth_identities is
+        // what the application actually reads; this column is never read for
+        // a Google-signed-in user.
+        await env.DB.batch([
+          env.DB.prepare(`INSERT INTO users (id, spotify_id, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`)
+            .bind(userId, userId, profile.email ?? null, now, now),
+          env.DB.prepare(
+            `INSERT INTO auth_identities (id, user_id, provider, provider_id, email, created_at, updated_at)
+             VALUES (?, ?, 'google', ?, ?, ?, ?)`
+          ).bind(crypto.randomUUID(), userId, profile.sub, profile.email ?? null, now, now),
+        ]);
+      }
+    }
+
+    const { cookie } = await createSession(env.DB, userId, requestIsSecure(request));
+
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: onboarded ? '/' : '/onboarding',
+        'Set-Cookie': cookie,
       },
     });
   });

@@ -591,6 +591,147 @@ describe('GET /callback', () => {
   });
 });
 
+describe('GET /callback/google', () => {
+  it('rejects a callback whose state does not match the cookie', async () => {
+    const req = new Request('http://localhost/callback/google?code=abc&state=wrong', {
+      headers: { Cookie: 'wl_oauth_state=right' },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(400);
+  });
+
+  it('creates a new user with a placeholder spotify_id and a google auth_identities row, no music_source_tokens row', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('oauth2.googleapis.com/token')) {
+          return new Response(JSON.stringify({ access_token: 'gtoken', expires_in: 3600 }), { status: 200 });
+        }
+        if (url.includes('openidconnect.googleapis.com/v1/userinfo')) {
+          return new Response(JSON.stringify({ sub: 'google-xyz', email: 'guser@example.com', email_verified: true }), { status: 200 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    const req = new Request('http://localhost/callback/google?code=abc&state=match', {
+      headers: { Cookie: 'wl_oauth_state=match' },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/onboarding');
+    expect(res.headers.get('Set-Cookie')).toContain('wl_session=');
+
+    const identity = await env.DB.prepare(`SELECT * FROM auth_identities WHERE provider = 'google' AND provider_id = 'google-xyz'`).first<any>();
+    expect(identity).toBeTruthy();
+    expect(identity.email).toBe('guser@example.com');
+
+    const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(identity.user_id).first<any>();
+    expect(user.spotify_id).toBe(identity.user_id); // placeholder = own id
+    expect(user.email).toBe('guser@example.com');
+
+    const tokenRow = await env.DB.prepare(`SELECT * FROM music_source_tokens WHERE user_id = ?`).bind(identity.user_id).first();
+    expect(tokenRow).toBeNull();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('links to an existing Spotify-created user by email when Google reports it verified', async () => {
+    const existingUserId = await insertTestUser(env.DB, { email: 'shared2@example.com', onboardedAt: Date.now() });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('oauth2.googleapis.com/token')) {
+          return new Response(JSON.stringify({ access_token: 'gtoken', expires_in: 3600 }), { status: 200 });
+        }
+        if (url.includes('openidconnect.googleapis.com/v1/userinfo')) {
+          return new Response(JSON.stringify({ sub: 'google-linkme', email: 'shared2@example.com', email_verified: true }), { status: 200 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    const req = new Request('http://localhost/callback/google?code=abc&state=match', {
+      headers: { Cookie: 'wl_oauth_state=match' },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/'); // already onboarded
+
+    const identity = await env.DB.prepare(`SELECT user_id FROM auth_identities WHERE provider_id = 'google-linkme'`).first<any>();
+    expect(identity.user_id).toBe(existingUserId);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('does not auto-link by email when Google reports it unverified', async () => {
+    await insertTestUser(env.DB, { email: 'unverified@example.com', onboardedAt: Date.now() });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('oauth2.googleapis.com/token')) {
+          return new Response(JSON.stringify({ access_token: 'gtoken', expires_in: 3600 }), { status: 200 });
+        }
+        if (url.includes('openidconnect.googleapis.com/v1/userinfo')) {
+          return new Response(JSON.stringify({ sub: 'google-unverified', email: 'unverified@example.com', email_verified: false }), { status: 200 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    const req = new Request('http://localhost/callback/google?code=abc&state=match', {
+      headers: { Cookie: 'wl_oauth_state=match' },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/onboarding'); // treated as a brand-new user
+
+    const usersCount = await env.DB.prepare(`SELECT COUNT(*) as c FROM users WHERE email = 'unverified@example.com'`).first<any>();
+    expect(usersCount.c).toBe(2); // did NOT link -- a second, separate user was created
+
+    vi.unstubAllGlobals();
+  });
+
+  it('reactivates a soft-deleted account found by identity', async () => {
+    const now = Date.now();
+    const userId = await insertTestUser(env.DB, { skipSpotify: true, onboardedAt: now, deletedAt: now, email: 'gsoftdel@example.com' });
+    await env.DB.prepare(
+      `INSERT INTO auth_identities (id, user_id, provider, provider_id, email, created_at, updated_at) VALUES (?, ?, 'google', 'google-soft-deleted', ?, ?, ?)`
+    ).bind(crypto.randomUUID(), userId, 'gsoftdel@example.com', now, now).run();
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('oauth2.googleapis.com/token')) {
+          return new Response(JSON.stringify({ access_token: 'gtoken', expires_in: 3600 }), { status: 200 });
+        }
+        if (url.includes('openidconnect.googleapis.com/v1/userinfo')) {
+          return new Response(JSON.stringify({ sub: 'google-soft-deleted', email: 'gsoftdel@example.com', email_verified: true }), { status: 200 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    const req = new Request('http://localhost/callback/google?code=abc&state=match', {
+      headers: { Cookie: 'wl_oauth_state=match' },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/');
+
+    const user = await env.DB.prepare('SELECT deleted_at FROM users WHERE id = ?').bind(userId).first<any>();
+    expect(user.deleted_at).toBeNull();
+
+    vi.unstubAllGlobals();
+  });
+});
+
 describe('POST /logout', () => {
   it('clears the session cookie', async () => {
     const req = new Request('http://localhost/logout', { method: 'POST' });
