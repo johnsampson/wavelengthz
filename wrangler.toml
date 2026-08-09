@@ -27,7 +27,16 @@ run_worker_first = true
 
 [vars]
 SPOTIFY_REDIRECT_URI = "http://127.0.0.1:8787/callback"
-GOOGLE_REDIRECT_URI = "http://127.0.0.1:8787/callback/google"
+# Unlike SPOTIFY_REDIRECT_URI (only ever a fallback -- /login and /callback
+# compute the real redirect_uri per-request via callbackUrlForHost), Google's
+# flow has no host-based override by design (no Cloudflare Tunnel/multi-host
+# support for Google -- see the Global Constraints in
+# docs/superpowers/plans/2026-08-08-google-signon.md). This value is used
+# verbatim by /login/google and /callback/google, and this file's top-level
+# [vars] block is what `wrangler deploy` (no --env) ships to production --
+# so it must be the production URL here. Override to the localhost value in
+# a personal (gitignored) .dev.vars for local dev.
+GOOGLE_REDIRECT_URI = "https://wavelengthz.com/callback/google"
 # Extra hosts (comma-separated, no scheme -- "host:port" or "host") that
 # /login and /callback (src/routes/auth.ts) will serve OAuth directly on,
 # rather than redirecting to SPOTIFY_REDIRECT_URI's host first. Each one
