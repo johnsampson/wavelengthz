@@ -48,6 +48,18 @@ export async function getDisplayMusicProfile(db: D1Database, userId: string): Pr
   };
 }
 
+/**
+ * Resolves users.anthem_track_id against an already-loaded topTracks list
+ * (e.g. from getDisplayMusicProfile). Returns null both when no anthem is
+ * set and when the chosen track has since fallen out of top_tracks on a
+ * refresh -- there's no FK to enforce this, so a stale id is expected to
+ * happen occasionally and just means "no anthem to show" rather than an error.
+ */
+export function pickAnthemTrack(topTracks: DisplayMusicTrack[], anthemTrackId: string | null): DisplayMusicTrack | null {
+  if (!anthemTrackId) return null;
+  return topTracks.find((t) => t.id === anthemTrackId) ?? null;
+}
+
 export async function getMusicProfile(db: D1Database, userId: string): Promise<MusicProfile> {
   const row = await db.prepare('SELECT top_artists, top_genres FROM music_profiles WHERE user_id = ?')
     .bind(userId)
@@ -94,6 +106,37 @@ export async function getMusicProfiles(db: D1Database, userIds: string[]): Promi
 
   for (const row of rows.results) profiles.set(row.user_id, parseProfileRow(row));
   return profiles;
+}
+
+/**
+ * Batched form of `pickAnthemTrack` — one query for a whole candidate pool
+ * (GET /api/candidates/people) instead of one per candidate, and it never
+ * even issues that one query when nobody in the batch has an anthem set,
+ * which is the common case today. `users` only needs the two fields already
+ * on hand from a `SELECT u.*` -- callers don't need a second lookup just to
+ * build this list.
+ */
+export async function getAnthemTracksForUsers(
+  db: D1Database,
+  users: Array<{ id: string; anthem_track_id: string | null }>
+): Promise<Map<string, DisplayMusicTrack>> {
+  const anthems = new Map<string, DisplayMusicTrack>();
+  const anthemByUserId = new Map(users.filter((u) => u.anthem_track_id).map((u) => [u.id, u.anthem_track_id!]));
+  if (anthemByUserId.size === 0) return anthems;
+
+  const userIds = [...anthemByUserId.keys()];
+  const rows = await db
+    .prepare(`SELECT user_id, top_tracks FROM music_profiles WHERE user_id IN (${placeholders(userIds.length)})`)
+    .bind(...userIds)
+    .all<{ user_id: string; top_tracks: string }>();
+
+  for (const row of rows.results) {
+    const tracks: Array<{ track_id: string; name: string; imageUrl: string | null }> = JSON.parse(row.top_tracks);
+    const topTracks = tracks.map((t) => ({ id: t.track_id, spotifyId: t.track_id, name: t.name, imageUrl: t.imageUrl }));
+    const anthem = pickAnthemTrack(topTracks, anthemByUserId.get(row.user_id)!);
+    if (anthem) anthems.set(row.user_id, anthem);
+  }
+  return anthems;
 }
 
 /** Batched form of `getRightSwipedItemIds` — one query for a whole pool. */

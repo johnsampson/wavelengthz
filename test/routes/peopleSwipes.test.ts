@@ -205,6 +205,23 @@ describe('GET /api/candidates/people', () => {
     expect(u3.primaryPhotoUrl).toBeNull();
   });
 
+  it('includes a candidate\'s anthemTrack when set, and null when not', async () => {
+    const topTracks = JSON.stringify([{ track_id: 'sp-t1', rank: 1, name: 'Their Anthem', imageUrl: 'https://img/t1.jpg' }]);
+    await env.DB.prepare(
+      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u2', '[]', ?, '[]', 'medium_term', 1000)`
+    ).bind(topTracks).run();
+    await env.DB.prepare(`UPDATE users SET anthem_track_id = 'sp-t1' WHERE id = 'u2'`).run();
+
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    const u2 = body.candidates.find((c: any) => c.id === 'u2');
+    const u3 = body.candidates.find((c: any) => c.id === 'u3');
+    expect(u2.anthemTrack).toEqual({ id: 'sp-t1', spotifyId: 'sp-t1', name: 'Their Anthem', imageUrl: 'https://img/t1.jpg' });
+    expect(u3.anthemTrack).toBeNull();
+  });
+
   it('still shows a primaryPhotoUrl after the candidate deletes their position-0 photo', async () => {
     // Regression: DELETE /api/photos/:id used to leave a hole at position 0,
     // and primaryPhotoUrl matches strictly on `position = 0` -- so deleting
@@ -770,6 +787,30 @@ describe('GET /api/people/:id/profile', () => {
     expect(body.profile.topGenres).toEqual(['indie', 'pop']);
     expect(body.profile.topArtists).toEqual([{ id: 'sp-a1', name: 'Their Fave Artist', imageUrl: 'https://img/a1.jpg' }]);
     expect(body.profile.topTracks).toEqual([{ id: 'sp-t1', spotifyId: 'sp-t1', name: 'Their Fave Track', imageUrl: 'https://img/t1.jpg' }]);
+  });
+
+  it('includes anthemTrack when the target has one set, resolved against their own top_tracks', async () => {
+    const topTracks = JSON.stringify([{ track_id: 'sp-t1', rank: 1, name: 'Their Fave Track', imageUrl: 'https://img/t1.jpg' }]);
+    await env.DB.prepare(
+      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u2', '[]', ?, '[]', 'medium_term', 1000)`
+    ).bind(topTracks).run();
+    await env.DB.prepare(`UPDATE users SET anthem_track_id = 'sp-t1' WHERE id = 'u2'`).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.profile.anthemTrack).toEqual({ id: 'sp-t1', spotifyId: 'sp-t1', name: 'Their Fave Track', imageUrl: 'https://img/t1.jpg' });
+  });
+
+  it('reports anthemTrack as null when unset or fallen out of top_tracks', async () => {
+    await env.DB.prepare(`UPDATE users SET anthem_track_id = 'stale-id' WHERE id = 'u2'`).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.profile.anthemTrack).toBeNull();
   });
 
   it('includes the caller\'s own top Spotify genres/artists/tracks on self-preview', async () => {
