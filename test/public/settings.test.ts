@@ -486,10 +486,16 @@ describe('settings page', () => {
 });
 
 function fakeServiceWorker(subscription: Record<string, unknown> | null) {
+  // Real PushSubscription objects always have toJSON(); default one in for
+  // fixtures that pass a plain object without it (init()'s re-subscribe
+  // step calls it on whatever getSubscription() resolves to).
+  const sub = subscription && typeof subscription.toJSON !== 'function'
+    ? { ...subscription, toJSON: () => ({ endpoint: subscription.endpoint, keys: subscription.keys ?? { p256dh: 'p', auth: 'a' } }) }
+    : subscription;
   return {
     ready: Promise.resolve({
       pushManager: {
-        getSubscription: async () => subscription,
+        getSubscription: async () => sub,
         subscribe: async () => ({
           endpoint: 'https://push.example/new',
           toJSON: () => ({ endpoint: 'https://push.example/new', keys: { p256dh: 'p', auth: 'a' } }),
@@ -511,6 +517,33 @@ describe('push notifications', () => {
 
     expect(app.pushSupported).toBe(true);
     expect(app.pushEnabled).toBe(true);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('init() re-subscribes an existing subscription to re-point ownership at the current user', async () => {
+    // Regression: on a shared device, an existing browser subscription
+    // belongs to whichever account last subscribed, not necessarily the one
+    // now logged in. init() must re-POST it so the subscribe route's
+    // ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id
+    // re-points it at the current session's user, even though
+    // getSubscription() already found one (pushEnabled would otherwise read
+    // "On" for an account that never actually re-subscribed).
+    const { calls } = stubApi(ONBOARDED_USER);
+    vi.stubGlobal('window', { location: { search: '' }, matchMedia: () => ({ matches: false }) });
+    vi.stubGlobal('navigator', {
+      userAgent: 'Mozilla/5.0 (Windows)',
+      serviceWorker: fakeServiceWorker({ endpoint: 'https://push.example/existing', keys: { p256dh: 'p1', auth: 'a1' } }),
+    });
+    vi.stubGlobal('Notification', { permission: 'granted' });
+
+    const app = createSettingsApp();
+    await app.init();
+
+    expect(app.pushEnabled).toBe(true);
+    const subscribeCall = calls.find((c) => c.path === '/api/push/subscribe');
+    expect(subscribeCall).toBeTruthy();
+    expect(JSON.parse(subscribeCall!.options.body)).toEqual({ endpoint: 'https://push.example/existing', keys: { p256dh: 'p1', auth: 'a1' } });
 
     vi.unstubAllGlobals();
   });

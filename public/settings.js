@@ -105,14 +105,6 @@ export function createSettingsApp() {
           const isIos = /iP(hone|ad|od)/.test(navigator.userAgent);
           const isStandalone = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator?.standalone === true;
           this.showIosInstallBanner = isIos && !isStandalone && !localStorage.getItem('wl_ios_install_dismissed');
-
-          this.pushSupported = typeof navigator !== 'undefined' && 'serviceWorker' in navigator && typeof Notification !== 'undefined';
-          if (this.pushSupported) {
-            this.pushPermissionDenied = Notification.permission === 'denied';
-            const registration = await navigator.serviceWorker.ready;
-            const existingSubscription = await registration.pushManager.getSubscription();
-            this.pushEnabled = existingSubscription != null;
-          }
         }
         this.gender = me.user.gender ?? '';
         this.seeking = me.user.seeking ?? '';
@@ -130,6 +122,42 @@ export function createSettingsApp() {
         this.locationLabel = me.user.location_label;
         this.locationUpdatedAt = me.user.location_updated_at;
         this.photos = photosRes.photos;
+
+        if (typeof window !== 'undefined') {
+          this.pushSupported = typeof navigator !== 'undefined' && 'serviceWorker' in navigator && typeof Notification !== 'undefined';
+          if (this.pushSupported) {
+            this.pushPermissionDenied = Notification.permission === 'denied';
+            // navigator.serviceWorker.ready never rejects, and never
+            // resolves at all if no service worker has been registered for
+            // this page's scope yet (the SW is only registered from
+            // index.html -- a user who bookmarks /settings directly and
+            // never visits '/' first has none). This block runs last in the
+            // try, after everything else has already been assigned, and is
+            // additionally raced against a timeout so a missing
+            // registration degrades pushSupported/pushEnabled to their
+            // false defaults instead of leaving `loading` stuck true
+            // forever.
+            const existingSubscription = await Promise.race([
+              navigator.serviceWorker.ready.then((registration) => registration.pushManager.getSubscription()),
+              new Promise((resolve) => setTimeout(() => resolve(null), 4000)),
+            ]);
+            this.pushEnabled = existingSubscription != null;
+            if (existingSubscription) {
+              // A browser's push subscription belongs to whichever account
+              // last subscribed on this device, not necessarily the one now
+              // logged in -- e.g. user A enables push, logs out, and user B
+              // logs in on the same shared device/browser. Re-POSTing it
+              // re-points ownership at the current session's user via the
+              // subscribe route's ON CONFLICT(endpoint) DO UPDATE SET
+              // user_id = excluded.user_id.
+              try {
+                await api.pushSubscribe(existingSubscription.toJSON());
+              } catch (err) {
+                console.error('Re-subscribing existing push subscription failed:', err);
+              }
+            }
+          }
+        }
       } catch (e) {
         if (e.status === 401) {
           window.location.href = '/login';
