@@ -75,6 +75,54 @@ describe('POST /api/push/subscribe', () => {
     expect(rows.results.length).toBe(1);
     expect(rows.results[0].p256dh).toBe('p2');
   });
+
+  it('returns 400 when keys object is missing', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/push/subscribe', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: 'https://push.example/x' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_subscription');
+  });
+
+  it('returns 400 when p256dh is missing', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/push/subscribe', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: 'https://push.example/x', keys: { auth: 'a' } }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_subscription');
+  });
+
+  it('returns 400 when endpoint is empty string', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/push/subscribe', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: '', keys: { p256dh: 'p', auth: 'a' } }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_subscription');
+  });
 });
 
 describe('POST /api/push/unsubscribe', () => {
@@ -120,5 +168,37 @@ describe('POST /api/push/unsubscribe', () => {
       {} as ExecutionContext
     );
     expect(await env.DB.prepare('SELECT * FROM push_subscriptions WHERE id = ?').bind('s2').first()).not.toBeNull();
+  });
+
+  it('returns 400 when endpoint is missing', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/push/unsubscribe', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_subscription');
+  });
+
+  it('returns 400 when endpoint is empty string', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/push/unsubscribe', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: '' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_subscription');
   });
 });

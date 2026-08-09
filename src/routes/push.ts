@@ -10,7 +10,12 @@ export function registerPushRoutes(router: RouterType) {
     const user = await getSessionUser(request, env.DB);
     if (!user) return new Response('Unauthorized', { status: 401 });
 
-    const { endpoint, keys } = await request.json<{ endpoint: string; keys: { p256dh: string; auth: string } }>();
+    const body = await request.json<{ endpoint: string; keys: { p256dh: string; auth: string } }>();
+    const { endpoint, keys } = body;
+
+    if (typeof endpoint !== 'string' || !endpoint.trim() || !keys || typeof keys.p256dh !== 'string' || !keys.p256dh.trim() || typeof keys.auth !== 'string' || !keys.auth.trim()) {
+      return Response.json({ error: 'invalid_subscription' }, { status: 400 });
+    }
 
     await env.DB.prepare(
       `INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?, ?)
@@ -24,7 +29,13 @@ export function registerPushRoutes(router: RouterType) {
     const user = await getSessionUser(request, env.DB);
     if (!user) return new Response('Unauthorized', { status: 401 });
 
-    const { endpoint } = await request.json<{ endpoint: string }>();
+    const body = await request.json<{ endpoint: string }>();
+    const { endpoint } = body;
+
+    if (typeof endpoint !== 'string' || !endpoint.trim()) {
+      return Response.json({ error: 'invalid_subscription' }, { status: 400 });
+    }
+
     await env.DB.prepare('DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id = ?').bind(endpoint, user.id).run();
 
     return Response.json({ ok: true });
