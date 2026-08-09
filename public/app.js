@@ -97,4 +97,9 @@ export const api = {
       body: JSON.stringify({ body }),
     }),
   recallGroupMessage: (groupId, messageId) => request(`/api/groups/${groupId}/messages/${messageId}/recall`, { method: 'POST' }),
+  pushVapidPublicKey: () => request('/api/push/vapid-public-key'),
+  pushSubscribe: (subscription) =>
+    request('/api/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(subscription) }),
+  pushUnsubscribe: (endpoint) =>
+    request('/api/push/unsubscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint }) }),
 };
