@@ -30,7 +30,7 @@ const ONBOARDED_USER = {
   max_distance_km: 25,
   gender: 'male',
   seeking: 'female',
-  intent: 'dating_around',
+  intent: 'something_casual',
   spotify_avatar_url: 'https://img.example/avatar.jpg',
 };
 
@@ -63,12 +63,12 @@ describe('settings page', () => {
   });
 
   it('round-trips a still-valid intent unchanged', async () => {
-    stubApi(ONBOARDED_USER); // intent: 'dating_around'
+    stubApi(ONBOARDED_USER); // intent: 'something_casual'
     const app = createSettingsApp();
 
     await app.init();
 
-    expect(app.intent).toBe('dating_around');
+    expect(app.intent).toBe('something_casual');
     vi.unstubAllGlobals();
   });
 
@@ -79,6 +79,18 @@ describe('settings page', () => {
     // get their next Save rejected by POST /api/onboarding's INTENT_OPTIONS
     // check, with no visible button to explain why.
     stubApi({ ...ONBOARDED_USER, intent: 'making_friends' });
+    const app = createSettingsApp();
+
+    await app.init();
+
+    expect(app.intent).toBe('');
+    vi.unstubAllGlobals();
+  });
+
+  it('resets the retired dating_around intent to unset too, not just making_friends', async () => {
+    // Same fallback, different retired value: 'dating_around' was collapsed
+    // into 'something_casual' for being the same option under two labels.
+    stubApi({ ...ONBOARDED_USER, intent: 'dating_around' });
     const app = createSettingsApp();
 
     await app.init();
@@ -165,13 +177,13 @@ describe('settings page', () => {
 
     expect(app.gender).toBe('male');
     expect(app.seeking).toBe('female');
-    expect(app.intent).toBe('dating_around');
+    expect(app.intent).toBe('something_casual');
 
     await app.updateDistance();
     const body = api.onboardBody();
     expect(body.gender).toBe('male');
     expect(body.seeking).toBe('female');
-    expect(body.intent).toBe('dating_around');
+    expect(body.intent).toBe('something_casual');
     vi.unstubAllGlobals();
   });
 
