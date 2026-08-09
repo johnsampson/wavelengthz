@@ -25,6 +25,8 @@ export function createSettingsApp() {
     bio: null,
     userId: null,
     spotifyAvatarUrl: null,
+    hasSpotify: false,
+    info: null,
     gender: '',
     seeking: '',
     intent: '',
@@ -74,6 +76,19 @@ export function createSettingsApp() {
         this.displayName = me.user.display_name ?? '';
         this.bio = me.user.bio ?? null;
         this.spotifyAvatarUrl = me.user.spotify_avatar_url ?? null;
+        this.hasSpotify = me.hasSpotify ?? false;
+
+        if (typeof window !== 'undefined') {
+          const params = new URLSearchParams(window.location.search);
+          if (params.get('spotify_connected') === '1') {
+            this.info = 'Spotify connected.';
+          } else if (params.get('spotify_error') === 'already_linked') {
+            this.error = 'That Spotify account is already linked to a different Wavelengthz account.';
+          }
+          if (params.has('spotify_connected') || params.has('spotify_error')) {
+            window.history.replaceState({}, '', '/settings');
+          }
+        }
         this.gender = me.user.gender ?? '';
         this.seeking = me.user.seeking ?? '';
         this.intent = me.user.intent ?? '';
