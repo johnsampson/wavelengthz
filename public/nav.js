@@ -41,7 +41,7 @@ export function renderNavHtml(pathname) {
       (item) => `
         <a
           href="${item.href}"
-          class="flex flex-1 flex-col items-center gap-0.5 py-2.5 text-xs transition ${
+          class="flex flex-1 flex-col items-center gap-0.5 py-2.5 text-xs transition active:scale-95 ${
             item.active ? 'font-semibold text-white' : 'font-medium text-neutral-500'
           }"
           ${item.active ? 'aria-current="page"' : ''}
@@ -77,7 +77,7 @@ export function renderHeaderHtml(unreadCount = 0) {
   return `
     <header class="relative flex items-center justify-center gap-1.5 p-4">
       <a href="/" class="wordmark text-xl">Wavelengthz</a>
-      <a href="/notifications" class="absolute right-4 text-neutral-400" aria-label="Notifications">
+      <a href="/notifications" class="absolute right-4 text-neutral-400 transition active:scale-90" aria-label="Notifications">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-6 w-6">
           <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
           <path d="M13.73 21a2 2 0 0 1-3.46 0" />
