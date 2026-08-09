@@ -29,10 +29,15 @@ const SEEKING_OPTIONS = new Set(['male', 'female', 'friends']);
 // 'making_friends' retired here in favor of the real seeking:'friends'
 // filter above -- keeping both would give onboarding two different "I want
 // friends" signals, only one of which actually did anything.
+// 'dating_around' retired too -- it and 'something_casual' are the same
+// option from a user's perspective, just two buttons for one idea. Existing
+// rows with the old value aren't migrated (see public/settings.js's identical
+// handling of 'making_friends'): a stale value simply doesn't match any
+// current option, so the next Settings visit shows no intent selected and
+// prompts a fresh pick rather than silently keeping (or rejecting) the old one.
 const INTENT_OPTIONS = new Set([
   'long_term_relationship',
   'something_casual',
-  'dating_around',
   'not_sure_yet',
 ]);
 
