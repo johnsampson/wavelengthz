@@ -1,7 +1,7 @@
 import type { RouterType, IRequest } from 'itty-router';
 import { getSessionUser, type UserRow } from '../lib/session';
 import { scoreCandidate, scoreCandidateFromInputs, createMatchIfMutual, type ScoringInputs } from '../lib/matching';
-import { getMusicProfiles, getRightSwipedItemIdsFor } from '../lib/profile';
+import { getMusicProfiles, getRightSwipedItemIdsFor, getAnthemTracksForUsers, pickAnthemTrack } from '../lib/profile';
 import type { MusicProfile } from '../lib/scoring';
 import { bucketedDistanceLabel, haversineKm } from '../lib/scoring';
 import { isBlockedEitherDirection } from '../lib/blocks';
@@ -228,7 +228,10 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
       ...scored.map(({ candidate }) => ({ user: candidate, likedYou: false })),
     ].slice(0, limit);
 
-    const photoUrls = await primaryPhotoUrls(env.DB, selected.map((s) => s.user.id));
+    const [photoUrls, anthemTracks] = await Promise.all([
+      primaryPhotoUrls(env.DB, selected.map((s) => s.user.id)),
+      getAnthemTracksForUsers(env.DB, selected.map((s) => s.user)),
+    ]);
 
     const candidates = selected.map(({ user, likedYou }) => ({
       id: user.id,
@@ -237,6 +240,10 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
       distanceLabel: bucketedDistanceLabel(haversineKm(me.lat!, me.lng!, user.lat!, user.lng!)),
       primaryPhotoUrl: photoUrls.get(user.id) ?? null,
       likedYou,
+      // Only set when the candidate picked one AND it's still in their
+      // top_tracks (see pickAnthemTrack) -- absent entirely otherwise, so the
+      // card's anthem chip (public/index.html) has a single falsy check.
+      anthemTrack: anthemTracks.get(user.id) ?? null,
     }));
 
     return Response.json({ candidates });
@@ -343,6 +350,7 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
         topGenres,
         topArtists,
         topTracks,
+        anthemTrack: pickAnthemTrack(topTracks, target.anthem_track_id),
       },
       overlap,
     });

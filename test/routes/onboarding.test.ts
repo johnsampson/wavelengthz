@@ -169,7 +169,7 @@ describe('POST /api/onboarding', () => {
         max_distance_km: 40,
         gender: 'female',
         seeking: 'male',
-        intent: 'dating_around',
+        intent: 'something_casual',
       }),
     });
     const res = await worker.fetch(req, env, {} as ExecutionContext);
@@ -182,7 +182,7 @@ describe('POST /api/onboarding', () => {
     expect(row.max_distance_km).toBe(40);
     expect(row.gender).toBe('female');
     expect(row.seeking).toBe('male');
-    expect(row.intent).toBe('dating_around');
+    expect(row.intent).toBe('something_casual');
     // First-time onboarding is not a "location change" -- the cooldown clock
     // doesn't start until a later call actually changes lat/lng.
     expect(row.location_updated_at).toBeNull();
@@ -195,7 +195,7 @@ describe('POST /api/onboarding', () => {
         new Request('http://localhost/api/onboarding', {
           method: 'POST',
           headers: { Cookie: cookie, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender, seeking: 'male', intent: 'dating_around' }),
+          body: JSON.stringify({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender, seeking: 'male', intent: 'something_casual' }),
         }),
         env,
         {} as ExecutionContext
@@ -216,7 +216,7 @@ describe('POST /api/onboarding', () => {
     const req = new Request('http://localhost/api/onboarding', {
       method: 'POST',
       headers: { Cookie: cookie, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'everyone', intent: 'dating_around' }),
+      body: JSON.stringify({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'everyone', intent: 'something_casual' }),
     });
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     expect(res.status).toBe(400);
@@ -242,7 +242,7 @@ describe('POST /api/onboarding', () => {
     const req = new Request('http://localhost/api/onboarding', {
       method: 'POST',
       headers: { Cookie: cookie, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'friends', intent: 'dating_around' }),
+      body: JSON.stringify({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'friends', intent: 'something_casual' }),
     });
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     expect(res.status).toBe(200);
@@ -264,6 +264,19 @@ describe('POST /api/onboarding', () => {
     expect(body.error).toBe('invalid_intent');
   });
 
+  it('rejects the retired dating_around intent -- duplicated something_casual', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const req = new Request('http://localhost/api/onboarding', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'female', intent: 'dating_around' }),
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_intent');
+  });
+
   describe('location change cooldown', () => {
     const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
     const completePayload = (overrides: Record<string, unknown>) => ({
@@ -272,7 +285,7 @@ describe('POST /api/onboarding', () => {
       location_label: 'Austin, TX',
       gender: 'male',
       seeking: 'female',
-      intent: 'dating_around',
+      intent: 'something_casual',
       lat: 30.27,
       lng: -97.74,
       ...overrides,
@@ -362,9 +375,9 @@ describe('POST /api/onboarding', () => {
         {} as ExecutionContext
       );
 
-    await post({ display_name: 'Jordan', bio: 'loud guitars', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, max_distance_km: 25, gender: 'male', seeking: 'female', intent: 'dating_around' });
+    await post({ display_name: 'Jordan', bio: 'loud guitars', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, max_distance_km: 25, gender: 'male', seeking: 'female', intent: 'something_casual' });
 
-    const resaved = await post({ display_name: 'Jordan', bio: 'loud guitars', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, max_distance_km: 50, gender: 'male', seeking: 'female', intent: 'dating_around' });
+    const resaved = await post({ display_name: 'Jordan', bio: 'loud guitars', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, max_distance_km: 50, gender: 'male', seeking: 'female', intent: 'something_casual' });
     expect(resaved.status).toBe(200);
 
     const row = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind('u1').first<any>();
@@ -385,8 +398,8 @@ describe('POST /api/onboarding', () => {
         {} as ExecutionContext
       );
 
-    await post({ display_name: 'Jordan', bio: 'loud guitars', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'female', intent: 'dating_around' });
-    await post({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, max_distance_km: 50, gender: 'male', seeking: 'female', intent: 'dating_around' });
+    await post({ display_name: 'Jordan', bio: 'loud guitars', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'female', intent: 'something_casual' });
+    await post({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, max_distance_km: 50, gender: 'male', seeking: 'female', intent: 'something_casual' });
 
     const row = await env.DB.prepare('SELECT bio FROM users WHERE id = ?').bind('u1').first<any>();
     expect(row.bio).toBeNull();
@@ -467,7 +480,7 @@ describe('POST /api/onboarding', () => {
     const req = new Request('http://localhost/api/onboarding', {
       method: 'POST',
       headers: { Cookie: cookie, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ display_name: 'Jordan-Lee 2', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'female', intent: 'dating_around' }),
+      body: JSON.stringify({ display_name: 'Jordan-Lee 2', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'female', intent: 'something_casual' }),
     });
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     expect(res.status).toBe(200);
@@ -480,7 +493,7 @@ describe('POST /api/onboarding', () => {
     const req = new Request('http://localhost/api/onboarding', {
       method: 'POST',
       headers: { Cookie: cookie, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ display_name: '  Jordan  ', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'female', intent: 'dating_around' }),
+      body: JSON.stringify({ display_name: '  Jordan  ', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'female', intent: 'something_casual' }),
     });
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     expect(res.status).toBe(200);
@@ -497,7 +510,7 @@ describe('POST /api/onboarding', () => {
       lng: -97.74,
       gender: 'male',
       seeking: 'female',
-      intent: 'dating_around',
+      intent: 'something_casual',
       ...overrides,
     });
     const post = (cookie: string, payload: Record<string, unknown>) =>

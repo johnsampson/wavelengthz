@@ -20,11 +20,13 @@ async function request(path, options = {}) {
 // between the two places it's picked. 'making_friends' retired -- superseded
 // by the real seeking:'friends' filter (src/routes/onboarding.ts's
 // SEEKING_OPTIONS), which actually changes who you match with rather than
-// just being a label. Kept in sync with onboarding.ts's INTENT_OPTIONS set.
+// just being a label. 'dating_around' retired too -- it and 'something_casual'
+// read as the same option to anyone picking one, so this collapses them
+// rather than asking users to guess the distinction. Kept in sync with
+// onboarding.ts's INTENT_OPTIONS set.
 export const INTENT_OPTIONS = [
   { value: 'long_term_relationship', label: 'Long-term relationship' },
   { value: 'something_casual', label: 'Something casual' },
-  { value: 'dating_around', label: 'Dating around' },
   { value: 'not_sure_yet', label: 'Not sure yet' },
 ];
 
@@ -52,6 +54,9 @@ export const api = {
   recallMessage: (matchId, messageId) => request(`/api/matches/${matchId}/messages/${messageId}/recall`, { method: 'POST' }),
   onboard: (payload) =>
     request('/api/onboarding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+  /** @param {string|null} trackId - one of the caller's own top tracks, or null to clear */
+  setAnthem: (trackId) =>
+    request('/api/me/anthem', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trackId }) }),
   block: (userId) =>
     request('/api/block', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: userId }) }),
   blocks: () => request('/api/blocks'),
