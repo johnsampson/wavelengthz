@@ -69,6 +69,28 @@ MATCH_NOTIFICATION_DELAY_MINUTES = "5"
 # `wrangler secret put`, never committed.
 VAPID_PUBLIC_KEY = "<your generated public key>"
 
+[[queues.producers]]
+# Enqueued right after a brand-new artist is inserted (see upsertArtist's
+# callers) so genre enrichment can start within seconds/minutes instead of
+# waiting for the hourly cron sweep (genreEnrichment.ts) -- that sweep stays
+# in place as the backstop for anything a queue message doesn't cover (a
+# message that exhausts its retries, or an artist that predates this queue).
+queue = "musicbrainz-genre-enrichment"
+binding = "GENRE_ENRICHMENT_QUEUE"
+
+[[queues.consumers]]
+queue = "musicbrainz-genre-enrichment"
+# max_concurrency = 1 is the actual rate-limit safeguard here: MusicBrainz
+# allows 1 request/second total, not per consumer instance, so more than one
+# concurrent consumer invocation would each independently pace against that
+# same limit and blow past it together. A batch is still processed one
+# message at a time internally (queueGenreEnrichment.ts) with the same
+# per-call delay the hourly cron uses.
+max_batch_size = 10
+max_batch_timeout = 30
+max_retries = 3
+max_concurrency = 1
+
 [triggers]
 # "0 3 * * *": nightly purgeExpiredDeletions. "0 4 * * sun": weekly catalog
 # refresh -- Cloudflare's day-of-week is 1=Sunday..7=Saturday, NOT the usual
@@ -76,7 +98,10 @@ VAPID_PUBLIC_KEY = "<your generated public key>"
 # than it looks and can even be rejected outright as out of range; the
 # 3-letter name Cloudflare itself recommends sidesteps the whole ambiguity.
 # "*/5 * * * *": sweeps deferred match-notification emails (MATCH_NOTIFICATION_DELAY_MINUTES above).
-crons = ["0 3 * * *", "0 4 * * sun", "*/5 * * * *"]
+# "0 * * * *": hourly MusicBrainz genre enrichment (genreEnrichment.ts) --
+# on the hour so an artist added right after one run has to wait at most
+# ~an hour, not longer, to get picked up by the next.
+crons = ["0 3 * * *", "0 4 * * sun", "*/5 * * * *", "0 * * * *"]
 
 [env.test]
 [[env.test.d1_databases]]
@@ -91,6 +116,17 @@ bucket_name = "wavelengthz-photos-test"
 [[env.test.kv_namespaces]]
 binding = "RATE_LIMIT_KV"
 id = "test-kv-id"
+
+[[env.test.queues.producers]]
+queue = "musicbrainz-genre-enrichment-test"
+binding = "GENRE_ENRICHMENT_QUEUE"
+
+[[env.test.queues.consumers]]
+queue = "musicbrainz-genre-enrichment-test"
+max_batch_size = 10
+max_batch_timeout = 30
+max_retries = 3
+max_concurrency = 1
 
 [env.test.vars]
 SPOTIFY_REDIRECT_URI = "http://127.0.0.1:8787/callback"

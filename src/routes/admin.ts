@@ -2,6 +2,7 @@ import type { IRequest, RouterType } from 'itty-router';
 import { seedCatalog } from '../db/seed';
 import { hardDeleteUser } from '../lib/accountDeletion';
 import { constantTimeEqual } from '../lib/crypto';
+import { enrichArtistGenresFromMusicBrainz, runHourlyGenreEnrichment } from '../lib/genreEnrichment';
 
 export function registerAdminRoutes(router: RouterType) {
   router.post('/internal/seed', async (request: Request, env: Env) => {
@@ -16,6 +17,43 @@ export function registerAdminRoutes(router: RouterType) {
     }
 
     const result = await seedCatalog(env, targetTotal ? { targetTotal } : undefined);
+    return Response.json(result);
+  });
+
+  // Deliberately slow: MusicBrainz's rate limit means this run takes
+  // roughly 2+ seconds per artist (see genreEnrichment.ts). ?count= lets a
+  // smaller/larger batch be requested per call; repeated calls make
+  // incremental progress since it always picks up genre_enriched_at IS NULL
+  // rows first.
+  router.post('/internal/enrich-genres', async (request: Request, env: Env) => {
+    if (!constantTimeEqual(request.headers.get('X-Seed-Secret') ?? '', env.SEED_SECRET)) {
+      return new Response('Forbidden', { status: 403 });
+    }
+
+    const countParam = new URL(request.url).searchParams.get('count');
+    const limit = countParam ? Number(countParam) : undefined;
+    if (countParam !== null && (!Number.isFinite(limit) || limit! <= 0)) {
+      return Response.json({ error: 'invalid_count' }, { status: 400 });
+    }
+
+    const result = await enrichArtistGenresFromMusicBrainz(env.DB, { limit });
+    return Response.json(result);
+  });
+
+  // Runs the exact same function the hourly cron calls (event.cron ===
+  // '0 * * * *' in src/index.ts) -- the KV lock, the 55-minute deadline,
+  // all of it -- rather than the smaller fixed-count run above. Useful for
+  // running a full sweep on demand, or for testing the lock/deadline
+  // behavior for real without waiting for the clock. Because this can run
+  // for up to 55 minutes, expect the HTTP response itself to take that
+  // long too -- there's no separate "kick off and return immediately"
+  // mode here.
+  router.post('/internal/enrich-genres/hourly', async (request: Request, env: Env) => {
+    if (!constantTimeEqual(request.headers.get('X-Seed-Secret') ?? '', env.SEED_SECRET)) {
+      return new Response('Forbidden', { status: 403 });
+    }
+
+    const result = await runHourlyGenreEnrichment(env.DB, env.RATE_LIMIT_KV);
     return Response.json(result);
   });
 

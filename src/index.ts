@@ -17,6 +17,7 @@ import { registerPushRoutes } from './routes/push';
 import { purgeExpiredDeletions } from './lib/accountDeletion';
 import { refreshCatalogFromProfiles } from './db/catalogRefresh';
 import { sendDelayedMatchNotificationEmails } from './lib/notifications';
+import { runHourlyGenreEnrichment, processGenreEnrichmentQueueBatch, type GenreEnrichmentQueueMessage } from './lib/genreEnrichment';
 import { checkRateLimit } from './lib/rateLimit';
 import { reportError } from './lib/sentry';
 import { constantTimeEqual } from './lib/crypto';
@@ -229,6 +230,12 @@ export default {
           .then(() => undefined)
           .catch(report('scheduled:sendDelayedMatchNotificationEmails'))
       );
+    } else if (event.cron === '0 * * * *') {
+      ctx.waitUntil(
+        runHourlyGenreEnrichment(env.DB, env.RATE_LIMIT_KV)
+          .then(() => undefined)
+          .catch(report('scheduled:runHourlyGenreEnrichment'))
+      );
     } else {
       ctx.waitUntil(
         purgeExpiredDeletions(env, GRACE_PERIOD_MS, Date.now())
@@ -236,5 +243,8 @@ export default {
           .catch(report('scheduled:purgeExpiredDeletions'))
       );
     }
+  },
+  queue: async (batch: MessageBatch<GenreEnrichmentQueueMessage>, env: Env): Promise<void> => {
+    await processGenreEnrichmentQueueBatch(batch, env.DB);
   },
 };
