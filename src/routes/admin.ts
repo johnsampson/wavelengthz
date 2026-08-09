@@ -36,7 +36,7 @@ export function registerAdminRoutes(router: RouterType) {
       return Response.json({ error: 'invalid_count' }, { status: 400 });
     }
 
-    const result = await enrichArtistGenresFromMusicBrainz(env.DB, limit);
+    const result = await enrichArtistGenresFromMusicBrainz(env.DB, { limit });
     return Response.json(result);
   });
 

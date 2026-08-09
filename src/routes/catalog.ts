@@ -94,7 +94,10 @@ export function registerCatalogRoutes(router: RouterType) {
     if (!artistRow) {
       const artist = await fetchArtistById(token, requestedId);
       const upserted = await upsertArtist(env.DB, artist, 'spotify_search', user.id, Date.now());
-      if (upserted.inserted) await recordCatalogGenres(env.DB, artist.genres ?? [], 'artist', Date.now());
+      if (upserted.inserted) {
+        await recordCatalogGenres(env.DB, artist.genres ?? [], 'artist', Date.now());
+        await env.GENRE_ENRICHMENT_QUEUE.send({ artistId: upserted.id });
+      }
       artistRow = await env.DB.prepare('SELECT * FROM artists WHERE id = ?').bind(upserted.id).first<any>();
     }
 
@@ -191,7 +194,10 @@ export function registerCatalogRoutes(router: RouterType) {
 
     const now = Date.now();
     const result = await upsertArtist(env.DB, artist, 'spotify_search', user.id, now);
-    if (result.inserted) await recordCatalogGenres(env.DB, artist.genres ?? [], 'artist', now);
+    if (result.inserted) {
+      await recordCatalogGenres(env.DB, artist.genres ?? [], 'artist', now);
+      await env.GENRE_ENRICHMENT_QUEUE.send({ artistId: result.id });
+    }
 
     return Response.json({ ok: true, artistId: result.id });
   });

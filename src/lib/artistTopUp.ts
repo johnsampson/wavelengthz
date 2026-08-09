@@ -68,6 +68,7 @@ export async function topUpArtistsForUser(env: Env, user: UserRow): Promise<numb
       if (!artistResult.inserted) continue;
       inserted += 1;
       await recordCatalogGenres(env.DB, artist.genres ?? [], 'artist', now);
+      await env.GENRE_ENRICHMENT_QUEUE.send({ artistId: artistResult.id });
 
       const tracks = await fetchArtistTracks(token, artist.id, TRACKS_PER_ARTIST);
       for (const track of tracks) {
