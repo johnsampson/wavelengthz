@@ -26,7 +26,16 @@ binding = "ASSETS"
 run_worker_first = true
 
 [vars]
-SPOTIFY_REDIRECT_URI = "http://127.0.0.1:8787/callback"
+# isAllowedHost() (src/routes/auth.ts) treats this var's own host as always
+# allowed, and bounces any other host straight to it -- so leaving this as
+# the localhost dev value meant production (wavelengthz.com) failed
+# isAllowedHost's check against its own canonical domain and redirected
+# every real visitor's /login/spotify to their own 127.0.0.1:8787 instead of
+# completing OAuth. This file's top-level [vars] block is what
+# `wrangler deploy` (no --env) ships to production, so it must be the
+# production URL here; override to the localhost value in a personal
+# (gitignored) .dev.vars for local dev.
+SPOTIFY_REDIRECT_URI = "https://wavelengthz.com/callback"
 # Unlike SPOTIFY_REDIRECT_URI (only ever a fallback -- /login and /callback
 # compute the real redirect_uri per-request via callbackUrlForHost), Google's
 # flow has no host-based override by design (no Cloudflare Tunnel/multi-host
