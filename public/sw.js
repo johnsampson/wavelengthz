@@ -78,7 +78,7 @@ self.addEventListener('activate', (event) => {
 // oauth-state cookie round-trip and produces "Invalid OAuth state" with
 // nothing to log server-side, since the request the server sees is entirely
 // legitimate, just carrying a cookie from a redirect chain the SW mangled.
-const BYPASS_PATHS = new Set(['/login', '/callback', '/logout']);
+const BYPASS_PATHS = new Set(['/login', '/login/spotify', '/login/google', '/callback', '/callback/google', '/logout']);
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);

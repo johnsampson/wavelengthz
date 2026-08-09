@@ -39,3 +39,18 @@ describe('insertTestUser', () => {
     expect(identity.provider_id).toBe('fixed-spotify-id');
   });
 });
+
+describe('insertTestUser with skipSpotify', () => {
+  it('creates only the users row, with no auth_identities or music_source_tokens rows', async () => {
+    const id = await insertTestUser(env.DB, { skipSpotify: true });
+
+    const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(id).first<any>();
+    expect(user).toBeTruthy();
+
+    const identity = await env.DB.prepare('SELECT * FROM auth_identities WHERE user_id = ?').bind(id).first();
+    expect(identity).toBeNull();
+
+    const token = await env.DB.prepare('SELECT * FROM music_source_tokens WHERE user_id = ?').bind(id).first();
+    expect(token).toBeNull();
+  });
+});

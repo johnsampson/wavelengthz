@@ -1,7 +1,8 @@
 import type { IRequest, RouterType } from 'itty-router';
 import { buildAuthUrl, exchangeCodeForToken, fetchSpotifyProfile } from '../lib/spotify';
 import { encrypt } from '../lib/crypto';
-import { createSession, requestIsSecure, requestProtocol } from '../lib/session';
+import { createSession, requestIsSecure, requestProtocol, getSessionUser } from '../lib/session';
+import { buildGoogleAuthUrl } from '../lib/google';
 
 function parseCookie(request: Request, name: string): string | null {
   const header = request.headers.get('Cookie');
@@ -36,7 +37,7 @@ function callbackUrlForHost(protocol: string, host: string): string {
 }
 
 export function registerAuthRoutes(router: RouterType) {
-  router.get('/login', async (request: IRequest, env: Env) => {
+  router.get('/login/spotify', async (request: IRequest, env: Env) => {
     // The state cookie set below is host-scoped, but Spotify always redirects
     // back to whatever host the redirect_uri we send it names -- if /login is
     // reached via a host that isn't allowed to complete OAuth (see
@@ -61,6 +62,22 @@ export function registerAuthRoutes(router: RouterType) {
     // here even when the public/browser side is https, and Spotify rejects
     // a non-loopback http redirect_uri outright.
     const authUrl = buildAuthUrl(state, env, callbackUrlForHost(requestProtocol(request), url.host));
+    const secure = requestIsSecure(request);
+
+    // ?intent=connect (from Settings' "Connect Spotify" action) marks this as
+    // linking to the currently logged-in user rather than a fresh login --
+    // /callback reads this cookie to decide which path to take.
+    const headers = new Headers({ Location: authUrl });
+    headers.append('Set-Cookie', `wl_oauth_state=${state}; Path=/; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Lax; Max-Age=600`);
+    if (url.searchParams.get('intent') === 'connect') {
+      headers.append('Set-Cookie', `wl_oauth_intent=connect; Path=/; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Lax; Max-Age=600`);
+    }
+    return new Response(null, { status: 302, headers });
+  });
+
+  router.get('/login/google', async (request: IRequest, env: Env) => {
+    const state = crypto.randomUUID();
+    const authUrl = buildGoogleAuthUrl(state, env);
     const secure = requestIsSecure(request);
     return new Response(null, {
       status: 302,
@@ -99,6 +116,50 @@ export function registerAuthRoutes(router: RouterType) {
     const product = profile.product ?? null;
     const grantedScope = token.scope ?? null;
 
+    const tokenStatement = (uid: string) =>
+      env.DB.prepare(
+        `INSERT INTO music_source_tokens (id, user_id, provider, provider_user_id, access_token, refresh_token, token_expires_at, avatar_url, product_tier, granted_scope, created_at, updated_at)
+         VALUES (?, ?, 'spotify', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, provider) DO UPDATE SET
+           access_token = excluded.access_token, refresh_token = excluded.refresh_token, token_expires_at = excluded.token_expires_at,
+           avatar_url = excluded.avatar_url, product_tier = excluded.product_tier, granted_scope = excluded.granted_scope, updated_at = excluded.updated_at`
+      ).bind(crypto.randomUUID(), uid, profile.id, encryptedAccess, encryptedRefresh, expiresAt, avatarUrl, product, grantedScope, now, now);
+
+    // ?intent=connect (set by /login/spotify) means "link this Spotify
+    // account to my current session's user," not a fresh login/signup.
+    const intentCookie = parseCookie(request, 'wl_oauth_intent');
+    const clearIntentCookie = 'wl_oauth_intent=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0';
+
+    if (intentCookie === 'connect') {
+      const currentUser = await getSessionUser(request, env.DB);
+      if (currentUser) {
+        const claimedBy = await env.DB.prepare(
+          `SELECT user_id FROM auth_identities WHERE provider = 'spotify' AND provider_id = ?`
+        ).bind(profile.id).first<{ user_id: string }>();
+
+        if (claimedBy && claimedBy.user_id !== currentUser.id) {
+          const headers = new Headers({ Location: '/settings?spotify_error=already_linked' });
+          headers.append('Set-Cookie', clearIntentCookie);
+          return new Response(null, { status: 302, headers });
+        }
+
+        await env.DB.batch([
+          env.DB.prepare(
+            `INSERT INTO auth_identities (id, user_id, provider, provider_id, email, created_at, updated_at)
+             VALUES (?, ?, 'spotify', ?, ?, ?, ?)
+             ON CONFLICT(provider, provider_id) DO NOTHING`
+          ).bind(crypto.randomUUID(), currentUser.id, profile.id, profile.email ?? null, now, now),
+          tokenStatement(currentUser.id),
+        ]);
+
+        const headers = new Headers({ Location: '/settings?spotify_connected=1' });
+        headers.append('Set-Cookie', clearIntentCookie);
+        return new Response(null, { status: 302, headers });
+      }
+      // No active session (it expired mid-flow) -- fall through to normal
+      // login/signup below, same as if intent had never been set.
+    }
+
     // Deliberately not filtered by deleted_at IS NULL: (provider, provider_id) is
     // UNIQUE, so a soft-deleted row's identity permanently occupies that Spotify
     // account's slot. Signing back in during the grace period (before the nightly
@@ -117,15 +178,6 @@ export function registerAuthRoutes(router: RouterType) {
     let userId: string;
     let onboarded: boolean;
 
-    const tokenStatement = (uid: string) =>
-      env.DB.prepare(
-        `INSERT INTO music_source_tokens (id, user_id, provider, provider_user_id, access_token, refresh_token, token_expires_at, avatar_url, product_tier, granted_scope, created_at, updated_at)
-         VALUES (?, ?, 'spotify', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(user_id, provider) DO UPDATE SET
-           access_token = excluded.access_token, refresh_token = excluded.refresh_token, token_expires_at = excluded.token_expires_at,
-           avatar_url = excluded.avatar_url, product_tier = excluded.product_tier, granted_scope = excluded.granted_scope, updated_at = excluded.updated_at`
-      ).bind(crypto.randomUUID(), uid, profile.id, encryptedAccess, encryptedRefresh, expiresAt, avatarUrl, product, grantedScope, now, now);
-
     if (existingIdentity) {
       userId = existingIdentity.user_id;
       onboarded = existingIdentity.onboarded_at != null;
@@ -135,34 +187,59 @@ export function registerAuthRoutes(router: RouterType) {
         tokenStatement(userId),
       ]);
     } else {
-      userId = crypto.randomUUID();
-      onboarded = false;
+      // No Spotify identity yet -- check whether this email already belongs
+      // to a user via a different provider (e.g. they signed up with Google
+      // first) before creating a duplicate account. Not filtered by
+      // deleted_at, same reactivation reasoning as the same-provider lookup
+      // above.
+      const existingByEmail = profile.email
+        ? await env.DB.prepare(`SELECT id, onboarded_at, deleted_at FROM users WHERE email = ?`)
+            .bind(profile.email)
+            .first<{ id: string; onboarded_at: number | null; deleted_at: number | null }>()
+        : null;
 
-      // spotify_id is still a required, still-UNIQUE column on users (see
-      // Task 1's migration note -- it's a platform constraint, not an
-      // oversight, that it can't be dropped). Keep writing the real value
-      // here for constraint satisfaction; auth_identities is what the
-      // application actually reads going forward.
-      await env.DB.batch([
-        env.DB.prepare(`INSERT INTO users (id, spotify_id, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`)
-          .bind(userId, profile.id, profile.email ?? null, now, now),
-        env.DB.prepare(
-          `INSERT INTO auth_identities (id, user_id, provider, provider_id, email, created_at, updated_at)
-           VALUES (?, ?, 'spotify', ?, ?, ?, ?)`
-        ).bind(crypto.randomUUID(), userId, profile.id, profile.email ?? null, now, now),
-        tokenStatement(userId),
-      ]);
+      if (existingByEmail) {
+        userId = existingByEmail.id;
+        onboarded = existingByEmail.onboarded_at != null;
+
+        const statements = [
+          env.DB.prepare(
+            `INSERT INTO auth_identities (id, user_id, provider, provider_id, email, created_at, updated_at)
+             VALUES (?, ?, 'spotify', ?, ?, ?, ?)`
+          ).bind(crypto.randomUUID(), userId, profile.id, profile.email ?? null, now, now),
+          tokenStatement(userId),
+        ];
+        if (existingByEmail.deleted_at != null) {
+          statements.unshift(env.DB.prepare('UPDATE users SET deleted_at = NULL, updated_at = ? WHERE id = ?').bind(now, userId));
+        }
+        await env.DB.batch(statements);
+      } else {
+        userId = crypto.randomUUID();
+        onboarded = false;
+
+        // spotify_id is still a required, still-UNIQUE column on users (see
+        // Task 1's migration note -- it's a platform constraint, not an
+        // oversight, that it can't be dropped). Keep writing the real value
+        // here for constraint satisfaction; auth_identities is what the
+        // application actually reads going forward.
+        await env.DB.batch([
+          env.DB.prepare(`INSERT INTO users (id, spotify_id, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`)
+            .bind(userId, profile.id, profile.email ?? null, now, now),
+          env.DB.prepare(
+            `INSERT INTO auth_identities (id, user_id, provider, provider_id, email, created_at, updated_at)
+             VALUES (?, ?, 'spotify', ?, ?, ?, ?)`
+          ).bind(crypto.randomUUID(), userId, profile.id, profile.email ?? null, now, now),
+          tokenStatement(userId),
+        ]);
+      }
     }
 
     const { cookie } = await createSession(env.DB, userId, requestIsSecure(request));
 
-    return new Response(null, {
-      status: 302,
-      headers: {
-        Location: onboarded ? '/' : '/onboarding',
-        'Set-Cookie': cookie,
-      },
-    });
+    const headers = new Headers({ Location: onboarded ? '/' : '/onboarding' });
+    headers.append('Set-Cookie', cookie);
+    if (intentCookie) headers.append('Set-Cookie', clearIntentCookie);
+    return new Response(null, { status: 302, headers });
   });
 
   router.post('/logout', async (request: Request, env: Env) => {

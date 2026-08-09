@@ -211,6 +211,54 @@ describe('GET /api/me', () => {
 
     vi.unstubAllGlobals();
   });
+
+  it('returns hasSpotify: false and musicProfile: null for a user with no linked Spotify account, without calling getValidAccessToken', async () => {
+    await insertTestUser(env.DB, { id: 'u5', skipSpotify: true });
+    const { cookie } = await createSession(env.DB, 'u5');
+    const sessionId = cookie.split(';')[0].split('=')[1];
+
+    const fetchMock = vi.fn(async () => {
+      throw new Error('should not call Spotify for a user with no linked account');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const req = new Request('http://localhost/api/me', { headers: { Cookie: `wl_session=${sessionId}` } });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    expect(body.hasSpotify).toBe(false);
+    expect(body.musicProfile).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('returns hasSpotify: true for a user with a linked Spotify account', async () => {
+    const encToken = await encrypt('access-tok', env.TOKEN_ENCRYPTION_KEY);
+    await insertTestUser(env.DB, {
+      id: 'u6', spotifyId: 'sp6', accessToken: encToken, refreshToken: encToken,
+      tokenExpiresAt: Date.now() + 100000, createdAt: 1000, updatedAt: 1000,
+    });
+    const { cookie } = await createSession(env.DB, 'u6');
+    const sessionId = cookie.split(';')[0].split('=')[1];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('top/artists')) return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        if (url.includes('top/tracks')) return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        throw new Error(`unexpected fetch ${url}`);
+      })
+    );
+
+    const req = new Request('http://localhost/api/me', { headers: { Cookie: `wl_session=${sessionId}` } });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.hasSpotify).toBe(true);
+
+    vi.unstubAllGlobals();
+  });
 });
 
 describe('POST /api/me/anthem', () => {

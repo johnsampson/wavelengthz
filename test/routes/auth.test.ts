@@ -13,9 +13,9 @@ beforeEach(async () => {
   await env.DB.exec('DELETE FROM sessions; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;');
 });
 
-describe('GET /login', () => {
+describe('GET /login/spotify', () => {
   it('redirects to Spotify authorize with a state cookie set', async () => {
-    const req = new Request('http://127.0.0.1:8787/login');
+    const req = new Request('http://127.0.0.1:8787/login/spotify');
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     expect(res.status).toBe(302);
     const location = res.headers.get('Location')!;
@@ -30,7 +30,7 @@ describe('GET /login', () => {
     // (wrangler over http://127.0.0.1) needs Secure dropped or Safari's
     // /callback never sees the state cookie back, producing "Invalid OAuth
     // state" with nothing wrong server-side.
-    const req = new Request('http://127.0.0.1:8787/login');
+    const req = new Request('http://127.0.0.1:8787/login/spotify');
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     const setCookie = res.headers.get('Set-Cookie')!;
     expect(setCookie).not.toContain('Secure');
@@ -40,40 +40,40 @@ describe('GET /login', () => {
     // Same host as SPOTIFY_REDIRECT_URI (127.0.0.1:8787) -- only the
     // protocol differs -- so this isolates the Secure-flag behavior from
     // the host-canonicalization redirect covered below.
-    const req = new Request('https://127.0.0.1:8787/login');
+    const req = new Request('https://127.0.0.1:8787/login/spotify');
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     const setCookie = res.headers.get('Set-Cookie')!;
     expect(setCookie).toContain('Secure');
   });
 
   it('redirects to the canonical SPOTIFY_REDIRECT_URI host instead of setting the state cookie, when reached via a different host', async () => {
-    // The state cookie is host-scoped. If /login is reached via a host that
-    // doesn't match SPOTIFY_REDIRECT_URI's host (e.g. "localhost", which is
-    // exactly what `wrangler dev` itself prints as "Ready on
+    // The state cookie is host-scoped. If /login/spotify is reached via a
+    // host that doesn't match SPOTIFY_REDIRECT_URI's host (e.g. "localhost",
+    // which is exactly what `wrangler dev` itself prints as "Ready on
     // http://localhost:8787" every time it (re)starts, while
     // SPOTIFY_REDIRECT_URI is configured as 127.0.0.1), a cookie set here
     // would never be sent back when Spotify redirects to /callback on the
     // *other* host -- producing "Invalid OAuth state" every single time,
     // with nothing actually wrong server-side. Funnel onto the canonical
     // host first, before ever setting the cookie.
-    const req = new Request('http://localhost:8787/login');
+    const req = new Request('http://localhost:8787/login/spotify');
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     expect(res.status).toBe(302);
-    expect(res.headers.get('Location')).toBe('http://127.0.0.1:8787/login');
+    expect(res.headers.get('Location')).toBe('http://127.0.0.1:8787/login/spotify');
     expect(res.headers.get('Set-Cookie')).toBeNull();
   });
 
   it('preserves the query string when redirecting to the canonical host', async () => {
-    const req = new Request('http://localhost:8787/login?foo=bar');
+    const req = new Request('http://localhost:8787/login/spotify?foo=bar');
     const res = await worker.fetch(req, env, {} as ExecutionContext);
-    expect(res.headers.get('Location')).toBe('http://127.0.0.1:8787/login?foo=bar');
+    expect(res.headers.get('Location')).toBe('http://127.0.0.1:8787/login/spotify?foo=bar');
   });
 
   it('serves OAuth directly (no redirect) on a host listed in SPOTIFY_ALLOWED_HOSTS, using that host as the redirect_uri', async () => {
     // env.test.vars sets SPOTIFY_ALLOWED_HOSTS=allowed.example.com -- e.g. a
     // Cloudflare Tunnel hostname someone's opted into for testing on a real
     // phone, distinct from the SPOTIFY_REDIRECT_URI default.
-    const req = new Request('https://allowed.example.com/login');
+    const req = new Request('https://allowed.example.com/login/spotify');
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     expect(res.status).toBe(302);
     const location = res.headers.get('Location')!;
@@ -90,7 +90,7 @@ describe('GET /login', () => {
     // genuinely https. Spotify requires https for any non-loopback redirect
     // URI, so getting this wrong makes the tunnel host completely unusable,
     // not just insecure.
-    const req = new Request('http://allowed.example.com/login', {
+    const req = new Request('http://allowed.example.com/login/spotify', {
       headers: { 'CF-Visitor': '{"scheme":"https"}' },
     });
     const res = await worker.fetch(req, env, {} as ExecutionContext);
@@ -101,11 +101,48 @@ describe('GET /login', () => {
   });
 
   it('still redirects to the canonical host when reached via a host that is neither SPOTIFY_REDIRECT_URI nor in SPOTIFY_ALLOWED_HOSTS', async () => {
-    const req = new Request('https://not-allowed.example.com/login');
+    const req = new Request('https://not-allowed.example.com/login/spotify');
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     expect(res.status).toBe(302);
-    expect(res.headers.get('Location')).toBe('http://127.0.0.1:8787/login');
+    expect(res.headers.get('Location')).toBe('http://127.0.0.1:8787/login/spotify');
     expect(res.headers.get('Set-Cookie')).toBeNull();
+  });
+
+  it('sets an additional wl_oauth_intent=connect cookie when reached with ?intent=connect', async () => {
+    const req = new Request('http://127.0.0.1:8787/login/spotify?intent=connect');
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(302);
+    const setCookies = res.headers.getSetCookie();
+    expect(setCookies.some((c) => c.includes('wl_oauth_state='))).toBe(true);
+    expect(setCookies.some((c) => c.includes('wl_oauth_intent=connect'))).toBe(true);
+  });
+
+  it('does not set wl_oauth_intent when reached without ?intent=connect', async () => {
+    const req = new Request('http://127.0.0.1:8787/login/spotify');
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const setCookies = res.headers.getSetCookie();
+    expect(setCookies.some((c) => c.includes('wl_oauth_intent'))).toBe(false);
+  });
+});
+
+describe('GET /login/google', () => {
+  it('redirects to Google authorize with a state cookie set', async () => {
+    const req = new Request('http://127.0.0.1:8787/login/google');
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(302);
+    const location = res.headers.get('Location')!;
+    expect(location).toContain('https://accounts.google.com/o/oauth2/v2/auth');
+    expect(res.headers.get('Set-Cookie')).toContain('wl_oauth_state=');
+  });
+
+  it('omits Secure on the state cookie over plain http, keeps it over https', async () => {
+    const httpReq = new Request('http://127.0.0.1:8787/login/google');
+    const httpRes = await worker.fetch(httpReq, env, {} as ExecutionContext);
+    expect(httpRes.headers.get('Set-Cookie')).not.toContain('Secure');
+
+    const httpsReq = new Request('https://wavelengthz.app/login/google');
+    const httpsRes = await worker.fetch(httpsReq, env, {} as ExecutionContext);
+    expect(httpsRes.headers.get('Set-Cookie')).toContain('Secure');
   });
 });
 
@@ -447,6 +484,108 @@ describe('GET /callback', () => {
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     expect(res.status).toBe(302);
     expect(res.headers.get('Location')).toBe('/');
+
+    vi.unstubAllGlobals();
+  });
+
+  it('links to an existing user found by email instead of creating a duplicate, when no Spotify identity exists yet', async () => {
+    const existingUserId = await insertTestUser(env.DB, { email: 'shared@example.com', skipSpotify: true, onboardedAt: Date.now() });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('accounts.spotify.com/api/token')) {
+          return new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 }), { status: 200 });
+        }
+        if (url.includes('api.spotify.com/v1/me')) {
+          return new Response(JSON.stringify({ id: 'spotify-linkme', email: 'shared@example.com' }), { status: 200 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    const req = new Request('http://localhost/callback?code=abc&state=match', {
+      headers: { Cookie: 'wl_oauth_state=match' },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/'); // already onboarded
+
+    const identity = await env.DB.prepare(`SELECT user_id FROM auth_identities WHERE provider_id = 'spotify-linkme'`).first<any>();
+    expect(identity.user_id).toBe(existingUserId); // linked, not a new user
+
+    const usersCount = await env.DB.prepare(`SELECT COUNT(*) as c FROM users WHERE email = 'shared@example.com'`).first<any>();
+    expect(usersCount.c).toBe(1); // no duplicate
+
+    vi.unstubAllGlobals();
+  });
+
+  it('connects Spotify to the currently logged-in user when intent=connect, without creating a new account', async () => {
+    const googleUserId = await insertTestUser(env.DB, { email: 'connectme@example.com', skipSpotify: true, onboardedAt: Date.now() });
+    const { id: sessionId } = await createSession(env.DB, googleUserId);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('accounts.spotify.com/api/token')) {
+          return new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 }), { status: 200 });
+        }
+        if (url.includes('api.spotify.com/v1/me')) {
+          return new Response(JSON.stringify({ id: 'spotify-connect-target', email: 'different@example.com' }), { status: 200 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    const req = new Request('http://localhost/callback?code=abc&state=match', {
+      headers: { Cookie: `wl_oauth_state=match; wl_oauth_intent=connect; wl_session=${sessionId}` },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/settings?spotify_connected=1');
+
+    const identity = await env.DB.prepare(`SELECT user_id FROM auth_identities WHERE provider_id = 'spotify-connect-target'`).first<any>();
+    expect(identity.user_id).toBe(googleUserId);
+
+    const tokenRow = await env.DB.prepare(`SELECT * FROM music_source_tokens WHERE user_id = ? AND provider = 'spotify'`).bind(googleUserId).first<any>();
+    expect(tokenRow).toBeTruthy();
+
+    const usersCount = await env.DB.prepare(`SELECT COUNT(*) as c FROM users`).first<any>();
+    expect(usersCount.c).toBe(1); // no second user created
+
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects connecting a Spotify account that is already linked to a different user', async () => {
+    const userA = await insertTestUser(env.DB, { spotifyId: 'spotify-already-claimed' });
+    const userB = await insertTestUser(env.DB, { email: 'userb@example.com', skipSpotify: true, onboardedAt: Date.now() });
+    const { id: sessionId } = await createSession(env.DB, userB);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('accounts.spotify.com/api/token')) {
+          return new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 }), { status: 200 });
+        }
+        if (url.includes('api.spotify.com/v1/me')) {
+          return new Response(JSON.stringify({ id: 'spotify-already-claimed', email: 'usera@example.com' }), { status: 200 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    const req = new Request('http://localhost/callback?code=abc&state=match', {
+      headers: { Cookie: `wl_oauth_state=match; wl_oauth_intent=connect; wl_session=${sessionId}` },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/settings?spotify_error=already_linked');
+
+    const identity = await env.DB.prepare(`SELECT user_id FROM auth_identities WHERE provider_id = 'spotify-already-claimed'`).first<any>();
+    expect(identity.user_id).toBe(userA); // unchanged, still belongs to user A
 
     vi.unstubAllGlobals();
   });
