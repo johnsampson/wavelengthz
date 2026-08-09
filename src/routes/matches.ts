@@ -156,7 +156,7 @@ export function registerMatchRoutes(router: RouterType) {
     return Response.json({ ok: true });
   });
 
-  router.post('/api/matches/:id/messages', async (request: IRequest, env: Env) => {
+  router.post('/api/matches/:id/messages', async (request: IRequest, env: Env, ctx: ExecutionContext) => {
     const user = await getSessionUser(request, env.DB);
     if (!user) return new Response('Unauthorized', { status: 401 });
 
@@ -179,13 +179,29 @@ export function registerMatchRoutes(router: RouterType) {
       `INSERT INTO notifications (id, user_id, type, related_id, created_at) VALUES (?, ?, 'message', ?, ?)`
     ).bind(crypto.randomUUID(), recipientId, messageId, now).run();
 
-    try {
-      await notifyMessage(env.DB, env, messageId, recipientId);
-    } catch (err) {
-      // Same reasoning as notifyMatch: the message is already committed, so
-      // an email-provider failure must not surface as a failed send to the
-      // caller.
+    // Fire-and-forget: notifyMessage now also does per-subscription push
+    // sends (ECDH keygen + HKDF + AES-GCM + ES256 sign + a real network
+    // round-trip per device), so awaiting it inline would add multiple
+    // serial cross-internet round-trips to the sender's request before
+    // their UI unblocks -- for a recipient with several devices. waitUntil
+    // lets the response return immediately while the notification still
+    // gets sent; the message write and notification row are already
+    // committed above either way. Same reasoning as notifyMatch for
+    // isolating a failure (email-provider or push) from the caller's
+    // response, but waitUntil swallows rejections silently, so the
+    // .catch() here is what actually gets the failure logged.
+    const notifyPromise = notifyMessage(env.DB, env, messageId, recipientId).catch((err) => {
       console.error('notifyMessage failed', err);
+    });
+    // Real Workers runtimes always provide ctx.waitUntil; tests pass a
+    // minimal fake ExecutionContext ({} as ExecutionContext) that doesn't,
+    // so this falls back to awaiting directly there -- same defensive
+    // pattern as rateLimitAllows/the top-level error handler in
+    // src/index.ts.
+    if (typeof ctx.waitUntil === 'function') {
+      ctx.waitUntil(notifyPromise);
+    } else {
+      await notifyPromise;
     }
 
     return Response.json({ ok: true, messageId });
