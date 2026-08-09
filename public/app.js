@@ -37,7 +37,8 @@ export const api = {
     request(`/api/swipe/${mode}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   matches: () => request('/api/matches'),
   matchDetail: (matchId) => request(`/api/matches/${matchId}`),
-  artistProfile: (artistId) => request(`/api/artists/${artistId}`),
+  /** @param {number} [limit] - omit for the server default; artist.html's "Load more" passes a higher value */
+  artistProfile: (artistId, limit) => request(`/api/artists/${artistId}${limit ? `?limit=${limit}` : ''}`),
   personProfile: (userId) => request(`/api/people/${userId}/profile`),
   artistSearch: (q) => request(`/api/artists/search?q=${encodeURIComponent(q)}`),
   // Persists a live (not-yet-cataloged) Spotify search result into the

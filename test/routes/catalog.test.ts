@@ -210,6 +210,73 @@ describe('GET /api/artists/:id', () => {
     vi.unstubAllGlobals();
   });
 
+  describe('pagination via ?limit=', () => {
+    function makeTracks(count: number) {
+      return Array.from({ length: count }, (_, i) => ({
+        id: `trk${i}`,
+        name: `Track ${i}`,
+        artists: [{ id: 'spotify-local-1', name: 'Local Artist' }],
+        album: { images: [] },
+        preview_url: null,
+      }));
+    }
+
+    it('defaults to the server limit and reports hasMore when exactly that many tracks come back', async () => {
+      stubTrackSearch({ tracks: makeTracks(30) });
+      const cookie = await cookieFor('u1');
+      const req = new Request('http://localhost/api/artists/local-1', { headers: { Cookie: cookie } });
+      const res = await worker.fetch(req, env, {} as ExecutionContext);
+      const body = await res.json<any>();
+      expect(body.tracks).toHaveLength(30);
+      expect(body.hasMore).toBe(true);
+      vi.unstubAllGlobals();
+    });
+
+    it('honors a higher ?limit=, returning more tracks than the server default', async () => {
+      stubTrackSearch({ tracks: makeTracks(10) });
+      const cookie = await cookieFor('u1');
+      const req = new Request('http://localhost/api/artists/local-1?limit=5', { headers: { Cookie: cookie } });
+      const res = await worker.fetch(req, env, {} as ExecutionContext);
+      const body = await res.json<any>();
+      expect(body.tracks.map((t: any) => t.spotifyId)).toEqual(['trk0', 'trk1', 'trk2', 'trk3', 'trk4']);
+      vi.unstubAllGlobals();
+    });
+
+    it('reports hasMore: false once the artist runs out of tracks before hitting the requested limit', async () => {
+      stubTrackSearch({ tracks: makeTracks(2) });
+      const cookie = await cookieFor('u1');
+      const req = new Request('http://localhost/api/artists/local-1?limit=30', { headers: { Cookie: cookie } });
+      const res = await worker.fetch(req, env, {} as ExecutionContext);
+      const body = await res.json<any>();
+      expect(body.tracks).toHaveLength(2);
+      expect(body.hasMore).toBe(false);
+      vi.unstubAllGlobals();
+    });
+
+    it('clamps an oversized ?limit= to the ceiling and reports no further hasMore there', async () => {
+      stubTrackSearch({ tracks: makeTracks(200) });
+      const cookie = await cookieFor('u1');
+      const req = new Request('http://localhost/api/artists/local-1?limit=99999', { headers: { Cookie: cookie } });
+      const res = await worker.fetch(req, env, {} as ExecutionContext);
+      const body = await res.json<any>();
+      expect(body.tracks).toHaveLength(90); // ARTIST_PROFILE_TRACK_MAX_LIMIT
+      expect(body.hasMore).toBe(false);
+      vi.unstubAllGlobals();
+    });
+
+    it('falls back to the server default for a non-numeric or non-positive ?limit=', async () => {
+      stubTrackSearch({ tracks: makeTracks(30) });
+      const cookie = await cookieFor('u1');
+      for (const limit of ['abc', '0', '-5']) {
+        const req = new Request(`http://localhost/api/artists/local-1?limit=${limit}`, { headers: { Cookie: cookie } });
+        const res = await worker.fetch(req, env, {} as ExecutionContext);
+        const body = await res.json<any>();
+        expect(body.tracks).toHaveLength(30); // the default, not an error
+      }
+      vi.unstubAllGlobals();
+    });
+  });
+
   describe('totalLikes and totalLikesInArea', () => {
     beforeEach(async () => {
       // Austin-area viewer, 80km radius (matches the default fixture in other
