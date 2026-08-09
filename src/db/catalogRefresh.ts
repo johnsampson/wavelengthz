@@ -29,9 +29,10 @@ export async function refreshCatalogFromProfiles(
       const artist = await fetchArtistById(token, artistId);
 
       const now = Date.now();
-      await upsertArtist(env.DB, artist, 'spotify_search', null, now);
+      const result = await upsertArtist(env.DB, artist, 'spotify_search', null, now);
       artistsAdded += 1;
       await recordCatalogGenres(env.DB, artist.genres ?? [], 'artist', now);
+      if (result.inserted) await env.GENRE_ENRICHMENT_QUEUE.send({ artistId: result.id });
     } catch {
       failedArtistIds.push(artistId);
     }

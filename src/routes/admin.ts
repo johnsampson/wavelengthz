@@ -2,6 +2,7 @@ import type { IRequest, RouterType } from 'itty-router';
 import { seedCatalog } from '../db/seed';
 import { hardDeleteUser } from '../lib/accountDeletion';
 import { constantTimeEqual } from '../lib/crypto';
+import { enrichArtistGenresFromMusicBrainz } from '../lib/genreEnrichment';
 
 export function registerAdminRoutes(router: RouterType) {
   router.post('/internal/seed', async (request: Request, env: Env) => {
@@ -16,6 +17,26 @@ export function registerAdminRoutes(router: RouterType) {
     }
 
     const result = await seedCatalog(env, targetTotal ? { targetTotal } : undefined);
+    return Response.json(result);
+  });
+
+  // Deliberately slow: MusicBrainz's rate limit means this run takes
+  // roughly 2+ seconds per artist (see genreEnrichment.ts). ?count= lets a
+  // smaller/larger batch be requested per call; repeated calls make
+  // incremental progress since it always picks up genre_enriched_at IS NULL
+  // rows first.
+  router.post('/internal/enrich-genres', async (request: Request, env: Env) => {
+    if (!constantTimeEqual(request.headers.get('X-Seed-Secret') ?? '', env.SEED_SECRET)) {
+      return new Response('Forbidden', { status: 403 });
+    }
+
+    const countParam = new URL(request.url).searchParams.get('count');
+    const limit = countParam ? Number(countParam) : undefined;
+    if (countParam !== null && (!Number.isFinite(limit) || limit! <= 0)) {
+      return Response.json({ error: 'invalid_count' }, { status: 400 });
+    }
+
+    const result = await enrichArtistGenresFromMusicBrainz(env.DB, { limit });
     return Response.json(result);
   });
 
