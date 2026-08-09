@@ -88,6 +88,87 @@ describe('fetchArtistTracks', () => {
     vi.unstubAllGlobals();
   });
 
+  it("never asks Spotify for more albums than its real max (10), even when the caller's own limit is much higher", async () => {
+    // Spotify's documented max for GET /v1/artists/{id}/albums's `limit` is
+    // 10 -- requesting more than that 400s outright. A higher target track
+    // count (e.g. the artist-profile route's 30) must still cap this
+    // specific call at 10, drawing more tracks per album instead.
+    let albumsCallUrl = '';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          albumsCallUrl = url;
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+
+    await fetchArtistTracks('token', 'artist-1', 30);
+
+    expect(new URL(albumsCallUrl).searchParams.get('limit')).toBe('10');
+    vi.unstubAllGlobals();
+  });
+
+  it("never asks Spotify for more tracks from one album than its real max (50), even when the caller's own limit is higher", async () => {
+    let albumTracksCallUrl = '';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+        }
+        if (url.includes('/albums/album-1/tracks')) {
+          albumTracksCallUrl = url;
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+
+    await fetchArtistTracks('token', 'artist-1', 60);
+
+    expect(new URL(albumTracksCallUrl).searchParams.get('limit')).toBe('50');
+    vi.unstubAllGlobals();
+  });
+
+  it('fetches album-tracks for every returned album concurrently rather than one at a time', async () => {
+    // Latency, not correctness: with no batch endpoint available, a
+    // sequential loop over up to 10 albums would add one Spotify round trip
+    // per album directly to the artist-profile page's load time. Asserting
+    // that both albums' track-id lookups are in flight before either
+    // resolves is the only reliable way to catch a regression back to a
+    // sequential loop -- checking the final result alone can't tell the
+    // difference.
+    let inFlight = 0;
+    let maxConcurrent = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: [{ id: 'album-1' }, { id: 'album-2' }] }), { status: 200 });
+        }
+        if (url.includes('/albums/')) {
+          inFlight += 1;
+          maxConcurrent = Math.max(maxConcurrent, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          inFlight -= 1;
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+
+    await fetchArtistTracks('token', 'artist-1', 10);
+
+    expect(maxConcurrent).toBe(2);
+    vi.unstubAllGlobals();
+  });
+
   it('excludes any track that does not actually credit the requested artist id', async () => {
     stubSpotify({
       albums: [{ id: 'album-1' }],
@@ -104,8 +185,14 @@ describe('fetchArtistTracks', () => {
     vi.unstubAllGlobals();
   });
 
-  it('stops fetching once the requested limit is reached, without querying later albums', async () => {
-    const secondAlbumCalls: string[] = [];
+  it('truncates to the requested limit, preferring earlier (more recent) albums, without fetching full details for truncated-away tracks', async () => {
+    // Album-tracks lookups now fan out in parallel across every returned
+    // album rather than stopping early -- fewer sequential round trips is
+    // worth a few tracks' worth of ids fetched and then discarded. Full
+    // per-track detail lookups (the expensive, one-request-per-track step)
+    // only ever happen for tracks that survive the limit=1 truncation, so
+    // t2's own detail endpoint should never be called.
+    const trackDetailCalls: string[] = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo) => {
@@ -117,10 +204,10 @@ describe('fetchArtistTracks', () => {
           return new Response(JSON.stringify({ items: [{ id: 't1' }] }), { status: 200 });
         }
         if (url.includes('/albums/album-2/tracks')) {
-          secondAlbumCalls.push(url);
           return new Response(JSON.stringify({ items: [{ id: 't2' }] }), { status: 200 });
         }
-        if (url.includes('/v1/tracks/t1')) {
+        if (url.includes('/v1/tracks/')) {
+          trackDetailCalls.push(url);
           return new Response(JSON.stringify({ id: 't1', name: 'Track One', artists: [{ id: 'artist-1', name: 'X' }] }), { status: 200 });
         }
         throw new Error(`unexpected ${url}`);
@@ -130,7 +217,7 @@ describe('fetchArtistTracks', () => {
     const tracks = await fetchArtistTracks('token', 'artist-1', 1);
 
     expect(tracks).toHaveLength(1);
-    expect(secondAlbumCalls).toHaveLength(0);
+    expect(trackDetailCalls).toEqual([expect.stringContaining('/v1/tracks/t1')]);
     vi.unstubAllGlobals();
   });
 

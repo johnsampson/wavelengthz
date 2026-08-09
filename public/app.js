@@ -17,23 +17,32 @@ async function request(path, options = {}) {
 }
 
 // Shared with onboarding.html and settings.html so the option list can't drift
-// between the two places it's picked.
+// between the two places it's picked. 'making_friends' retired -- superseded
+// by the real seeking:'friends' filter (src/routes/onboarding.ts's
+// SEEKING_OPTIONS), which actually changes who you match with rather than
+// just being a label. 'dating_around' retired too -- it and 'something_casual'
+// read as the same option to anyone picking one, so this collapses them
+// rather than asking users to guess the distinction. Kept in sync with
+// onboarding.ts's INTENT_OPTIONS set.
 export const INTENT_OPTIONS = [
   { value: 'long_term_relationship', label: 'Long-term relationship' },
   { value: 'something_casual', label: 'Something casual' },
-  { value: 'dating_around', label: 'Dating around' },
-  { value: 'making_friends', label: 'Making new friends' },
   { value: 'not_sure_yet', label: 'Not sure yet' },
 ];
 
 export const api = {
   me: () => request('/api/me'),
+  // Backs public/wavelengthzPlayer.js. `available: false` (Free tier, or not
+  // yet re-authorized for the `streaming` scope) is the normal, common-case
+  // response -- never thrown as an error.
+  playerToken: () => request('/api/me/player-token'),
   candidates: (mode, limit = 10) => request(`/api/candidates/${mode}?limit=${limit}`),
   swipe: (mode, body) =>
     request(`/api/swipe/${mode}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   matches: () => request('/api/matches'),
   matchDetail: (matchId) => request(`/api/matches/${matchId}`),
-  artistProfile: (artistId) => request(`/api/artists/${artistId}`),
+  /** @param {number} [limit] - omit for the server default; artist.html's "Load more" passes a higher value */
+  artistProfile: (artistId, limit) => request(`/api/artists/${artistId}${limit ? `?limit=${limit}` : ''}`),
   personProfile: (userId) => request(`/api/people/${userId}/profile`),
   artistSearch: (q) => request(`/api/artists/search?q=${encodeURIComponent(q)}`),
   // Persists a live (not-yet-cataloged) Spotify search result into the
@@ -50,6 +59,9 @@ export const api = {
   recallMessage: (matchId, messageId) => request(`/api/matches/${matchId}/messages/${messageId}/recall`, { method: 'POST' }),
   onboard: (payload) =>
     request('/api/onboarding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+  /** @param {string|null} trackId - one of the caller's own top tracks, or null to clear */
+  setAnthem: (trackId) =>
+    request('/api/me/anthem', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trackId }) }),
   block: (userId) =>
     request('/api/block', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: userId }) }),
   blocks: () => request('/api/blocks'),

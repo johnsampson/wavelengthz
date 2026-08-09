@@ -260,3 +260,81 @@ describe('GET /api/me', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('POST /api/me/anthem', () => {
+  async function makeUserWithTopTracks() {
+    const encToken = await encrypt('access-tok', env.TOKEN_ENCRYPTION_KEY);
+    await insertTestUser(env.DB, {
+      id: 'u5', spotifyId: 'sp5', accessToken: encToken, refreshToken: encToken,
+      tokenExpiresAt: Date.now() + 100000, createdAt: 1000, updatedAt: 1000,
+    });
+    const topTracks = JSON.stringify([{ track_id: 't1', rank: 1, name: 'My Track', imageUrl: null }]);
+    await env.DB.prepare(
+      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u5', '[]', ?, '[]', 'medium_term', 1000)`
+    ).bind(topTracks).run();
+    const { cookie } = await createSession(env.DB, 'u5');
+    return cookie.split(';')[0].split('=')[1];
+  }
+
+  it('returns 401 when not logged in', async () => {
+    const res = await worker.fetch(
+      new Request('http://localhost/api/me/anthem', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trackId: 't1' }) }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('sets the anthem when trackId is one of the caller\'s own top tracks', async () => {
+    const sessionId = await makeUserWithTopTracks();
+    const res = await worker.fetch(
+      new Request('http://localhost/api/me/anthem', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: `wl_session=${sessionId}` },
+        body: JSON.stringify({ trackId: 't1' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(200);
+
+    const row = await env.DB.prepare('SELECT anthem_track_id FROM users WHERE id = ?').bind('u5').first<any>();
+    expect(row.anthem_track_id).toBe('t1');
+  });
+
+  it('rejects a trackId that is not one of the caller\'s own top tracks', async () => {
+    const sessionId = await makeUserWithTopTracks();
+    const res = await worker.fetch(
+      new Request('http://localhost/api/me/anthem', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: `wl_session=${sessionId}` },
+        body: JSON.stringify({ trackId: 'someone-elses-track' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+
+    const row = await env.DB.prepare('SELECT anthem_track_id FROM users WHERE id = ?').bind('u5').first<any>();
+    expect(row.anthem_track_id).toBeNull();
+  });
+
+  it('clears the anthem when trackId is null', async () => {
+    const sessionId = await makeUserWithTopTracks();
+    await env.DB.prepare('UPDATE users SET anthem_track_id = ? WHERE id = ?').bind('t1', 'u5').run();
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/me/anthem', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: `wl_session=${sessionId}` },
+        body: JSON.stringify({ trackId: null }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(200);
+
+    const row = await env.DB.prepare('SELECT anthem_track_id FROM users WHERE id = ?').bind('u5').first<any>();
+    expect(row.anthem_track_id).toBeNull();
+  });
+});

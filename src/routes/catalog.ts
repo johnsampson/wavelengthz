@@ -14,7 +14,22 @@ import { recordCatalogGenres } from '../lib/genreCatalog';
 import { upsertArtist, upsertTrack } from '../lib/catalogUpsert';
 import { haversineKm } from '../lib/scoring';
 
-const ARTIST_PROFILE_TRACK_LIMIT = 10;
+// Raised from 10 -- fetchArtistTracks (src/lib/spotify.ts) now fans out
+// across up to 10 albums/singles in parallel rather than fetching
+// sequentially, so a higher target here no longer means proportionally
+// slower page loads. Actual results still vary per artist: this is a
+// ceiling on what's drawn from their most recent ARTIST_ALBUMS_PAGE_SIZE
+// releases, not a guarantee -- an artist with sparse releases may still
+// come back with fewer.
+const ARTIST_PROFILE_TRACK_LIMIT = 30;
+// Ceiling on the `?limit=` query param public/artist.html's "Load more songs"
+// button drives -- each bump re-fetches the whole list at a higher limit
+// (fetchArtistTracks has no true offset/cursor support, see its own comment),
+// so this bounds how far a single request can push Spotify fan-out rather
+// than trusting an arbitrary client-supplied value. 3x the default: enough
+// for a couple of "Load more" taps without approaching the Workers
+// subrequest limit PR #18 was written to avoid re-hitting.
+const ARTIST_PROFILE_TRACK_MAX_LIMIT = 90;
 
 export function registerCatalogRoutes(router: RouterType) {
   router.get('/api/artists/search', async (request: Request, env: Env) => {
@@ -62,6 +77,18 @@ export function registerCatalogRoutes(router: RouterType) {
     const requestedId = request.params.id;
     const token = await getValidAccessToken(user, env, env.DB).catch(() => getClientCredentialsToken(env));
 
+    // ?limit= drives "Load more songs" (public/artist.html): each tap
+    // re-requests the full list at a higher limit rather than an incremental
+    // page, since fetchArtistTracks has no offset/cursor to resume from.
+    // Anything absent, non-numeric, or non-positive falls back to the
+    // default rather than being treated as an error -- this param is
+    // optional and only the frontend's own "Load more" ever sets it.
+    const requestedLimit = Number(new URL(request.url).searchParams.get('limit'));
+    const trackLimit =
+      Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.min(requestedLimit, ARTIST_PROFILE_TRACK_MAX_LIMIT)
+        : ARTIST_PROFILE_TRACK_LIMIT;
+
     let artistRow = await env.DB.prepare('SELECT * FROM artists WHERE id = ?').bind(requestedId).first<any>();
     if (!artistRow) artistRow = await env.DB.prepare('SELECT * FROM artists WHERE spotify_id = ?').bind(requestedId).first<any>();
     if (!artistRow) {
@@ -72,7 +99,7 @@ export function registerCatalogRoutes(router: RouterType) {
     }
 
     const artistGenres = genresFromRow(artistRow.genres);
-    const topTracks = await fetchArtistTracks(token, artistRow.spotify_id, ARTIST_PROFILE_TRACK_LIMIT);
+    const topTracks = await fetchArtistTracks(token, artistRow.spotify_id, trackLimit);
     const now = Date.now();
     // Pairs each live Spotify track with its resolved internal id -- needed
     // because everything downstream (swipe direction lookup, totalLikes,
@@ -144,6 +171,13 @@ export function registerCatalogRoutes(router: RouterType) {
         previewUrl: t.preview_url ?? null,
         direction: directions.get(internalId) ?? null,
       })),
+      // Heuristic, not an exact count: getting back exactly as many tracks as
+      // requested means the artist likely has more beyond this cut (a higher
+      // `limit` is worth trying); getting back fewer means fetchArtistTracks
+      // is already exhausted (sparse discography) and asking for more
+      // wouldn't turn up anything new. False once trackLimit has hit the
+      // ceiling regardless, since this endpoint won't fetch any deeper.
+      hasMore: enrichedTracks.length === trackLimit && trackLimit < ARTIST_PROFILE_TRACK_MAX_LIMIT,
     });
   });
 

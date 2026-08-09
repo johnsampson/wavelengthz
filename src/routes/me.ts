@@ -68,4 +68,37 @@ export function registerMeRoutes(router: RouterType) {
     const safeUser = { ...user, spotify_avatar_url: tokenRow?.avatar_url ?? null };
     return Response.json({ user: safeUser, musicProfile: profile, hasSpotify });
   });
+
+  // Sets or clears the caller's anthem -- the one track that plays from a tap
+  // on their swipe-deck card (public/index.html) and is badged on their full
+  // profile (public/profile.html). Deliberately its own tiny endpoint rather
+  // than folded into POST /api/onboarding: that endpoint unconditionally
+  // rewrites the whole profile-setup field set, so a one-field change there
+  // means echoing back every other field just to avoid clobbering it (see
+  // public/settings.js's comment on the same tradeoff).
+  router.post('/api/me/anthem', async (request: Request, env: Env) => {
+    const user = await getSessionUser(request, env.DB);
+    if (!user) return new Response('Unauthorized', { status: 401 });
+
+    const { trackId } = await request.json<{ trackId: string | null }>();
+
+    if (trackId != null) {
+      // Anthem must be one of the caller's own top tracks -- prevents setting
+      // an arbitrary Spotify id here, and matches the only picker the UI ever
+      // offers (profile.html's own "Top tracks on Spotify" list).
+      const profileRow = await env.DB.prepare('SELECT top_tracks FROM music_profiles WHERE user_id = ?')
+        .bind(user.id)
+        .first<{ top_tracks: string }>();
+      const topTracks: Array<{ track_id: string }> = profileRow ? JSON.parse(profileRow.top_tracks) : [];
+      if (!topTracks.some((t) => t.track_id === trackId)) {
+        return Response.json({ error: 'invalid_track' }, { status: 400 });
+      }
+    }
+
+    await env.DB.prepare('UPDATE users SET anthem_track_id = ?, updated_at = ? WHERE id = ?')
+      .bind(trackId, Date.now(), user.id)
+      .run();
+
+    return Response.json({ ok: true });
+  });
 }

@@ -75,7 +75,9 @@
       <div class="flex gap-2 rounded-full bg-surface2 p-1">
         <button type="button" class="pill-toggle flex-1" :class="seeking === 'male' ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="seeking = 'male'">Male</button>
         <button type="button" class="pill-toggle flex-1" :class="seeking === 'female' ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="seeking = 'female'">Female</button>
+        <button type="button" class="pill-toggle flex-1" :class="seeking === 'friends' ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="seeking = 'friends'">Friends</button>
       </div>
+      <p x-show="seeking === 'friends'" class="text-xs text-neutral-400">You'll match with anyone else also seeking friends, regardless of gender.</p>
     </div>
     <p x-show="error === 'invalid_seeking'" class="text-sm text-red-400" role="alert">Please select who you're seeking.</p>
 
@@ -120,7 +122,7 @@
       <div class="grid grid-cols-4 gap-2">
         <template x-for="photo in photos" :key="photo.photoId">
           <div class="relative">
-            <img :src="photo.url" alt="" class="aspect-square w-full rounded-lg object-cover" />
+            <img :src="photo.url" alt="" class="aspect-square w-full rounded-lg object-cover ring-1 ring-white/10" />
             <button
               type="button"
               class="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-xs text-white"

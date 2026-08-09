@@ -2,9 +2,30 @@ export interface SpotifyTokenResponse {
   access_token: string;
   refresh_token: string;
   expires_in: number;
+  // Space-separated, exactly as Spotify returns it -- persisted to
+  // music_source_tokens.granted_scope (migration 0008) so src/routes/player.ts
+  // can check for `streaming` without a live Spotify call. Always present on
+  // a real Spotify response; optional here only because nothing enforces it
+  // in tests that stub a bare {access_token, refresh_token, expires_in}.
+  scope?: string;
 }
 
-const SCOPES = ['user-top-read', 'user-read-email'].join(' ');
+// streaming/user-read-playback-state/user-modify-playback-state back the
+// Wavelengthz Player (public/wavelengthzPlayer.js, src/routes/player.ts) --
+// the Spotify Web Playback SDK, which plays a full track in-page via a
+// browser-side Spotify Connect device instead of the read-only
+// open.spotify.com/embed iframe (public/artist.html et al). Adding scopes
+// here only affects *new* consents (this app's own registered redirect_uri
+// going forward) -- every already-logged-in user's existing token keeps
+// whatever scope they originally consented to until their next full
+// /login, since a refresh can't silently grant scopes never approved.
+const SCOPES = [
+  'user-top-read',
+  'user-read-email',
+  'streaming',
+  'user-read-playback-state',
+  'user-modify-playback-state',
+].join(' ');
 
 // redirectUri defaults to env.SPOTIFY_REDIRECT_URI, but callers on an
 // allowlisted alternate host (src/routes/auth.ts's SPOTIFY_ALLOWED_HOSTS)
@@ -173,12 +194,19 @@ export async function searchArtistsByGenre(token: string, genre: string, limit: 
 // not restricted in Development Mode. Verified live: this returns Cirez D's
 // actual discography (Valborg/The Raid, DARE U, Mokba, ...) with every track
 // correctly credited to Cirez D.
+// Spotify's real max for this endpoint's `limit` is 10, not the more
+// commonly-assumed higher ceilings that apply to some of its other
+// list endpoints -- confirmed directly against the current API docs.
+const ARTIST_ALBUMS_PAGE_SIZE = 10;
+// Spotify's real max for this endpoint's `limit` is 50.
+const ALBUM_TRACKS_PAGE_SIZE = 50;
+
 async function fetchArtistAlbumIds(token: string, artistId: string, limit: number): Promise<string[]> {
   const res = await fetch(
     // include_groups excludes "compilation" and "appears_on" -- releases
     // where this artist isn't the actual album artist, which is exactly the
     // ambiguity this replaces the name-search fallback to avoid.
-    `https://api.spotify.com/v1/artists/${artistId}/albums?include_groups=album,single&limit=${limit}`,
+    `https://api.spotify.com/v1/artists/${artistId}/albums?include_groups=album,single&limit=${Math.min(limit, ARTIST_ALBUMS_PAGE_SIZE)}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
   if (!res.ok) throw new Error(`Spotify artist albums fetch failed: ${res.status} ${await res.text()}`);
@@ -187,7 +215,7 @@ async function fetchArtistAlbumIds(token: string, artistId: string, limit: numbe
 }
 
 async function fetchAlbumTrackIds(token: string, albumId: string, limit: number): Promise<string[]> {
-  const res = await fetch(`https://api.spotify.com/v1/albums/${albumId}/tracks?limit=${limit}`, {
+  const res = await fetch(`https://api.spotify.com/v1/albums/${albumId}/tracks?limit=${Math.min(limit, ALBUM_TRACKS_PAGE_SIZE)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`Spotify album tracks fetch failed: ${res.status} ${await res.text()}`);
@@ -201,29 +229,32 @@ async function fetchTracksByIds(token: string, trackIds: string[]) {
   // instead. The batch form of this lookup (GET /v1/tracks?ids=, plural)
   // also 403s in Development Mode -- confirmed live, even with a single id
   // -- while the singular GET /v1/tracks/{id} used here works fine, so this
-  // is one request per track rather than one batch request. One id failing
-  // (removed/region-locked track) shouldn't drop the rest of the artist's
-  // tracks, so each fetch is isolated rather than letting one throw wipe out
-  // the whole list.
-  const tracks: any[] = [];
-  for (const id of trackIds) {
-    try {
-      tracks.push(await fetchTrackById(token, id));
-    } catch {
-      // skip -- see comment above
-    }
-  }
-  return tracks;
+  // is one request per track rather than one batch request. Fetched in
+  // parallel (not a sequential loop) -- with no batch endpoint available,
+  // sequential per-track fetches would make a larger track count directly
+  // slow down the artist-profile page load, one Spotify round trip at a
+  // time. One id failing (removed/region-locked track) shouldn't drop the
+  // rest of the artist's tracks, so each fetch is isolated via .catch
+  // rather than one throw wiping out the whole batch.
+  const results = await Promise.all(trackIds.map((id) => fetchTrackById(token, id).catch(() => null)));
+  return results.filter((track): track is NonNullable<typeof track> => track != null);
 }
 
 export async function fetchArtistTracks(token: string, artistId: string, limit: number) {
-  const albumIds = await fetchArtistAlbumIds(token, artistId, Math.min(limit, 20));
-  const trackIds: string[] = [];
-  for (const albumId of albumIds) {
-    if (trackIds.length >= limit) break;
-    trackIds.push(...(await fetchAlbumTrackIds(token, albumId, limit - trackIds.length)));
-  }
-  const tracks = await fetchTracksByIds(token, trackIds.slice(0, limit));
+  // Fetched in parallel, not stopping early once enough tracks are found in
+  // earlier albums -- a handful of extra album-tracks calls (bounded by
+  // ARTIST_ALBUMS_PAGE_SIZE, at most 10) is a better trade than sequential
+  // round trips directly adding to page load latency. Still capped by the
+  // caller's own `limit` too (via fetchArtistAlbumIds's Math.min), so a
+  // small target -- e.g. artistTopUp.ts's TRACKS_PER_ARTIST -- doesn't fan
+  // out to 10 albums' worth of calls just to keep 2 tracks. Album order
+  // (most recent release first -- see the module comment above) is
+  // preserved via .flat(), so the truncation below still favors newer
+  // releases.
+  const albumIds = await fetchArtistAlbumIds(token, artistId, limit);
+  const albumTrackIdLists = await Promise.all(albumIds.map((albumId) => fetchAlbumTrackIds(token, albumId, limit)));
+  const trackIds = albumTrackIdLists.flat().slice(0, limit);
+  const tracks = await fetchTracksByIds(token, trackIds);
   // Belt-and-suspenders: a release where this artist is the album artist
   // should credit them on every track, but this costs nothing and matches
   // the same defensive check the old search-based path needed for real.

@@ -35,7 +35,7 @@
         <div class="grid grid-cols-3 gap-3">
           <template x-for="a in overlap.sharedArtists" :key="a.id">
             <div class="flex flex-col items-center gap-1 text-center">
-              <img :src="a.imageUrl" :alt="a.name" class="h-16 w-16 rounded-full object-cover" />
+              <img :src="a.imageUrl" :alt="a.name" class="h-16 w-16 rounded-full object-cover ring-1 ring-white/10" />
               <span class="text-xs text-neutral-300" x-text="a.name"></span>
             </div>
           </template>
@@ -47,7 +47,7 @@
         <ul class="flex flex-col gap-2">
           <template x-for="t in overlap.sharedTracks" :key="t.id">
             <li class="flex items-center gap-3">
-              <img :src="t.imageUrl" :alt="t.name" class="h-10 w-10 rounded object-cover" />
+              <img :src="t.imageUrl" :alt="t.name" class="h-10 w-10 rounded object-cover ring-1 ring-white/10" />
               <div class="min-w-0">
                 <p class="truncate text-sm text-neutral-100" x-text="t.name"></p>
                 <p class="truncate text-xs text-neutral-500" x-text="t.artistName"></p>

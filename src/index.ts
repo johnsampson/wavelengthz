@@ -12,6 +12,7 @@ import { registerNotificationRoutes } from './routes/notifications';
 import { registerSafetyRoutes } from './routes/safety';
 import { registerAccountRoutes } from './routes/account';
 import { registerGroupRoutes } from './routes/groups';
+import { registerPlayerRoutes } from './routes/player';
 import { purgeExpiredDeletions } from './lib/accountDeletion';
 import { refreshCatalogFromProfiles } from './db/catalogRefresh';
 import { sendDelayedMatchNotificationEmails } from './lib/notifications';
@@ -34,6 +35,7 @@ registerNotificationRoutes(router);
 registerSafetyRoutes(router);
 registerAccountRoutes(router);
 registerGroupRoutes(router);
+registerPlayerRoutes(router);
 
 // Falls back to the ASSETS binding (static HTML/JS/CSS under public/) for
 // anything that isn't an API route -- required once [assets].run_worker_first
@@ -77,21 +79,32 @@ function withSecurityHeaders(response: Response): Response {
     // Rewriting every page's directives against Alpine's CSP-safe build is a
     // real option later, but out of scope for this pass.
     'Content-Security-Policy',
-    // connect-src is 'self' only: no app code calls fetch() against the CDN/
-    // fonts/image hosts directly (they're only ever loaded via native
-    // <script src>/<link>/<img> tags, governed by script-src/style-src/
-    // img-src respectively). public/sw.js previously re-issued ALL requests
-    // -- including cross-origin ones -- via its own fetch(), which forced
-    // connect-src to list every such host too (a moving target: jsdelivr,
-    // then googleapis/gstatic, then scdn.co for artist images). Fixed at the
-    // root in the service worker instead (cross-origin requests are no
-    // longer intercepted at all), so connect-src can stay minimal.
+    // connect-src was 'self' only until the Wavelengthz Player
+    // (public/wavelengthzPlayer.js): every other Spotify integration in this
+    // app is server-side (the Worker calls Spotify, never the browser), but
+    // the Web Playback SDK is a genuine exception -- it's a client-side SDK
+    // that opens its own realtime connection to Spotify's Connect
+    // infrastructure and calls the Web API directly from the page. The exact
+    // set of hosts it needs isn't fully pinned down in Spotify's own docs
+    // (regionally-sharded edge hosts under spotify.com are involved), so
+    // this allows Spotify's own domains broadly rather than guessing at
+    // specific undocumented subdomains -- verify against a real Premium
+    // session before shipping; a wrong/missing host here fails silently as a
+    // CSP violation, not a visible error, which src/routes/player.ts's
+    // `available: false` fallback exists to survive either way.
     //
-    // frame-src allows Spotify's own track embed (public/artist.html) --
-    // Spotify stopped returning preview_url for tracks, so playback now goes
-    // through https://open.spotify.com/embed/track/{id} instead of an
-    // <audio> tag.
-    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https://*.scdn.co data:; connect-src 'self'; frame-src https://open.spotify.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    // script-src additionally allows sdk.scdn.co, which serves the SDK's own
+    // script; frame-src additionally allows sdk.scdn.co because the SDK
+    // embeds its own hidden iframe there for DRM-protected audio decoding
+    // (Spotify's EME requirement) -- invisible and fully controlled via the
+    // SDK's JS API, not a user-facing Spotify UI the way open.spotify.com's
+    // embed (below) is.
+    //
+    // frame-src's open.spotify.com entry is the pre-existing fallback track
+    // embed (public/artist.html et al) -- Spotify stopped returning
+    // preview_url for tracks, so that fallback plays via
+    // https://open.spotify.com/embed/track/{id} instead of an <audio> tag.
+    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://sdk.scdn.co; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https://*.scdn.co data:; connect-src 'self' https://*.spotify.com wss://*.spotify.com https://*.scdn.co; frame-src https://open.spotify.com https://sdk.scdn.co; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
   );
   headers.set('X-Frame-Options', 'DENY');
   headers.set('X-Content-Type-Options', 'nosniff');

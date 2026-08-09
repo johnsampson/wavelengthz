@@ -1,7 +1,7 @@
 import type { RouterType, IRequest } from 'itty-router';
 import { getSessionUser, type UserRow } from '../lib/session';
 import { scoreCandidate, scoreCandidateFromInputs, createMatchIfMutual, type ScoringInputs } from '../lib/matching';
-import { getMusicProfiles, getRightSwipedItemIdsFor } from '../lib/profile';
+import { getMusicProfiles, getRightSwipedItemIdsFor, getAnthemTracksForUsers, pickAnthemTrack } from '../lib/profile';
 import type { MusicProfile } from '../lib/scoring';
 import { bucketedDistanceLabel, haversineKm } from '../lib/scoring';
 import { isBlockedEitherDirection } from '../lib/blocks';
@@ -24,6 +24,18 @@ const POOL_LIMIT = 200;
 const KM_PER_DEGREE_LATITUDE = 111;
 
 const RECENT_MUSIC_LIMIT = 10;
+
+// Mutual gender/seeking reciprocity, as a SQL fragment reused by both the
+// like-priority and pool queries below. "Friends" (src/routes/onboarding.ts's
+// SEEKING_OPTIONS) is a seeking-only value -- there's no matching gender, by
+// design, so it can never satisfy the normal `u.gender = me.seeking` check.
+// Two friends-seekers match each other regardless of gender; everyone else
+// keeps today's exact reciprocity untouched. Params, in order: me.seeking,
+// me.seeking, me.gender.
+const RECIPROCITY_SQL = `(u.seeking = 'friends' AND ? = 'friends') OR (u.gender = ? AND u.seeking = ?)`;
+function reciprocityParams(me: Pick<UserRow, 'gender' | 'seeking'>): [string, string, string] {
+  return [me.seeking!, me.seeking!, me.gender!];
+}
 
 interface RecentMusicItem {
   id: string;
@@ -149,10 +161,10 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
          AND u.deleted_at IS NULL AND u.ghosted_at IS NULL AND u.onboarded_at IS NOT NULL
          AND u.lat IS NOT NULL AND u.lng IS NOT NULL
          AND u.lat BETWEEN ? AND ?
-         AND u.gender = ? AND u.seeking = ?
+         AND (${RECIPROCITY_SQL})
        ORDER BY ps.match_score DESC
        LIMIT ?`
-    ).bind(me.id, me.id, me.id, me.id, minLat, maxLat, me.seeking, me.gender, LIKE_PRIORITY_LIMIT).all<UserRow & { match_score: number }>();
+    ).bind(me.id, me.id, me.id, me.id, minLat, maxLat, ...reciprocityParams(me), LIKE_PRIORITY_LIMIT).all<UserRow & { match_score: number }>();
 
     const likePriorityIds = new Set(likePriorityRows.results.map((r) => r.id));
 
@@ -161,13 +173,13 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
        WHERE u.id != ? AND u.deleted_at IS NULL AND u.ghosted_at IS NULL AND u.onboarded_at IS NOT NULL
          AND u.lat IS NOT NULL AND u.lng IS NOT NULL
          AND u.lat BETWEEN ? AND ?
-         AND u.gender = ? AND u.seeking = ?
+         AND (${RECIPROCITY_SQL})
          AND NOT EXISTS (SELECT 1 FROM people_swipes ps WHERE ps.swiper_id = ? AND ps.target_id = u.id)
          AND NOT EXISTS (
            SELECT 1 FROM blocks b WHERE (b.blocker_id = ? AND b.blocked_id = u.id) OR (b.blocker_id = u.id AND b.blocked_id = ?)
          )
        LIMIT ?`
-    ).bind(me.id, minLat, maxLat, me.seeking, me.gender, me.id, me.id, me.id, POOL_LIMIT).all<UserRow>();
+    ).bind(me.id, minLat, maxLat, ...reciprocityParams(me), me.id, me.id, me.id, POOL_LIMIT).all<UserRow>();
 
     const pool = poolRows.results.filter((u) => !likePriorityIds.has(u.id));
 
@@ -216,7 +228,10 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
       ...scored.map(({ candidate }) => ({ user: candidate, likedYou: false })),
     ].slice(0, limit);
 
-    const photoUrls = await primaryPhotoUrls(env.DB, selected.map((s) => s.user.id));
+    const [photoUrls, anthemTracks] = await Promise.all([
+      primaryPhotoUrls(env.DB, selected.map((s) => s.user.id)),
+      getAnthemTracksForUsers(env.DB, selected.map((s) => s.user)),
+    ]);
 
     const candidates = selected.map(({ user, likedYou }) => ({
       id: user.id,
@@ -225,6 +240,10 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
       distanceLabel: bucketedDistanceLabel(haversineKm(me.lat!, me.lng!, user.lat!, user.lng!)),
       primaryPhotoUrl: photoUrls.get(user.id) ?? null,
       likedYou,
+      // Only set when the candidate picked one AND it's still in their
+      // top_tracks (see pickAnthemTrack) -- absent entirely otherwise, so the
+      // card's anthem chip (public/index.html) has a single falsy check.
+      anthemTrack: anthemTracks.get(user.id) ?? null,
     }));
 
     return Response.json({ candidates });
@@ -331,6 +350,7 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
         topGenres,
         topArtists,
         topTracks,
+        anthemTrack: pickAnthemTrack(topTracks, target.anthem_track_id),
       },
       overlap,
     });

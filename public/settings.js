@@ -91,7 +91,15 @@ export function createSettingsApp() {
         }
         this.gender = me.user.gender ?? '';
         this.seeking = me.user.seeking ?? '';
-        this.intent = me.user.intent ?? '';
+        // Falls back to unset (prompting a fresh pick) rather than keeping a
+        // stale value INTENT_OPTIONS no longer offers -- e.g. 'making_friends'
+        // (retired in favor of seeking:'friends') or 'dating_around' (retired
+        // as a duplicate of 'something_casual'). Otherwise a user who never
+        // touches this field would have their next Save rejected outright
+        // (POST /api/onboarding's INTENT_OPTIONS check), with no visible
+        // button to explain why.
+        const loadedIntent = me.user.intent ?? '';
+        this.intent = INTENT_OPTIONS.some((opt) => opt.value === loadedIntent) ? loadedIntent : '';
         this.lat = me.user.lat;
         this.lng = me.user.lng;
         this.locationLabel = me.user.location_label;
