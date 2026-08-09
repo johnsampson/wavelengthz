@@ -52,9 +52,17 @@ describe('global middleware', () => {
     vi.unstubAllGlobals();
   });
 
-  it('reports a KV failure during rate limiting to Sentry instead of throwing past it', async () => {
-    // The rate-limit checks used to run before the try/catch, so a KV outage
-    // escaped as an unhandled 500 that Sentry never recorded.
+  it('reports a KV failure during rate limiting to Sentry, but fails open instead of 500ing the request', async () => {
+    // A KV outage during a rate-limit check used to propagate as an
+    // unhandled exception -- at one point invisibly (before Sentry
+    // reporting existed here), and after that as a reported but very real
+    // 500 for an otherwise-ordinary request. Production hit this directly:
+    // KV writes are limited to roughly one per second per key, and any
+    // client sharing a rate-limit bucket faster than that (a busy user, a
+    // NAT/corporate shared IP) throws here under real traffic. Rate
+    // limiting is best-effort defense, not core functionality, so this must
+    // now fail open (allow the request through to the real route) while
+    // still reporting the KV failure for visibility.
     const sentryCalls: string[] = [];
     vi.stubGlobal(
       'fetch',
@@ -78,7 +86,10 @@ describe('global middleware', () => {
       {} as ExecutionContext
     );
 
-    expect(res.status).toBe(500);
+    // Falls through to the real /api/me handler, which correctly 401s here
+    // since the request carries no session -- not the 500 a blocked rate
+    // limiter used to produce.
+    expect(res.status).toBe(401);
     expect(await res.text()).not.toContain('KV namespace unavailable');
     expect(sentryCalls.some((u) => u.includes('/envelope/'))).toBe(true);
 

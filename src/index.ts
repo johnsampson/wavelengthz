@@ -130,6 +130,36 @@ function checkSiteBasicAuth(request: Request, env: Env): Response | null {
   });
 }
 
+// KV writes are limited to roughly one per second per key, and every request
+// sharing a rate-limit bucket (a busy user, or many users behind one shared
+// NAT/corporate egress IP) writes to that same key -- so sustained traffic
+// above that rate throws inside checkRateLimit under real production load.
+// Rate limiting is best-effort defense, not core functionality: this reports
+// the failure (the exact visibility the surrounding try/catch was already
+// built to give a KV outage) but fails open rather than letting an ordinary
+// request 500 just because its rate-limit check couldn't complete.
+async function rateLimitAllows(
+  kv: KVNamespace,
+  key: string,
+  limit: number,
+  windowSeconds: number,
+  env: Env,
+  ctx: ExecutionContext,
+  path: string
+): Promise<boolean> {
+  try {
+    return await checkRateLimit(kv, key, limit, windowSeconds);
+  } catch (error) {
+    console.error(`Rate limit check failed for ${path}:`, error);
+    if (typeof ctx.waitUntil === 'function') {
+      ctx.waitUntil(reportError(env, error, { path }));
+    } else {
+      await reportError(env, error, { path });
+    }
+    return true;
+  }
+}
+
 export default {
   fetch: async (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> => {
     const authResponse = checkSiteBasicAuth(request, env);
@@ -137,25 +167,21 @@ export default {
 
     const url = new URL(request.url);
 
-    // The rate-limit checks live *inside* this try. They talk to KV, so a KV
-    // outage throws -- and outside the try that surfaced as a bare unhandled
-    // 500 that Sentry never saw, which is exactly the failure you most need
-    // visibility into.
     try {
       const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
 
       if (url.pathname.startsWith('/api/swipe/')) {
-        const swipeAllowed = await checkRateLimit(env.RATE_LIMIT_KV, `swipe:${ip}`, SWIPE_LIMIT.limit, SWIPE_LIMIT.windowSeconds);
+        const swipeAllowed = await rateLimitAllows(env.RATE_LIMIT_KV, `swipe:${ip}`, SWIPE_LIMIT.limit, SWIPE_LIMIT.windowSeconds, env, ctx, url.pathname);
         if (!swipeAllowed) return withSecurityHeaders(Response.json({ error: 'rate_limited' }, { status: 429 }));
       }
 
       if (url.pathname === '/callback') {
-        const callbackAllowed = await checkRateLimit(env.RATE_LIMIT_KV, `callback:${ip}`, CALLBACK_LIMIT.limit, CALLBACK_LIMIT.windowSeconds);
+        const callbackAllowed = await rateLimitAllows(env.RATE_LIMIT_KV, `callback:${ip}`, CALLBACK_LIMIT.limit, CALLBACK_LIMIT.windowSeconds, env, ctx, url.pathname);
         if (!callbackAllowed) return withSecurityHeaders(Response.json({ error: 'rate_limited' }, { status: 429 }));
       }
 
       if (url.pathname.startsWith('/api/')) {
-        const generallyAllowed = await checkRateLimit(env.RATE_LIMIT_KV, `general:${ip}`, GENERAL_LIMIT.limit, GENERAL_LIMIT.windowSeconds);
+        const generallyAllowed = await rateLimitAllows(env.RATE_LIMIT_KV, `general:${ip}`, GENERAL_LIMIT.limit, GENERAL_LIMIT.windowSeconds, env, ctx, url.pathname);
         if (!generallyAllowed) return withSecurityHeaders(Response.json({ error: 'rate_limited' }, { status: 429 }));
       }
 
