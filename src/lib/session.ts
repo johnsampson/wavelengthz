@@ -77,8 +77,8 @@ export async function createSession(
   const now = Date.now();
   const expiresAt = now + SESSION_TTL_SECONDS * 1000;
   await db
-    .prepare(`INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)`)
-    .bind(id, userId, now, expiresAt)
+    .prepare(`INSERT INTO sessions (id, user_id, created_at, expires_at, updated_at) VALUES (?, ?, ?, ?, ?)`)
+    .bind(id, userId, now, expiresAt, now)
     .run();
   return { id, cookie: sessionCookieHeader(id, SESSION_TTL_SECONDS, secure) };
 }

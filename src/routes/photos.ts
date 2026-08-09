@@ -55,9 +55,10 @@ export function registerPhotoRoutes(router: RouterType) {
 
     await env.PHOTOS.put(r2Key, body, { httpMetadata: { contentType } });
 
+    const now = Date.now();
     await env.DB.prepare(
-      `INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES (?, ?, ?, ?, ?)`
-    ).bind(photoId, user.id, r2Key, position, Date.now()).run();
+      `INSERT INTO user_photos (id, user_id, r2_key, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+    ).bind(photoId, user.id, r2Key, position, now, now).run();
 
     return Response.json({ photoId, url: `/photos/${photoId}` });
   });
@@ -86,8 +87,9 @@ export function registerPhotoRoutes(router: RouterType) {
       .bind(user.id)
       .all<{ id: string }>();
 
-    const renumber = env.DB.prepare('UPDATE user_photos SET position = ? WHERE id = ?');
-    const statements = remaining.results.map((row, index) => renumber.bind(index, row.id));
+    const renumberedAt = Date.now();
+    const renumber = env.DB.prepare('UPDATE user_photos SET position = ?, updated_at = ? WHERE id = ?');
+    const statements = remaining.results.map((row, index) => renumber.bind(index, renumberedAt, row.id));
     if (statements.length > 0) await env.DB.batch(statements);
 
     return Response.json({ ok: true });

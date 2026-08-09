@@ -45,7 +45,8 @@ export async function notifyMatch(db: D1Database, env: Env, matchId: string): Pr
       subject: "You've got a new match!",
       html: `<p>You matched with someone on Wavelengthz. Open the app to say hi.</p>`,
     });
-    await db.prepare('UPDATE notifications SET email_sent_at = ? WHERE id = ?').bind(Date.now(), row.notification_id).run();
+    const sentAt = Date.now();
+    await db.prepare('UPDATE notifications SET email_sent_at = ?, updated_at = ? WHERE id = ?').bind(sentAt, sentAt, row.notification_id).run();
   }
 }
 
@@ -69,7 +70,8 @@ export async function notifyMessage(db: D1Database, env: Env, messageId: string,
     subject: 'New message on Wavelengthz',
     html: `<p>You have a new message. Open the app to read it.</p>`,
   });
-  await db.prepare('UPDATE notifications SET email_sent_at = ? WHERE id = ?').bind(Date.now(), notification.id).run();
+  const sentAt = Date.now();
+  await db.prepare('UPDATE notifications SET email_sent_at = ?, updated_at = ? WHERE id = ?').bind(sentAt, sentAt, notification.id).run();
 }
 
 /**

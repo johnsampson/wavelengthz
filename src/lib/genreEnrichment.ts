@@ -61,7 +61,7 @@ async function enrichOneArtist(db: D1Database, artist: { id: string; spotify_id:
     await sleep(MUSICBRAINZ_REQUEST_DELAY_MS);
 
     if (!mbid) {
-      await db.prepare(`UPDATE artists SET genre_enriched_at = ? WHERE id = ?`).bind(now, artist.id).run();
+      await db.prepare(`UPDATE artists SET genre_enriched_at = ?, updated_at = ? WHERE id = ?`).bind(now, now, artist.id).run();
       return 'no_mbid_match';
     }
 
@@ -71,8 +71,8 @@ async function enrichOneArtist(db: D1Database, artist: { id: string; spotify_id:
     const mergedGenres = genresToObject([...genresFromRow(artist.genres), ...mbGenres.map((g) => g.name)]);
     const statements = [
       db
-        .prepare(`UPDATE artists SET mbid = ?, genre_enriched_at = ?, genres = ? WHERE id = ?`)
-        .bind(mbid, now, JSON.stringify(mergedGenres), artist.id),
+        .prepare(`UPDATE artists SET mbid = ?, genre_enriched_at = ?, genres = ?, updated_at = ? WHERE id = ?`)
+        .bind(mbid, now, JSON.stringify(mergedGenres), now, artist.id),
       ...mbGenres.map((g) =>
         db
           .prepare(

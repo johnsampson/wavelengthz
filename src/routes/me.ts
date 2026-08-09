@@ -51,11 +51,20 @@ export function registerMeRoutes(router: RouterType) {
         // — both requests computed equally valid data from Spotify, so it doesn't
         // matter whose insert actually persisted.
         await env.DB.prepare(
-          `INSERT OR IGNORE INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at)
-           VALUES (?, ?, ?, ?, ?, ?)`
-        ).bind(user.id, topArtists, topTracks, topGenres, TIME_RANGE, now).run();
+          `INSERT OR IGNORE INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(crypto.randomUUID(), user.id, topArtists, topTracks, topGenres, TIME_RANGE, now, now, now).run();
 
-        profile = { user_id: user.id, top_artists: topArtists, top_tracks: topTracks, top_genres: topGenres, time_range: TIME_RANGE, refreshed_at: now };
+        profile = {
+          user_id: user.id,
+          top_artists: topArtists,
+          top_tracks: topTracks,
+          top_genres: topGenres,
+          time_range: TIME_RANGE,
+          refreshed_at: now,
+          created_at: now,
+          updated_at: now,
+        };
       }
     }
 

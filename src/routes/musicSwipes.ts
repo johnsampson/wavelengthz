@@ -54,11 +54,11 @@ async function applyGenreAffinity(
   for (const genre of genres) {
     await db
       .prepare(
-        `INSERT INTO user_genres (user_id, genre, artist_count, track_count, updated_at) VALUES (?, ?, MAX(0, ?), MAX(0, ?), ?)
+        `INSERT INTO user_genres (id, user_id, genre, artist_count, track_count, created_at, updated_at) VALUES (?, ?, ?, MAX(0, ?), MAX(0, ?), ?, ?)
          ON CONFLICT(user_id, genre) DO UPDATE SET
            artist_count = MAX(0, artist_count + ?), track_count = MAX(0, track_count + ?), updated_at = ?`
       )
-      .bind(userId, genre, artistDelta, trackDelta, now, artistDelta, trackDelta, now)
+      .bind(crypto.randomUUID(), userId, genre, artistDelta, trackDelta, now, now, artistDelta, trackDelta, now)
       .run();
   }
 }
