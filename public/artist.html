@@ -86,6 +86,15 @@
       </ul>
 
       <p x-show="tracks.length === 0" class="text-center text-neutral-400">No tracks found for this artist.</p>
+
+      <button
+        type="button"
+        x-show="hasMoreTracks"
+        class="btn-secondary"
+        :disabled="loadingMore"
+        @click="loadMoreTracks()"
+        x-text="loadingMore ? 'Loading…' : 'Load more songs'"
+      ></button>
     </div>
   </template>
 
@@ -95,6 +104,11 @@
     import { requireAuth } from '/auth.js';
     mountHeader();
     mountNav();
+
+    // Matches src/routes/catalog.ts's ARTIST_PROFILE_TRACK_LIMIT -- the
+    // server default this page starts at, and the increment each "Load
+    // more" tap adds on top of it.
+    const TRACKS_PAGE_SIZE = 30;
 
     window.artistApp = function () {
       return {
@@ -107,6 +121,9 @@
         // iframe instead of an <audio> tag -- see src/index.ts's CSP
         // frame-src comment. Only one track's iframe is expanded at a time.
         openTrackId: null,
+        trackLimit: TRACKS_PAGE_SIZE,
+        hasMoreTracks: false,
+        loadingMore: false,
 
         async init() {
           if (!(await requireAuth())) return;
@@ -114,8 +131,30 @@
             const res = await api.artistProfile(this.artistId);
             this.artist = res.artist;
             this.tracks = res.tracks;
+            this.hasMoreTracks = res.hasMore;
           } catch (e) {
             this.error = 'Could not load this artist. Please try again.';
+          }
+        },
+
+        // GET /api/artists/:id has no offset/cursor to resume from
+        // (fetchArtistTracks re-derives the list from scratch each call), so
+        // this re-fetches the whole thing at a higher limit rather than
+        // appending an incremental page.
+        async loadMoreTracks() {
+          if (this.loadingMore || !this.hasMoreTracks) return;
+          this.loadingMore = true;
+          this.error = null;
+          const nextLimit = this.trackLimit + TRACKS_PAGE_SIZE;
+          try {
+            const res = await api.artistProfile(this.artistId, nextLimit);
+            this.trackLimit = nextLimit;
+            this.tracks = res.tracks;
+            this.hasMoreTracks = res.hasMore;
+          } catch (e) {
+            this.error = 'Could not load more songs. Please try again.';
+          } finally {
+            this.loadingMore = false;
           }
         },
 

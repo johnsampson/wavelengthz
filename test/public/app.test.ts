@@ -57,6 +57,14 @@ describe('api client', () => {
     vi.unstubAllGlobals();
   });
 
+  it('api.artistProfile(id, limit) appends ?limit= for the "Load more songs" case', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ artist: {}, tracks: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.artistProfile('a1', 60);
+    expect(fetchMock).toHaveBeenCalledWith('/api/artists/a1?limit=60', expect.anything());
+    vi.unstubAllGlobals();
+  });
+
   it('api.artistSearch(q) hits the search endpoint with an encoded query', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ results: [] }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
