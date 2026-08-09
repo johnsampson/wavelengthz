@@ -32,6 +32,10 @@ export const INTENT_OPTIONS = [
 
 export const api = {
   me: () => request('/api/me'),
+  // Backs public/wavelengthzPlayer.js. `available: false` (Free tier, or not
+  // yet re-authorized for the `streaming` scope) is the normal, common-case
+  // response -- never thrown as an error.
+  playerToken: () => request('/api/me/player-token'),
   candidates: (mode, limit = 10) => request(`/api/candidates/${mode}?limit=${limit}`),
   swipe: (mode, body) =>
     request(`/api/swipe/${mode}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),

@@ -66,22 +66,50 @@
           <span class="truncate" x-text="current?.anthemTrack?.name"></span>
         </button>
         <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-5 pt-16">
-          <!-- x-if (not x-show): actually unmounts the iframe so the track
-               stops -- same reasoning as public/artist.html/profile.html.
-               autoplay=1 is safe here because the iframe only mounts from the
-               chip's own click handler above, so the browser's autoplay
-               policy sees the required user gesture. -->
-          <template x-if="anthemOpen && current?.anthemTrack">
-            <iframe
-              :src="`https://open.spotify.com/embed/track/${current.anthemTrack.spotifyId}?theme=0&autoplay=1`"
-              width="100%"
-              height="80"
-              frameborder="0"
-              allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-              loading="lazy"
-              class="mb-3 rounded-xl"
+          <template x-if="anthemOpen && current?.anthemTrack && customPlayerAvailable">
+            <div
+              class="mb-3 flex items-center gap-3 rounded-xl bg-gradient-to-r from-brand-500/20 to-accent-500/20 p-3 ring-1 ring-brand-500/40 backdrop-blur-sm"
               @pointerdown.stop
-            ></iframe>
+            >
+              <button
+                type="button"
+                class="btn-primary h-9 w-9 shrink-0 rounded-full p-0"
+                @click.stop="togglePlayPause()"
+                :aria-label="playerState && !playerState.paused ? 'Pause' : 'Play'"
+              >
+                <svg x-show="!playerState || playerState.paused" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+                <svg x-show="playerState && !playerState.paused" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
+                  <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
+                </svg>
+              </button>
+              <div class="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-white/10">
+                <div class="h-full rounded-full bg-gradient-to-r from-brand-500 to-accent-500" :style="`width:${progressPct}%`"></div>
+              </div>
+              <span class="wordmark shrink-0 text-[10px]">Wavelengthz Player</span>
+            </div>
+          </template>
+          <!-- Fallback path: no Premium/streaming-eligible Wavelengthz
+               Player this page load. x-if (not x-show): actually unmounts
+               the iframe so the track stops -- same reasoning as
+               public/artist.html/profile.html. autoplay=1 is safe here
+               because the iframe only mounts from the chip's own click
+               handler above, so the browser's autoplay policy sees the
+               required user gesture. -->
+          <template x-if="anthemOpen && current?.anthemTrack && !customPlayerAvailable">
+            <div class="mb-3 flex flex-col gap-1" @pointerdown.stop>
+              <span class="self-start text-[10px] font-semibold tracking-wide text-amber-400 uppercase">Basic player</span>
+              <iframe
+                :src="`https://open.spotify.com/embed/track/${current.anthemTrack.spotifyId}?theme=0&autoplay=1`"
+                width="100%"
+                height="80"
+                frameborder="0"
+                allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                loading="lazy"
+                class="rounded-xl"
+              ></iframe>
+            </div>
           </template>
           <h2 class="text-2xl font-bold" x-text="current?.name || current?.displayName"></h2>
           <p class="text-neutral-200" x-text="current?.bio || current?.distanceLabel"></p>
@@ -203,6 +231,7 @@
     import { mountHeader, mountNav } from '/nav.js';
     import { getAuthedUser } from '/auth.js';
     import { shouldSearch, debounce } from '/search.js';
+    import { checkPlayerAvailability, playTrack, pausePlayback, resumePlayback, onStateChange } from '/wavelengthzPlayer.js';
     mountHeader();
     mountNav();
 
@@ -225,19 +254,49 @@
         // wherever `current` changes (showNext, decide) so a track never
         // keeps playing into the next card.
         anthemOpen: false,
+        // See public/artist.html's identical fields for the full explanation.
+        customPlayerAvailable: false,
+        playerState: null,
+
+        get progressPct() {
+          if (!this.playerState || !this.playerState.duration) return 0;
+          return (this.playerState.position / this.playerState.duration) * 100;
+        },
 
         async init() {
           const user = await getAuthedUser();
           this.authed = !!user;
-          if (this.authed) await this.loadQueue();
+          if (this.authed) {
+            await this.loadQueue();
+            const availability = await checkPlayerAvailability();
+            this.customPlayerAvailable = availability.available;
+            if (this.customPlayerAvailable) {
+              onStateChange((state) => {
+                if (!this.anthemOpen || !this.current?.anthemTrack || !state) return;
+                if (state.track_window?.current_track?.id !== this.current.anthemTrack.spotifyId) return;
+                this.playerState = { paused: state.paused, position: state.position, duration: state.duration };
+              });
+            }
+          }
           this.debouncedSearch = debounce(() => this.runSearch(), 300);
+        },
+
+        // Closes the anthem panel AND actually stops playback -- unlike the
+        // iframe path (unmounting via x-if stops Spotify's embedded player
+        // on its own), the Wavelengthz Player is driven entirely by JS calls,
+        // so hiding the panel alone would leave a track playing, unheard, in
+        // the background after the card it belongs to is gone.
+        async closeAnthem() {
+          if (this.anthemOpen && this.customPlayerAvailable) await pausePlayback();
+          this.anthemOpen = false;
+          this.playerState = null;
         },
 
         async setMode(mode) {
           this.mode = mode;
           this.queue = [];
           this.current = null;
-          this.anthemOpen = false;
+          await this.closeAnthem();
           await this.loadQueue();
         },
 
@@ -247,9 +306,9 @@
           this.showNext();
         },
 
-        showNext() {
+        async showNext() {
           if (this.detachSwipe) this.detachSwipe();
-          this.anthemOpen = false;
+          await this.closeAnthem();
           this.current = this.queue.shift() ?? null;
           this.$nextTick(() => {
             const card = document.getElementById('card');
@@ -267,7 +326,7 @@
           // 250ms later when the card's fling animation finishes and
           // showNext() actually runs -- otherwise it keeps playing, unheard,
           // through the transition.
-          this.anthemOpen = false;
+          await this.closeAnthem();
           try {
             if (this.mode === 'people') {
               const res = await api.swipe('people', { target_id: swiped.id, direction });
@@ -362,8 +421,24 @@
           window.location.href = `/profile?id=${this.current.id}`;
         },
 
-        toggleAnthem() {
-          this.anthemOpen = !this.anthemOpen;
+        async toggleAnthem() {
+          if (this.anthemOpen) {
+            if (this.customPlayerAvailable) await pausePlayback();
+            this.anthemOpen = false;
+            this.playerState = null;
+            return;
+          }
+          this.anthemOpen = true;
+          this.playerState = null;
+          if (!this.customPlayerAvailable || !this.current?.anthemTrack) return; // the iframe template handles itself
+          const started = await playTrack(this.current.anthemTrack.spotifyId);
+          if (!started) this.customPlayerAvailable = false; // degrade for the rest of this page view
+        },
+
+        async togglePlayPause() {
+          if (!this.playerState) return;
+          if (this.playerState.paused) await resumePlayback();
+          else await pausePlayback();
         },
       };
     };

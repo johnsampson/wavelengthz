@@ -56,6 +56,41 @@ describe('getValidAccessToken', () => {
     vi.unstubAllGlobals();
   });
 
+  it('persists the refreshed scope into granted_scope', async () => {
+    const encAccess = await encrypt('stale-access-token', KEY);
+    const encRefresh = await encrypt('refresh-token', KEY);
+    const row = { access_token: encAccess, refresh_token: encRefresh, token_expires_at: Date.now() - 1000 };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ access_token: 'fresh-access-token', refresh_token: 'refresh-token', expires_in: 3600, scope: 'streaming user-top-read' }),
+          { status: 200 }
+        )
+      )
+    );
+
+    const first = vi.fn().mockResolvedValue(row);
+    const run = vi.fn().mockResolvedValue({});
+    const bind = vi.fn().mockReturnValue({ first, run });
+    const prepare = vi.fn().mockReturnValue({ bind });
+    const db = { prepare } as any;
+
+    await getValidAccessToken(user, env, db);
+
+    expect(bind).toHaveBeenCalledWith(
+      expect.anything(), // encrypted access token
+      expect.anything(), // encrypted refresh token
+      expect.anything(), // expiresAt
+      'streaming user-top-read',
+      expect.anything(), // updated_at
+      user.id
+    );
+
+    vi.unstubAllGlobals();
+  });
+
   it('throws a clear error when the user has no Spotify token row', async () => {
     const first = vi.fn().mockResolvedValue(null);
     const bind = vi.fn().mockReturnValue({ first });

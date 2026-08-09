@@ -125,16 +125,40 @@
                   </svg>
                 </button>
               </div>
-              <template x-if="openTrackId === t.id">
-                <iframe
-                  :src="`https://open.spotify.com/embed/track/${t.spotifyId}?theme=0`"
-                  width="100%"
-                  height="80"
-                  frameborder="0"
-                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                  loading="lazy"
-                  class="rounded-xl"
-                ></iframe>
+              <template x-if="openTrackId === t.id && customPlayerAvailable">
+                <div class="flex items-center gap-3 rounded-xl bg-gradient-to-r from-brand-500/10 to-accent-500/10 p-3 ring-1 ring-brand-500/30">
+                  <button
+                    type="button"
+                    class="btn-primary h-9 w-9 shrink-0 rounded-full p-0"
+                    @click="togglePlayPause()"
+                    :aria-label="playerState && !playerState.paused ? 'Pause' : 'Play'"
+                  >
+                    <svg x-show="!playerState || playerState.paused" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                    <svg x-show="playerState && !playerState.paused" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
+                      <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
+                    </svg>
+                  </button>
+                  <div class="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-white/10">
+                    <div class="h-full rounded-full bg-gradient-to-r from-brand-500 to-accent-500" :style="`width:${progressPct}%`"></div>
+                  </div>
+                  <span class="wordmark shrink-0 text-[10px]">Wavelengthz Player</span>
+                </div>
+              </template>
+              <template x-if="openTrackId === t.id && !customPlayerAvailable">
+                <div class="flex flex-col gap-1">
+                  <span class="self-start text-[10px] font-semibold tracking-wide text-amber-400 uppercase">Basic player</span>
+                  <iframe
+                    :src="`https://open.spotify.com/embed/track/${t.spotifyId}?theme=0`"
+                    width="100%"
+                    height="80"
+                    frameborder="0"
+                    allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                    loading="lazy"
+                    class="rounded-xl"
+                  ></iframe>
+                </div>
               </template>
             </li>
           </template>
@@ -195,16 +219,40 @@
                       </svg>
                     </button>
                   </div>
-                  <template x-if="openTrackId === t.id">
-                    <iframe
-                      :src="`https://open.spotify.com/embed/track/${t.spotifyId}?theme=0`"
-                      width="100%"
-                      height="80"
-                      frameborder="0"
-                      allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                      loading="lazy"
-                      class="rounded-xl"
-                    ></iframe>
+                  <template x-if="openTrackId === t.id && customPlayerAvailable">
+                    <div class="flex items-center gap-3 rounded-xl bg-gradient-to-r from-brand-500/10 to-accent-500/10 p-3 ring-1 ring-brand-500/30">
+                      <button
+                        type="button"
+                        class="btn-primary h-9 w-9 shrink-0 rounded-full p-0"
+                        @click="togglePlayPause()"
+                        :aria-label="playerState && !playerState.paused ? 'Pause' : 'Play'"
+                      >
+                        <svg x-show="!playerState || playerState.paused" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                        <svg x-show="playerState && !playerState.paused" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
+                          <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
+                        </svg>
+                      </button>
+                      <div class="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-white/10">
+                        <div class="h-full rounded-full bg-gradient-to-r from-brand-500 to-accent-500" :style="`width:${progressPct}%`"></div>
+                      </div>
+                      <span class="wordmark shrink-0 text-[10px]">Wavelengthz Player</span>
+                    </div>
+                  </template>
+                  <template x-if="openTrackId === t.id && !customPlayerAvailable">
+                    <div class="flex flex-col gap-1">
+                      <span class="self-start text-[10px] font-semibold tracking-wide text-amber-400 uppercase">Basic player</span>
+                      <iframe
+                        :src="`https://open.spotify.com/embed/track/${t.spotifyId}?theme=0`"
+                        width="100%"
+                        height="80"
+                        frameborder="0"
+                        allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                        loading="lazy"
+                        class="rounded-xl"
+                      ></iframe>
+                    </div>
                   </template>
                 </li>
               </template>
@@ -264,16 +312,40 @@
                       </svg>
                     </button>
                   </div>
-                  <template x-if="openTrackId === t.id">
-                    <iframe
-                      :src="`https://open.spotify.com/embed/track/${t.spotifyId}?theme=0`"
-                      width="100%"
-                      height="80"
-                      frameborder="0"
-                      allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                      loading="lazy"
-                      class="rounded-xl"
-                    ></iframe>
+                  <template x-if="openTrackId === t.id && customPlayerAvailable">
+                    <div class="flex items-center gap-3 rounded-xl bg-gradient-to-r from-brand-500/10 to-accent-500/10 p-3 ring-1 ring-brand-500/30">
+                      <button
+                        type="button"
+                        class="btn-primary h-9 w-9 shrink-0 rounded-full p-0"
+                        @click="togglePlayPause()"
+                        :aria-label="playerState && !playerState.paused ? 'Pause' : 'Play'"
+                      >
+                        <svg x-show="!playerState || playerState.paused" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                        <svg x-show="playerState && !playerState.paused" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
+                          <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
+                        </svg>
+                      </button>
+                      <div class="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-white/10">
+                        <div class="h-full rounded-full bg-gradient-to-r from-brand-500 to-accent-500" :style="`width:${progressPct}%`"></div>
+                      </div>
+                      <span class="wordmark shrink-0 text-[10px]">Wavelengthz Player</span>
+                    </div>
+                  </template>
+                  <template x-if="openTrackId === t.id && !customPlayerAvailable">
+                    <div class="flex flex-col gap-1">
+                      <span class="self-start text-[10px] font-semibold tracking-wide text-amber-400 uppercase">Basic player</span>
+                      <iframe
+                        :src="`https://open.spotify.com/embed/track/${t.spotifyId}?theme=0`"
+                        width="100%"
+                        height="80"
+                        frameborder="0"
+                        allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                        loading="lazy"
+                        class="rounded-xl"
+                      ></iframe>
+                    </div>
                   </template>
                 </li>
               </template>
@@ -316,6 +388,7 @@
     import { api } from '/app.js';
     import { mountHeader, mountNav } from '/nav.js';
     import { requireAuth } from '/auth.js';
+    import { checkPlayerAvailability, playTrack, pausePlayback, resumePlayback, onStateChange } from '/wavelengthzPlayer.js';
     mountHeader();
     mountNav();
 
@@ -338,6 +411,27 @@
         // Shared across all three track lists on this page (top/shared/recent)
         // -- only one embedded player open at a time, same as public/artist.html.
         openTrackId: null,
+        // See public/artist.html's identical fields for the full explanation
+        // -- customPlayerAvailable gates every "Wavelengthz Player vs iframe"
+        // choice on this page too, shared across all three track lists.
+        customPlayerAvailable: false,
+        playerState: null,
+
+        get progressPct() {
+          if (!this.playerState || !this.playerState.duration) return 0;
+          return (this.playerState.position / this.playerState.duration) * 100;
+        },
+
+        // The currently-open track, whichever of the three lists it's in --
+        // needed because openTrackId alone doesn't say which array to look in.
+        get openTrack() {
+          const lists = [this.profile?.topTracks, this.overlap.sharedTracks, this.profile?.recentTracks];
+          for (const list of lists) {
+            const found = list?.find((t) => t.id === this.openTrackId);
+            if (found) return found;
+          }
+          return null;
+        },
 
         async init() {
           if (!(await requireAuth())) return;
@@ -348,10 +442,36 @@
           } catch (e) {
             this.error = 'Could not load this profile. Please try again.';
           }
+
+          const availability = await checkPlayerAvailability();
+          this.customPlayerAvailable = availability.available;
+          if (this.customPlayerAvailable) {
+            onStateChange((state) => {
+              const openTrack = this.openTrack;
+              if (!openTrack || !state || state.track_window?.current_track?.id !== openTrack.spotifyId) return;
+              this.playerState = { paused: state.paused, position: state.position, duration: state.duration };
+            });
+          }
         },
 
-        togglePlayer(track) {
-          this.openTrackId = this.openTrackId === track.id ? null : track.id;
+        async togglePlayer(track) {
+          if (this.openTrackId === track.id) {
+            if (this.customPlayerAvailable) await pausePlayback();
+            this.openTrackId = null;
+            this.playerState = null;
+            return;
+          }
+          this.openTrackId = track.id;
+          this.playerState = null;
+          if (!this.customPlayerAvailable) return; // the iframe template handles itself
+          const started = await playTrack(track.spotifyId);
+          if (!started) this.customPlayerAvailable = false; // degrade for the rest of this page view
+        },
+
+        async togglePlayPause() {
+          if (!this.playerState) return;
+          if (this.playerState.paused) await resumePlayback();
+          else await pausePlayback();
         },
 
         // Clicking the currently-set anthem again clears it (trackId: null) --

@@ -97,6 +97,7 @@ export function registerAuthRoutes(router: RouterType) {
     const expiresAt = now + token.expires_in * 1000;
     const avatarUrl = profile.images?.[0]?.url ?? null;
     const product = profile.product ?? null;
+    const grantedScope = token.scope ?? null;
 
     // Deliberately not filtered by deleted_at IS NULL: (provider, provider_id) is
     // UNIQUE, so a soft-deleted row's identity permanently occupies that Spotify
@@ -118,12 +119,12 @@ export function registerAuthRoutes(router: RouterType) {
 
     const tokenStatement = (uid: string) =>
       env.DB.prepare(
-        `INSERT INTO music_source_tokens (id, user_id, provider, provider_user_id, access_token, refresh_token, token_expires_at, avatar_url, product_tier, created_at, updated_at)
-         VALUES (?, ?, 'spotify', ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO music_source_tokens (id, user_id, provider, provider_user_id, access_token, refresh_token, token_expires_at, avatar_url, product_tier, granted_scope, created_at, updated_at)
+         VALUES (?, ?, 'spotify', ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(user_id, provider) DO UPDATE SET
            access_token = excluded.access_token, refresh_token = excluded.refresh_token, token_expires_at = excluded.token_expires_at,
-           avatar_url = excluded.avatar_url, product_tier = excluded.product_tier, updated_at = excluded.updated_at`
-      ).bind(crypto.randomUUID(), uid, profile.id, encryptedAccess, encryptedRefresh, expiresAt, avatarUrl, product, now, now);
+           avatar_url = excluded.avatar_url, product_tier = excluded.product_tier, granted_scope = excluded.granted_scope, updated_at = excluded.updated_at`
+      ).bind(crypto.randomUUID(), uid, profile.id, encryptedAccess, encryptedRefresh, expiresAt, avatarUrl, product, grantedScope, now, now);
 
     if (existingIdentity) {
       userId = existingIdentity.user_id;

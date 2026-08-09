@@ -2,9 +2,30 @@ export interface SpotifyTokenResponse {
   access_token: string;
   refresh_token: string;
   expires_in: number;
+  // Space-separated, exactly as Spotify returns it -- persisted to
+  // music_source_tokens.granted_scope (migration 0008) so src/routes/player.ts
+  // can check for `streaming` without a live Spotify call. Always present on
+  // a real Spotify response; optional here only because nothing enforces it
+  // in tests that stub a bare {access_token, refresh_token, expires_in}.
+  scope?: string;
 }
 
-const SCOPES = ['user-top-read', 'user-read-email'].join(' ');
+// streaming/user-read-playback-state/user-modify-playback-state back the
+// Wavelengthz Player (public/wavelengthzPlayer.js, src/routes/player.ts) --
+// the Spotify Web Playback SDK, which plays a full track in-page via a
+// browser-side Spotify Connect device instead of the read-only
+// open.spotify.com/embed iframe (public/artist.html et al). Adding scopes
+// here only affects *new* consents (this app's own registered redirect_uri
+// going forward) -- every already-logged-in user's existing token keeps
+// whatever scope they originally consented to until their next full
+// /login, since a refresh can't silently grant scopes never approved.
+const SCOPES = [
+  'user-top-read',
+  'user-read-email',
+  'streaming',
+  'user-read-playback-state',
+  'user-modify-playback-state',
+].join(' ');
 
 // redirectUri defaults to env.SPOTIFY_REDIRECT_URI, but callers on an
 // allowlisted alternate host (src/routes/auth.ts's SPOTIFY_ALLOWED_HOSTS)
