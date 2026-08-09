@@ -27,6 +27,8 @@ interface Env {
   RESEND_API_KEY: string;
   RESEND_FROM_ADDRESS: string;
   SENTRY_DSN: string;
+  VAPID_PRIVATE_KEY: string;
+  VAPID_SUBJECT: string;
   // Optional pre-launch site-wide password gate (src/index.ts) -- unset
   // (the normal case once real users are live) means the gate is a no-op.
   // Set both via `wrangler secret put` to lock the whole site (API routes
@@ -55,6 +57,8 @@ declare namespace Cloudflare {
     RESEND_API_KEY: string;
     RESEND_FROM_ADDRESS: string;
     SENTRY_DSN: string;
+    VAPID_PRIVATE_KEY: string;
+    VAPID_SUBJECT: string;
     SITE_BASIC_AUTH_USER?: string;
     SITE_BASIC_AUTH_PASSWORD?: string;
   }

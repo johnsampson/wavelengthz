@@ -62,6 +62,12 @@ SPOTIFY_ALLOWED_HOSTS = ""
 # notifications.ts's getMatchNotificationDelayMs(). Minutes, not ms, for a
 # human-editable config value.
 MATCH_NOTIFICATION_DELAY_MINUTES = "5"
+# The frontend fetches this via GET /api/push/vapid-public-key to pass as
+# pushManager.subscribe()'s applicationServerKey -- it's not secret, the
+# browser receives it directly. VAPID_PRIVATE_KEY/VAPID_SUBJECT (the matching
+# private scalar + contact mailto: RFC 8292 requires) are secrets, set via
+# `wrangler secret put`, never committed.
+VAPID_PUBLIC_KEY = "<your generated public key>"
 
 [triggers]
 # "0 3 * * *": nightly purgeExpiredDeletions. "0 4 * * sun": weekly catalog
@@ -104,3 +110,6 @@ R2_BUCKET_NAME = "wavelengthz-photos-test"
 RESEND_API_KEY = "test-resend-api-key"
 RESEND_FROM_ADDRESS = "connect@wavelengthz.com"
 SENTRY_DSN = "https://a75f80cd4c5c349f4d7b8f7a8fffe055@o4511876074962944.ingest.us.sentry.io/4511876083351552"
+VAPID_PUBLIC_KEY = "BC-IIfT4yho1Lp9x06rIRv0bo-Ns2hq77fpxI61ELRF2DQm0TxTLnyzHcWd2QRB6vJyJIN1gGG8In355vJGGF5E"
+VAPID_PRIVATE_KEY = "myv3AP-P0PyJxUMi2NBShq7cAodxuEcOg1iuAYO5Q2I"
+VAPID_SUBJECT = "mailto:test@example.com"
