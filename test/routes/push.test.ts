@@ -123,6 +123,47 @@ describe('POST /api/push/subscribe', () => {
     const body = await res.json<any>();
     expect(body.error).toBe('invalid_subscription');
   });
+
+  it('returns 400 when endpoint is not a valid URL', async () => {
+    // A malformed endpoint would otherwise throw later inside
+    // buildVapidAuthHeader (src/lib/webPush.ts) on every future send
+    // attempt for this subscription, becoming a permanent poison row.
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/push/subscribe', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: 'not-a-url', keys: { p256dh: 'p', auth: 'a' } }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_subscription');
+    expect(await env.DB.prepare('SELECT * FROM push_subscriptions WHERE endpoint = ?').bind('not-a-url').first()).toBeNull();
+  });
+
+  it('returns 400 when endpoint is a well-formed non-https URL', async () => {
+    // Without an https requirement, an authenticated user could point
+    // endpoint at an arbitrary URL and have the Worker POST to it (carrying
+    // a VAPID Authorization header) whenever they get a notification -- a
+    // limited request-forwarding primitive.
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/push/subscribe', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: 'http://push.example/x', keys: { p256dh: 'p', auth: 'a' } }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_subscription');
+    expect(await env.DB.prepare('SELECT * FROM push_subscriptions WHERE endpoint = ?').bind('http://push.example/x').first()).toBeNull();
+  });
 });
 
 describe('POST /api/push/unsubscribe', () => {
