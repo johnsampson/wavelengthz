@@ -15,5 +15,5 @@ export async function sendEmail(
       html: input.html,
     }),
   });
-  if (!res.ok) throw new Error(`Resend send failed: ${res.status}`);
+  if (!res.ok) throw new Error(`Resend send failed: ${res.status} ${await res.text()}`);
 }
