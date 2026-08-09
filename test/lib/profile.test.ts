@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { applySchema } from '../apply-schema';
-import { getDisplayMusicProfile } from '../../src/lib/profile';
+import { getDisplayMusicProfile, pickAnthemTrack, getAnthemTracksForUsers } from '../../src/lib/profile';
 import { insertTestUser } from '../helpers/createUser';
 
 beforeAll(async () => {
@@ -63,5 +63,74 @@ describe('getDisplayMusicProfile', () => {
 
     expect(result.topArtists).toHaveLength(10);
     expect(result.topArtists[0].id).toBe('a0');
+  });
+});
+
+describe('pickAnthemTrack', () => {
+  const topTracks = [
+    { id: 't1', spotifyId: 't1', name: 'First Track', imageUrl: 'https://img/t1.jpg' },
+    { id: 't2', spotifyId: 't2', name: 'Second Track', imageUrl: 'https://img/t2.jpg' },
+  ];
+
+  it('returns null when no anthem is set', () => {
+    expect(pickAnthemTrack(topTracks, null)).toBeNull();
+  });
+
+  it('returns the matching track', () => {
+    expect(pickAnthemTrack(topTracks, 't2')).toEqual(topTracks[1]);
+  });
+
+  it('returns null when the chosen id has fallen out of top_tracks on a refresh', () => {
+    expect(pickAnthemTrack(topTracks, 'no-longer-in-top-tracks')).toBeNull();
+  });
+});
+
+describe('getAnthemTracksForUsers', () => {
+  it('returns an empty map without querying when nobody in the batch has an anthem set', async () => {
+    let queried = false;
+    const spyDb = new Proxy(env.DB, {
+      get(target, prop, receiver) {
+        if (prop === 'prepare') {
+          queried = true;
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+
+    const result = await getAnthemTracksForUsers(spyDb, [{ id: 'u1', anthem_track_id: null }]);
+
+    expect(result.size).toBe(0);
+    expect(queried).toBe(false);
+  });
+
+  it('resolves each user\'s anthem from their own top_tracks', async () => {
+    await insertTestUser(env.DB, { id: 'u2', spotifyId: 'sp2', createdAt: 1000, updatedAt: 1000 });
+    const topTracks1 = JSON.stringify([{ track_id: 't1', rank: 1, name: 'My Anthem', imageUrl: 'https://img/t1.jpg' }]);
+    const topTracks2 = JSON.stringify([{ track_id: 't9', rank: 1, name: 'Their Anthem', imageUrl: 'https://img/t9.jpg' }]);
+    await env.DB.prepare(
+      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u1', '[]', ?, '[]', 'medium_term', 1000)`
+    ).bind(topTracks1).run();
+    await env.DB.prepare(
+      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u2', '[]', ?, '[]', 'medium_term', 1000)`
+    ).bind(topTracks2).run();
+
+    const result = await getAnthemTracksForUsers(env.DB, [
+      { id: 'u1', anthem_track_id: 't1' },
+      { id: 'u2', anthem_track_id: 't9' },
+    ]);
+
+    expect(result.get('u1')).toEqual({ id: 't1', spotifyId: 't1', name: 'My Anthem', imageUrl: 'https://img/t1.jpg' });
+    expect(result.get('u2')).toEqual({ id: 't9', spotifyId: 't9', name: 'Their Anthem', imageUrl: 'https://img/t9.jpg' });
+  });
+
+  it('omits a user whose chosen anthem has fallen out of their top_tracks', async () => {
+    const topTracks = JSON.stringify([{ track_id: 't1', rank: 1, name: 'First Track', imageUrl: null }]);
+    await env.DB.prepare(
+      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u1', '[]', ?, '[]', 'medium_term', 1000)`
+    ).bind(topTracks).run();
+
+    const result = await getAnthemTracksForUsers(env.DB, [{ id: 'u1', anthem_track_id: 'stale-track-id' }]);
+
+    expect(result.has('u1')).toBe(false);
   });
 });

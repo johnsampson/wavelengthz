@@ -52,6 +52,9 @@ export const api = {
   recallMessage: (matchId, messageId) => request(`/api/matches/${matchId}/messages/${messageId}/recall`, { method: 'POST' }),
   onboard: (payload) =>
     request('/api/onboarding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+  /** @param {string|null} trackId - one of the caller's own top tracks, or null to clear */
+  setAnthem: (trackId) =>
+    request('/api/me/anthem', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trackId }) }),
   block: (userId) =>
     request('/api/block', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: userId }) }),
   blocks: () => request('/api/blocks'),
