@@ -29,8 +29,10 @@
 // arrows + a shared index with the full-screen lightbox). v19 adds a Report
 // button to /profile -- previously the only report entry point anywhere in
 // the app was from an active match (match.html), with no way to report
-// someone from their photos/bio before ever matching.
-const CACHE_NAME = 'wavelengthz-shell-v19';
+// someone from their photos/bio before ever matching. v20 adds push
+// notification handling (push + notificationclick listeners) -- see
+// docs/superpowers/plans/2026-08-09-web-push-notifications.md.
+const CACHE_NAME = 'wavelengthz-shell-v20';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -100,5 +102,29 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith(
     caches.match(event.request).then((cached) => cached || fetch(event.request))
+  );
+});
+
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+  const payload = event.data.json();
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      icon: '/icons/icon-192.png',
+      data: { url: payload.url },
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = event.notification.data?.url ?? '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window' }).then((clients) => {
+      const existing = clients.find((c) => new URL(c.url).pathname === targetUrl);
+      if (existing) return existing.focus();
+      return self.clients.openWindow(targetUrl);
+    })
   );
 });
