@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { notifyMatch, notifyMessage, sendDelayedMatchNotificationEmails, getMatchNotificationDelayMs } from '../../src/lib/notifications';
+import * as webPush from '../../src/lib/webPush';
 import { insertTestUser } from '../helpers/createUser';
 
 async function insertPushSubscription(db: D1Database, userId: string, endpoint: string) {
@@ -218,6 +219,32 @@ describe('notifyMessage', () => {
     const n3 = await env.DB.prepare('SELECT email_sent_at FROM notifications WHERE id = ?').bind('n3').first<any>();
     expect(n3.email_sent_at).not.toBeNull();
 
+    vi.unstubAllGlobals();
+  });
+
+  it('sends a push whose url deep-links to the message\'s specific match, not the bare /messages page', async () => {
+    // Regression: public/messages.html reads matchId from the query string
+    // and can't render anything without it -- a bare '/messages' url left
+    // every real message push landing on a broken, empty conversation view.
+    // Spies on sendWebPush (the layer right before encryption/network) since
+    // the actual wire payload is AES-GCM encrypted and opaque to a fetch mock.
+    await env.DB.prepare(`UPDATE users SET email = NULL WHERE id = 'u1'`).run();
+    await insertPushSubscription(env.DB, 'u1', 'https://push.example/u1-device');
+    await env.DB.prepare(`INSERT INTO messages (id, match_id, sender_id, body, created_at) VALUES ('msg1', 'm1', 'u2', 'hi', 1000)`).run();
+    await env.DB.prepare(
+      `INSERT INTO notifications (id, user_id, type, related_id, created_at) VALUES ('n3', 'u1', 'message', 'msg1', 1000)`
+    ).run();
+    const sendWebPushSpy = vi.spyOn(webPush, 'sendWebPush').mockResolvedValue({ ok: true });
+
+    await notifyMessage(env.DB, { ...VAPID_TEST_ENV, RESEND_API_KEY: 'k', RESEND_FROM_ADDRESS: 'f@x.com' } as any, 'msg1', 'u1');
+
+    expect(sendWebPushSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ endpoint: 'https://push.example/u1-device' }),
+      expect.objectContaining({ url: '/messages?matchId=m1' }),
+      expect.anything()
+    );
+
+    sendWebPushSpy.mockRestore();
     vi.unstubAllGlobals();
   });
 });

@@ -117,10 +117,16 @@ export async function notifyMessage(db: D1Database, env: Env, messageId: string,
     .first<{ id: string }>();
   if (!notification) return;
 
+  // /messages (public/messages.html) reads matchId from the query string on
+  // load and has nothing to render without it -- a bare '/messages' link
+  // lands the recipient on a broken, empty conversation view instead of the
+  // actual match they were messaged from.
+  const message = await db.prepare('SELECT match_id FROM messages WHERE id = ?').bind(messageId).first<{ match_id: string }>();
+
   const pushed = await sendPushToUser(db, env, recipientId, {
     title: 'New message on Wavelengthz',
     body: 'Open the app to read it.',
-    url: '/messages',
+    url: message ? `/messages?matchId=${message.match_id}` : '/messages',
   });
 
   if (recipient.email) {

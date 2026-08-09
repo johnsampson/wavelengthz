@@ -31,8 +31,12 @@
 // the app was from an active match (match.html), with no way to report
 // someone from their photos/bio before ever matching. v20 adds push
 // notification handling (push + notificationclick listeners) -- see
-// docs/superpowers/plans/2026-08-09-web-push-notifications.md.
-const CACHE_NAME = 'wavelengthz-shell-v20';
+// docs/superpowers/plans/2026-08-09-web-push-notifications.md. v21 fixes
+// notificationclick's existing-tab match: message pushes now deep-link with
+// a matchId query string, so comparing only pathname (the old check) wrongly
+// treated any open /messages tab as "the same" conversation regardless of
+// which match it was actually showing.
+const CACHE_NAME = 'wavelengthz-shell-v21';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -120,9 +124,18 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const targetUrl = event.notification.data?.url ?? '/';
+  // targetUrl can now carry a query string (e.g. '/messages?matchId=...'),
+  // so an already-open tab only counts as "the same page" when its
+  // pathname AND search match -- comparing pathname alone (the old
+  // behavior) would treat two different open matches' /messages tabs as
+  // interchangeable and focus the wrong conversation.
+  const target = new URL(targetUrl, self.location.origin);
   event.waitUntil(
     self.clients.matchAll({ type: 'window' }).then((clients) => {
-      const existing = clients.find((c) => new URL(c.url).pathname === targetUrl);
+      const existing = clients.find((c) => {
+        const clientUrl = new URL(c.url);
+        return clientUrl.pathname === target.pathname && clientUrl.search === target.search;
+      });
       if (existing) return existing.focus();
       return self.clients.openWindow(targetUrl);
     })
