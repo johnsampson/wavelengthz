@@ -17,8 +17,8 @@ beforeEach(async () => {
 describe('refreshCatalogFromProfiles', () => {
   it('adds only the artists missing from the catalog, fetching each exactly once', async () => {
     await env.DB.prepare(
-      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at)
-       VALUES ('u1', ?, '[]', '[]', 'medium_term', 1000)`
+      `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at)
+       VALUES ('mp1', 'u1', ?, '[]', '[]', 'medium_term', 1000, 1000, 1000)`
     ).bind(JSON.stringify([{ artist_id: 'already-known', rank: 1 }, { artist_id: 'new-artist', rank: 2 }])).run();
 
     const fetchMock = vi.fn(async (input: RequestInfo) => {
@@ -46,8 +46,8 @@ describe('refreshCatalogFromProfiles', () => {
 
   it('skips an artist whose fetch fails, without aborting the rest of the run', async () => {
     await env.DB.prepare(
-      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at)
-       VALUES ('u1', ?, '[]', '[]', 'medium_term', 1000)`
+      `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at)
+       VALUES ('mp2', 'u1', ?, '[]', '[]', 'medium_term', 1000, 1000, 1000)`
     )
       .bind(
         JSON.stringify([

@@ -121,16 +121,16 @@ export async function createMatchIfMutual(
   const now = Date.now();
 
   const insertResult = await db
-    .prepare(`INSERT OR IGNORE INTO matches (id, user_a_id, user_b_id, created_at) VALUES (?, ?, ?, ?)`)
-    .bind(matchId, userA, userB, now)
+    .prepare(`INSERT OR IGNORE INTO matches (id, user_a_id, user_b_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`)
+    .bind(matchId, userA, userB, now, now)
     .run();
 
   if (insertResult.meta.changes === 0) return null; // match already existed
 
   for (const recipient of [userA, userB]) {
     await db
-      .prepare(`INSERT INTO notifications (id, user_id, type, related_id, created_at) VALUES (?, ?, 'match', ?, ?)`)
-      .bind(crypto.randomUUID(), recipient, matchId, now)
+      .prepare(`INSERT INTO notifications (id, user_id, type, related_id, created_at, updated_at) VALUES (?, ?, 'match', ?, ?, ?)`)
+      .bind(crypto.randomUUID(), recipient, matchId, now, now)
       .run();
   }
 

@@ -37,6 +37,7 @@ async function ensureTombstoneUser(env: Env): Promise<void> {
 }
 
 export async function hardDeleteUser(env: Env, userId: string): Promise<void> {
+  const now = Date.now();
   const photos = await env.DB.prepare('SELECT r2_key FROM user_photos WHERE user_id = ?').bind(userId).all<{ r2_key: string }>();
   for (const photo of photos.results) {
     await env.PHOTOS.delete(photo.r2_key);
@@ -61,15 +62,15 @@ export async function hardDeleteUser(env: Env, userId: string): Promise<void> {
   // continuity, but must be re-pointed at the tombstone (see module comment above) —
   // `reported_id` can't be left referencing a row we're about to delete.
   await ensureTombstoneUser(env);
-  await env.DB.prepare('UPDATE reports SET reported_id = ? WHERE reported_id = ?').bind(TOMBSTONE_USER_ID, userId).run();
+  await env.DB.prepare('UPDATE reports SET reported_id = ?, updated_at = ? WHERE reported_id = ?').bind(TOMBSTONE_USER_ID, now, userId).run();
 
   await env.DB.prepare('DELETE FROM notifications WHERE user_id = ?').bind(userId).run();
   await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId).run();
 
   // Catalog rows (artists/tracks a user added via search-and-add) outlive the user;
   // added_by_user_id is nullable, so null it rather than leaving it dangling.
-  await env.DB.prepare('UPDATE artists SET added_by_user_id = NULL WHERE added_by_user_id = ?').bind(userId).run();
-  await env.DB.prepare('UPDATE tracks SET added_by_user_id = NULL WHERE added_by_user_id = ?').bind(userId).run();
+  await env.DB.prepare('UPDATE artists SET added_by_user_id = NULL, updated_at = ? WHERE added_by_user_id = ?').bind(now, userId).run();
+  await env.DB.prepare('UPDATE tracks SET added_by_user_id = NULL, updated_at = ? WHERE added_by_user_id = ?').bind(now, userId).run();
 
   await env.DB.prepare('DELETE FROM auth_identities WHERE user_id = ?').bind(userId).run();
   await env.DB.prepare('DELETE FROM music_source_tokens WHERE user_id = ?').bind(userId).run();

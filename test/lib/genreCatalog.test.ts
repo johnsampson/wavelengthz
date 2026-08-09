@@ -32,6 +32,7 @@ describe('recordCatalogGenres', () => {
 
   it('accumulates across multiple calls for the same genre', async () => {
     await recordCatalogGenres(env.DB, ['pop'], 'artist', 1000);
+    const firstId = (await rowFor('pop')).id;
     await recordCatalogGenres(env.DB, ['pop'], 'artist', 2000);
     await recordCatalogGenres(env.DB, ['pop'], 'track', 3000);
 
@@ -39,6 +40,10 @@ describe('recordCatalogGenres', () => {
     expect(row.artist_count).toBe(2);
     expect(row.track_count).toBe(1);
     expect(row.updated_at).toBe(3000);
+    // genres was previously keyed by `genre` alone -- an ON CONFLICT update
+    // must keep the same row (and its id), not insert a new one.
+    expect(row.id).toBe(firstId);
+    expect(row.created_at).toBe(1000);
   });
 
   it('records every genre in the array independently', async () => {

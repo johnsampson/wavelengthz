@@ -13,10 +13,10 @@ export async function recordCatalogGenres(
   for (const genre of genres) {
     await db
       .prepare(
-        `INSERT INTO genres (genre, artist_count, track_count, updated_at) VALUES (?, ?, ?, ?)
+        `INSERT INTO genres (id, genre, artist_count, track_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(genre) DO UPDATE SET artist_count = artist_count + ?, track_count = track_count + ?, updated_at = ?`
       )
-      .bind(genre, artistDelta, trackDelta, now, artistDelta, trackDelta, now)
+      .bind(crypto.randomUUID(), genre, artistDelta, trackDelta, now, now, artistDelta, trackDelta, now)
       .run();
   }
 }

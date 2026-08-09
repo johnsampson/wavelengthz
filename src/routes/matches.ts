@@ -103,8 +103,9 @@ export function registerMatchRoutes(router: RouterType) {
     const match = await loadActiveMatchForParticipant(env.DB, request.params.id, user.id);
     if (!match) return new Response('Not found', { status: 404 });
 
-    await env.DB.prepare('UPDATE matches SET unmatched_at = ?, unmatched_by = ? WHERE id = ?')
-      .bind(Date.now(), user.id, match.id)
+    const unmatchedAt = Date.now();
+    await env.DB.prepare('UPDATE matches SET unmatched_at = ?, unmatched_by = ?, updated_at = ? WHERE id = ?')
+      .bind(unmatchedAt, user.id, unmatchedAt, match.id)
       .run();
 
     return Response.json({ ok: true });
@@ -152,7 +153,10 @@ export function registerMatchRoutes(router: RouterType) {
     const check = canRecall(message, user.id, Date.now());
     if (!check.ok) return Response.json({ error: check.error }, { status: check.error === 'not_sender' ? 403 : 400 });
 
-    await env.DB.prepare('UPDATE messages SET recalled_at = ? WHERE id = ?').bind(Date.now(), request.params.messageId).run();
+    const recalledAt = Date.now();
+    await env.DB.prepare('UPDATE messages SET recalled_at = ?, updated_at = ? WHERE id = ?')
+      .bind(recalledAt, recalledAt, request.params.messageId)
+      .run();
     return Response.json({ ok: true });
   });
 
@@ -172,12 +176,12 @@ export function registerMatchRoutes(router: RouterType) {
     const recipientId = match.user_a_id === user.id ? match.user_b_id : match.user_a_id;
 
     await env.DB.prepare(
-      `INSERT INTO messages (id, match_id, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?)`
-    ).bind(messageId, match.id, user.id, body, now).run();
+      `INSERT INTO messages (id, match_id, sender_id, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+    ).bind(messageId, match.id, user.id, body, now, now).run();
 
     await env.DB.prepare(
-      `INSERT INTO notifications (id, user_id, type, related_id, created_at) VALUES (?, ?, 'message', ?, ?)`
-    ).bind(crypto.randomUUID(), recipientId, messageId, now).run();
+      `INSERT INTO notifications (id, user_id, type, related_id, created_at, updated_at) VALUES (?, ?, 'message', ?, ?, ?)`
+    ).bind(crypto.randomUUID(), recipientId, messageId, now, now).run();
 
     try {
       await notifyMessage(env.DB, env, messageId, recipientId);

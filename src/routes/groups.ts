@@ -38,10 +38,12 @@ export function registerGroupRoutes(router: RouterType) {
     // separate location-picker UI, and it matches how a user's own radius
     // already governs what they can discover (see GET /api/groups below).
     await env.DB.prepare(
-      `INSERT INTO groups (id, name, topic, created_by, lat, lng, location_label, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(id, name.trim(), topic?.trim() || null, user.id, user.lat, user.lng, user.location_label, now).run();
+      `INSERT INTO groups (id, name, topic, created_by, lat, lng, location_label, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(id, name.trim(), topic?.trim() || null, user.id, user.lat, user.lng, user.location_label, now, now).run();
 
-    await env.DB.prepare('INSERT INTO group_members (group_id, user_id, joined_at) VALUES (?, ?, ?)').bind(id, user.id, now).run();
+    await env.DB.prepare('INSERT INTO group_members (id, group_id, user_id, joined_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(crypto.randomUUID(), id, user.id, now, now, now)
+      .run();
 
     return Response.json({ ok: true, groupId: id });
   });
@@ -145,8 +147,9 @@ export function registerGroupRoutes(router: RouterType) {
       }
     }
 
-    await env.DB.prepare('INSERT INTO group_members (group_id, user_id, joined_at) VALUES (?, ?, ?)')
-      .bind(groupId, user.id, Date.now())
+    const joinedAt = Date.now();
+    await env.DB.prepare('INSERT INTO group_members (id, group_id, user_id, joined_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(crypto.randomUUID(), groupId, user.id, joinedAt, joinedAt, joinedAt)
       .run();
 
     return Response.json({ ok: true });
@@ -208,7 +211,10 @@ export function registerGroupRoutes(router: RouterType) {
     const check = canRecall(message, user.id, Date.now());
     if (!check.ok) return Response.json({ error: check.error }, { status: check.error === 'not_sender' ? 403 : 400 });
 
-    await env.DB.prepare('UPDATE group_messages SET recalled_at = ? WHERE id = ?').bind(Date.now(), request.params.messageId).run();
+    const recalledAt = Date.now();
+    await env.DB.prepare('UPDATE group_messages SET recalled_at = ?, updated_at = ? WHERE id = ?')
+      .bind(recalledAt, recalledAt, request.params.messageId)
+      .run();
     return Response.json({ ok: true });
   });
 
@@ -228,8 +234,9 @@ export function registerGroupRoutes(router: RouterType) {
     }
 
     const id = crypto.randomUUID();
-    await env.DB.prepare('INSERT INTO group_messages (id, group_id, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?)')
-      .bind(id, groupId, user.id, body, Date.now())
+    const now = Date.now();
+    await env.DB.prepare('INSERT INTO group_messages (id, group_id, sender_id, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(id, groupId, user.id, body, now, now)
       .run();
 
     return Response.json({ ok: true, messageId: id });

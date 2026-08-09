@@ -193,9 +193,9 @@ describe('GET /api/matches/:id', () => {
   });
 
   it('returns genres both participants have affinity for', async () => {
-    await env.DB.prepare(`INSERT INTO user_genres (user_id, genre, artist_count, track_count, updated_at) VALUES ('u1', 'indie', 3, 0, 1000)`).run();
-    await env.DB.prepare(`INSERT INTO user_genres (user_id, genre, artist_count, track_count, updated_at) VALUES ('u2', 'indie', 5, 0, 1000)`).run();
-    await env.DB.prepare(`INSERT INTO user_genres (user_id, genre, artist_count, track_count, updated_at) VALUES ('u1', 'metal', 2, 0, 1000)`).run(); // u2 has no affinity for this
+    await env.DB.prepare(`INSERT INTO user_genres (id, user_id, genre, artist_count, track_count, created_at, updated_at) VALUES ('ug5', 'u1', 'indie', 3, 0, 1000, 1000)`).run();
+    await env.DB.prepare(`INSERT INTO user_genres (id, user_id, genre, artist_count, track_count, created_at, updated_at) VALUES ('ug6', 'u2', 'indie', 5, 0, 1000, 1000)`).run();
+    await env.DB.prepare(`INSERT INTO user_genres (id, user_id, genre, artist_count, track_count, created_at, updated_at) VALUES ('ug7', 'u1', 'metal', 2, 0, 1000, 1000)`).run(); // u2 has no affinity for this
 
     const cookie = await cookieFor('u1');
     const res = await worker.fetch(new Request('http://localhost/api/matches/m1', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);

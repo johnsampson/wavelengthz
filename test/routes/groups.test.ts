@@ -59,9 +59,15 @@ describe('POST /api/groups', () => {
     expect(group.topic).toBe('indie rock');
     expect(group.lat).toBe(30.27);
     expect(group.lng).toBe(-97.74);
+    expect(group.updated_at).not.toBeNull();
 
-    const member = await env.DB.prepare('SELECT * FROM group_members WHERE group_id = ? AND user_id = ?').bind(body.groupId, 'u1').first();
+    const member = await env.DB.prepare('SELECT * FROM group_members WHERE group_id = ? AND user_id = ?').bind(body.groupId, 'u1').first<any>();
     expect(member).toBeTruthy();
+    // group_members didn't have its own id before this schema cleanup --
+    // it was keyed by (group_id, user_id) alone.
+    expect(member.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(member.created_at).not.toBeNull();
+    expect(member.updated_at).not.toBeNull();
   });
 
   it('rejects a blank name', async () => {

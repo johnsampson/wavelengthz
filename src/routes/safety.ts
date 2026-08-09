@@ -13,13 +13,13 @@ export function registerSafetyRoutes(router: RouterType) {
     const now = Date.now();
 
     await env.DB.prepare(
-      `INSERT OR IGNORE INTO blocks (id, blocker_id, blocked_id, created_at) VALUES (?, ?, ?, ?)`
-    ).bind(crypto.randomUUID(), user.id, user_id, now).run();
+      `INSERT OR IGNORE INTO blocks (id, blocker_id, blocked_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`
+    ).bind(crypto.randomUUID(), user.id, user_id, now, now).run();
 
     const [a, b] = [user.id, user_id].sort();
     await env.DB.prepare(
-      `UPDATE matches SET unmatched_at = ?, unmatched_by = ? WHERE user_a_id = ? AND user_b_id = ? AND unmatched_at IS NULL`
-    ).bind(now, user.id, a, b).run();
+      `UPDATE matches SET unmatched_at = ?, unmatched_by = ?, updated_at = ? WHERE user_a_id = ? AND user_b_id = ? AND unmatched_at IS NULL`
+    ).bind(now, user.id, now, a, b).run();
 
     return Response.json({ ok: true });
   });
@@ -72,8 +72,8 @@ export function registerSafetyRoutes(router: RouterType) {
 
     const now = Date.now();
     await env.DB.prepare(
-      `INSERT INTO reports (id, reporter_id, reported_id, reason, details, status, created_at) VALUES (?, ?, ?, ?, ?, 'open', ?)`
-    ).bind(crypto.randomUUID(), user.id, user_id, reason, details ?? null, now).run();
+      `INSERT INTO reports (id, reporter_id, reported_id, reason, details, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'open', ?, ?)`
+    ).bind(crypto.randomUUID(), user.id, user_id, reason, details ?? null, now, now).run();
 
     // Ghost removal: once 3+ distinct people have reported the same person,
     // they silently stop appearing to or interacting with anyone else --

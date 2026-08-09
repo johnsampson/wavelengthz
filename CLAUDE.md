@@ -2,7 +2,7 @@
 
 ## Database schema conventions
 
-Adopted starting with `migrations/0010` (the `artist_genres` rename). Existing tables predate this and largely don't comply yet -- retrofitting them is tracked separately, not assumed done. Always check the actual migration for a given table rather than assuming it follows this.
+Adopted starting with `migrations/0010` (the `artist_genres` rename) and applied to every other table in `migrations/0011`. The whole schema complies as of `0011`; any new migration is expected to keep it that way from here on.
 
 - **Table names are plural, snake_case** (Rails convention) -- e.g. `artist_genres`, not `artist_genre` or `artistGenres`.
 - **Every table gets its own `id TEXT PRIMARY KEY`** (a UUID), even join/association tables (e.g. `group_members`) and tables otherwise keyed by a natural key (e.g. `genres`, keyed by `genre` today). The natural or composite key becomes a `UNIQUE` constraint instead of the primary key -- it doesn't disqualify a table from also having its own `id`.

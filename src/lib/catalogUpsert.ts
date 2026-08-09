@@ -40,8 +40,8 @@ export async function upsertArtist(
   const id = crypto.randomUUID();
   const result = await db
     .prepare(
-      `INSERT INTO artists (id, spotify_id, name, genres, image_url, popularity, source, added_by_user_id, approved, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+      `INSERT INTO artists (id, spotify_id, name, genres, image_url, popularity, source, added_by_user_id, approved, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
        ON CONFLICT(spotify_id) DO NOTHING`
     )
     .bind(
@@ -53,6 +53,7 @@ export async function upsertArtist(
       artist.popularity ?? null,
       source,
       addedByUserId,
+      now,
       now
     )
     .run();
@@ -74,11 +75,11 @@ export async function upsertTrack(
   const id = crypto.randomUUID();
   const result = await db
     .prepare(
-      `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, preview_url, source, added_by_user_id, approved, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, preview_url, source, added_by_user_id, approved, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
        ON CONFLICT(spotify_id) DO NOTHING`
     )
-    .bind(id, track.id, track.name, artistInternalId, track.album?.images?.[0]?.url ?? null, track.preview_url ?? null, source, addedByUserId, now)
+    .bind(id, track.id, track.name, artistInternalId, track.album?.images?.[0]?.url ?? null, track.preview_url ?? null, source, addedByUserId, now, now)
     .run();
 
   if (result.meta.changes > 0) return { id, inserted: true };
