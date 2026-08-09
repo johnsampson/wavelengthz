@@ -20,7 +20,7 @@
         <img
           :src="profile.photoUrls[carouselIndex]"
           alt=""
-          class="aspect-[4/3] w-full cursor-pointer rounded-2xl object-cover"
+          class="aspect-[4/3] w-full cursor-pointer rounded-2xl object-cover ring-1 ring-white/10"
           @click="openLightbox()"
         />
         <button
@@ -77,7 +77,7 @@
         <div class="grid grid-cols-3 gap-3">
           <template x-for="a in profile.topArtists" :key="a.id">
             <div class="flex flex-col items-center gap-1 text-center">
-              <img :src="a.imageUrl" :alt="a.name" class="h-16 w-16 rounded-full object-cover" />
+              <img :src="a.imageUrl" :alt="a.name" class="h-16 w-16 rounded-full object-cover ring-1 ring-white/10" />
               <span class="text-xs text-neutral-300" x-text="a.name"></span>
             </div>
           </template>
@@ -90,7 +90,7 @@
           <template x-for="t in profile.topTracks" :key="t.id">
             <li class="flex flex-col gap-2">
               <div class="flex items-center gap-3">
-                <img :src="t.imageUrl" :alt="t.name" class="h-10 w-10 rounded object-cover" />
+                <img :src="t.imageUrl" :alt="t.name" class="h-10 w-10 rounded object-cover ring-1 ring-white/10" />
                 <p class="min-w-0 flex-1 truncate text-sm text-neutral-100" x-text="t.name"></p>
                 <button
                   type="button"
@@ -138,7 +138,7 @@
             <div class="grid grid-cols-3 gap-3">
               <template x-for="a in overlap.sharedArtists.slice(0, visibleArtistsCount)" :key="a.id">
                 <div class="flex flex-col items-center gap-1 text-center">
-                  <img :src="a.imageUrl" :alt="a.name" class="h-16 w-16 rounded-full object-cover" />
+                  <img :src="a.imageUrl" :alt="a.name" class="h-16 w-16 rounded-full object-cover ring-1 ring-white/10" />
                   <span class="text-xs text-neutral-300" x-text="a.name"></span>
                 </div>
               </template>
@@ -157,7 +157,7 @@
               <template x-for="t in overlap.sharedTracks.slice(0, visibleTracksCount)" :key="t.id">
                 <li class="flex flex-col gap-2">
                   <div class="flex items-center gap-3">
-                    <img :src="t.imageUrl" :alt="t.name" class="h-10 w-10 rounded object-cover" />
+                    <img :src="t.imageUrl" :alt="t.name" class="h-10 w-10 rounded object-cover ring-1 ring-white/10" />
                     <div class="min-w-0 flex-1">
                       <p class="truncate text-sm text-neutral-100" x-text="t.name"></p>
                       <p class="truncate text-xs text-neutral-500" x-text="t.artistName"></p>
@@ -216,7 +216,7 @@
             <div class="grid grid-cols-3 gap-3">
               <template x-for="a in profile.recentArtists" :key="a.id">
                 <div class="flex flex-col items-center gap-1 text-center">
-                  <img :src="a.imageUrl" :alt="a.name" class="h-16 w-16 rounded-full object-cover" />
+                  <img :src="a.imageUrl" :alt="a.name" class="h-16 w-16 rounded-full object-cover ring-1 ring-white/10" />
                   <span class="text-xs text-neutral-300" x-text="a.name"></span>
                 </div>
               </template>
@@ -229,7 +229,7 @@
               <template x-for="t in profile.recentTracks" :key="t.id">
                 <li class="flex flex-col gap-2">
                   <div class="flex items-center gap-3">
-                    <img :src="t.imageUrl" :alt="t.name" class="h-10 w-10 rounded object-cover" />
+                    <img :src="t.imageUrl" :alt="t.name" class="h-10 w-10 rounded object-cover ring-1 ring-white/10" />
                     <p class="min-w-0 flex-1 truncate text-sm text-neutral-100" x-text="t.name"></p>
                     <button
                       type="button"

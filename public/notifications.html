@@ -18,7 +18,7 @@
   <ul class="mx-auto flex max-w-md flex-col gap-2">
     <template x-for="n in notifications" :key="n.id">
       <li>
-        <button class="card flex w-full items-center gap-3 p-3 text-left" @click="open(n)">
+        <button class="card flex w-full items-center gap-3 p-3 text-left transition active:scale-[0.98] active:bg-white/5" @click="open(n)">
           <span class="text-xl" x-text="n.type === 'match' ? '🎉' : '💬'"></span>
           <span class="min-w-0 flex-1">
             <span class="block text-sm text-neutral-100" x-text="n.type === 'match' ? 'New match!' : 'New message'"></span>

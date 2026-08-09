@@ -121,12 +121,12 @@
   >
     <div class="mx-auto flex w-full max-w-md items-center gap-2">
       <input
+        x-ref="searchInput"
         class="field flex-1"
         type="search"
         placeholder="Search for an artist..."
         x-model="searchQuery"
         @input="onSearchInput()"
-        autofocus
       />
       <button class="btn-ghost" @click="closeSearch()">Cancel</button>
     </div>
@@ -134,8 +134,8 @@
     <ul class="mx-auto mt-4 flex w-full max-w-md flex-col gap-2 overflow-y-auto">
       <template x-for="result in searchResults" :key="result.id || result.spotifyArtistId">
         <li>
-          <button class="card flex w-full items-center gap-3 p-3 text-left" @click="selectArtist(result)">
-            <img :src="result.imageUrl" :alt="result.name" class="h-10 w-10 rounded-full object-cover" />
+          <button class="card flex w-full items-center gap-3 p-3 text-left transition active:scale-[0.98] active:bg-white/5" @click="selectArtist(result)">
+            <img :src="result.imageUrl" :alt="result.name" class="h-10 w-10 rounded-full object-cover ring-1 ring-white/10" />
             <span class="text-neutral-100" x-text="result.name"></span>
           </button>
         </li>
@@ -257,6 +257,12 @@
 
         openSearch() {
           this.showSearch = true;
+          // The plain `autofocus` attribute only fires once, on the initial
+          // (hidden) page load -- this element never re-parses when x-show
+          // later reveals it, so it silently did nothing. $nextTick waits for
+          // Alpine to actually flip the modal's `display` before focusing,
+          // otherwise .focus() on a still-hidden input is a no-op too.
+          this.$nextTick(() => this.$refs.searchInput?.focus());
         },
 
         closeSearch() {
