@@ -201,6 +201,61 @@ describe('GET /callback', () => {
     vi.unstubAllGlobals();
   });
 
+  it('persists the granted OAuth scope on the token row, for GET /api/me/player-token to check against', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('accounts.spotify.com/api/token')) {
+          return new Response(
+            JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600, scope: 'user-top-read streaming user-read-playback-state' }),
+            { status: 200 }
+          );
+        }
+        if (url.includes('api.spotify.com/v1/me')) {
+          return new Response(JSON.stringify({ id: 'spotify-scoped', product: 'premium' }), { status: 200 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    const req = new Request('http://localhost/callback?code=abc&state=match', {
+      headers: { Cookie: 'wl_oauth_state=match' },
+    });
+    await worker.fetch(req, env, {} as ExecutionContext);
+
+    const tokenRow = await env.DB.prepare(`SELECT granted_scope FROM music_source_tokens WHERE provider_user_id = 'spotify-scoped'`).first<any>();
+    expect(tokenRow.granted_scope).toBe('user-top-read streaming user-read-playback-state');
+
+    vi.unstubAllGlobals();
+  });
+
+  it('leaves granted_scope null rather than the string "undefined" when Spotify omits scope from the response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('accounts.spotify.com/api/token')) {
+          return new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 }), { status: 200 });
+        }
+        if (url.includes('api.spotify.com/v1/me')) {
+          return new Response(JSON.stringify({ id: 'spotify-unscoped' }), { status: 200 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    const req = new Request('http://localhost/callback?code=abc&state=match', {
+      headers: { Cookie: 'wl_oauth_state=match' },
+    });
+    await worker.fetch(req, env, {} as ExecutionContext);
+
+    const tokenRow = await env.DB.prepare(`SELECT granted_scope FROM music_source_tokens WHERE provider_user_id = 'spotify-unscoped'`).first<any>();
+    expect(tokenRow.granted_scope).toBeNull();
+
+    vi.unstubAllGlobals();
+  });
+
   it('omits Secure on the session cookie over plain http, keeps it over https', async () => {
     const stubFetch = () =>
       vi.stubGlobal(

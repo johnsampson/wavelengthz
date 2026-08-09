@@ -63,23 +63,49 @@
                 aria-label="Like"
               >♥</button>
             </div>
-            <!-- x-if (not x-show): x-show only toggles CSS display, so a
-                 closed iframe stayed mounted and kept playing. x-if actually
-                 removes the element from the DOM, which stops Spotify's
-                 embedded player. autoplay=1 only takes effect because the
-                 iframe is mounted from a click handler (openTrackId is set
-                 by @click above) -- that user gesture is what lets the
-                 browser's autoplay policy allow it. -->
-            <template x-if="openTrackId === track.id">
-              <iframe
-                :src="`https://open.spotify.com/embed/track/${track.spotifyId}?theme=0&autoplay=1`"
-                width="100%"
-                height="80"
-                frameborder="0"
-                allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                loading="lazy"
-                class="rounded-xl"
-              ></iframe>
+            <template x-if="openTrackId === track.id && customPlayerAvailable">
+              <div class="flex items-center gap-3 rounded-xl bg-gradient-to-r from-brand-500/10 to-accent-500/10 p-3 ring-1 ring-brand-500/30">
+                <button
+                  type="button"
+                  class="btn-primary h-9 w-9 shrink-0 rounded-full p-0"
+                  @click="togglePlayPause()"
+                  :aria-label="playerState && !playerState.paused ? 'Pause' : 'Play'"
+                >
+                  <svg x-show="!playerState || playerState.paused" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                  <svg x-show="playerState && !playerState.paused" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
+                    <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
+                  </svg>
+                </button>
+                <div class="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-white/10">
+                  <div class="h-full rounded-full bg-gradient-to-r from-brand-500 to-accent-500" :style="`width:${progressPct}%`"></div>
+                </div>
+                <span class="wordmark shrink-0 text-[10px]">Wavelengthz Player</span>
+              </div>
+            </template>
+            <!-- Fallback path: no Premium/streaming-eligible Wavelengthz
+                 Player this page load, so this track plays the same way it
+                 always has. x-if (not x-show): x-show only toggles CSS
+                 display, so a closed iframe stayed mounted and kept playing.
+                 x-if actually removes the element from the DOM, which stops
+                 Spotify's embedded player. autoplay=1 only takes effect
+                 because the iframe is mounted from a click handler
+                 (openTrackId is set by @click above) -- that user gesture is
+                 what lets the browser's autoplay policy allow it. -->
+            <template x-if="openTrackId === track.id && !customPlayerAvailable">
+              <div class="flex flex-col gap-1">
+                <span class="self-start text-[10px] font-semibold tracking-wide text-amber-400 uppercase">Basic player</span>
+                <iframe
+                  :src="`https://open.spotify.com/embed/track/${track.spotifyId}?theme=0&autoplay=1`"
+                  width="100%"
+                  height="80"
+                  frameborder="0"
+                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                  loading="lazy"
+                  class="rounded-xl"
+                ></iframe>
+              </div>
             </template>
           </li>
         </template>
@@ -102,6 +128,7 @@
     import { api } from '/app.js';
     import { mountHeader, mountNav } from '/nav.js';
     import { requireAuth } from '/auth.js';
+    import { checkPlayerAvailability, playTrack, pausePlayback, resumePlayback, onStateChange } from '/wavelengthzPlayer.js';
     mountHeader();
     mountNav();
 
@@ -116,14 +143,28 @@
         artist: null,
         tracks: [],
         error: null,
-        // Spotify stopped returning preview_url for tracks, so playback goes
-        // through an embedded https://open.spotify.com/embed/track/{id}
-        // iframe instead of an <audio> tag -- see src/index.ts's CSP
-        // frame-src comment. Only one track's iframe is expanded at a time.
+        // Which track's player row is expanded, custom or iframe either way
+        // -- see customPlayerAvailable below for which one actually renders.
         openTrackId: null,
         trackLimit: TRACKS_PAGE_SIZE,
         hasMoreTracks: false,
         loadingMore: false,
+        // Set once at init from wavelengthzPlayer.js's own Premium +
+        // `streaming`-scope check. False (Free tier, or not yet re-
+        // authorized since that scope was added) means every track on this
+        // page falls back to the same open.spotify.com/embed iframe it
+        // always used -- see src/index.ts's CSP comment for why this can't
+        // just always be attempted.
+        customPlayerAvailable: false,
+        // The open track's live position/duration/paused state, from the
+        // Wavelengthz Player's own player_state_changed event. Only
+        // meaningful while customPlayerAvailable is true.
+        playerState: null,
+
+        get progressPct() {
+          if (!this.playerState || !this.playerState.duration) return 0;
+          return (this.playerState.position / this.playerState.duration) * 100;
+        },
 
         async init() {
           if (!(await requireAuth())) return;
@@ -135,6 +176,26 @@
           } catch (e) {
             this.error = 'Could not load this artist. Please try again.';
           }
+
+          const availability = await checkPlayerAvailability();
+          this.customPlayerAvailable = availability.available;
+          if (this.customPlayerAvailable) {
+            onStateChange((state) => {
+              // Ignore state for a track other than the one actually open on
+              // this page -- state comes from the page's one shared Connect
+              // device, so a stale event for whatever played previously
+              // shouldn't reopen/repopulate a since-closed row.
+              const openTrack = this.tracks.find((t) => t.id === this.openTrackId);
+              if (!openTrack || !state || state.track_window?.current_track?.id !== openTrack.spotifyId) return;
+              this.playerState = { paused: state.paused, position: state.position, duration: state.duration };
+            });
+          }
+        },
+
+        async togglePlayPause() {
+          if (!this.playerState) return;
+          if (this.playerState.paused) await resumePlayback();
+          else await pausePlayback();
         },
 
         // GET /api/artists/:id has no offset/cursor to resume from
@@ -158,8 +219,25 @@
           }
         },
 
-        togglePlayer(track) {
-          this.openTrackId = this.openTrackId === track.id ? null : track.id;
+        async togglePlayer(track) {
+          if (this.openTrackId === track.id) {
+            if (this.customPlayerAvailable) await pausePlayback();
+            this.openTrackId = null;
+            this.playerState = null;
+            return;
+          }
+          this.openTrackId = track.id;
+          this.playerState = null;
+          if (!this.customPlayerAvailable) return; // the iframe template handles itself
+          const started = await playTrack(track.spotifyId);
+          if (!started) {
+            // Failed at the actual play call despite passing the earlier
+            // availability check (a transient Spotify/network hiccup, most
+            // likely) -- degrade to the iframe for the rest of this page
+            // view instead of leaving the row stuck on a player that never
+            // starts.
+            this.customPlayerAvailable = false;
+          }
         },
 
         async swipeTrack(track, direction) {

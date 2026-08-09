@@ -26,9 +26,17 @@ export async function getValidAccessToken(user: UserRow, env: Env, db: D1Databas
   const encRefresh = await encrypt(fresh.refresh_token, env.TOKEN_ENCRYPTION_KEY);
   const expiresAt = Date.now() + fresh.expires_in * 1000;
 
+  // fresh.scope reflects whatever the token was actually issued with -- a
+  // refresh can't gain scopes beyond the original /login consent, but
+  // keeping this column current (rather than only ever set at login) means
+  // it never silently drifts stale if Spotify ever narrows a token's scope
+  // out from under it. COALESCE guards against overwriting a known value
+  // with NULL on the rare response (or test stub) that omits `scope`.
   await db
-    .prepare(`UPDATE music_source_tokens SET access_token = ?, refresh_token = ?, token_expires_at = ?, updated_at = ? WHERE user_id = ? AND provider = 'spotify'`)
-    .bind(encAccess, encRefresh, expiresAt, Date.now(), user.id)
+    .prepare(
+      `UPDATE music_source_tokens SET access_token = ?, refresh_token = ?, token_expires_at = ?, granted_scope = COALESCE(?, granted_scope), updated_at = ? WHERE user_id = ? AND provider = 'spotify'`
+    )
+    .bind(encAccess, encRefresh, expiresAt, fresh.scope ?? null, Date.now(), user.id)
     .run();
 
   return fresh.access_token;
