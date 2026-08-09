@@ -77,7 +77,7 @@ describe('POST /internal/seed', () => {
 
 describe('POST /internal/enrich-genres', () => {
   beforeEach(async () => {
-    await env.DB.prepare('DELETE FROM artist_musicbrainz_genres').run();
+    await env.DB.prepare('DELETE FROM artist_genres').run();
     await env.DB.prepare('DELETE FROM artists').run();
   });
 
@@ -132,7 +132,7 @@ describe('POST /internal/enrich-genres', () => {
 
 describe('POST /internal/enrich-genres/hourly', () => {
   beforeEach(async () => {
-    await env.DB.prepare('DELETE FROM artist_musicbrainz_genres').run();
+    await env.DB.prepare('DELETE FROM artist_genres').run();
     await env.DB.prepare('DELETE FROM artists').run();
     await env.RATE_LIMIT_KV.delete('musicbrainz-enrichment-lock');
   });

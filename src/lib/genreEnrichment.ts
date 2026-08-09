@@ -52,9 +52,8 @@ type EnrichOneOutcome = 'matched' | 'matched_no_genres' | 'no_mbid_match' | 'fai
 
 // The actual two-call MusicBrainz lookup, shared by both the batch/cron path
 // below and the queue consumer (queueGenreEnrichment.ts) -- one place doing
-// the lookup, the merge-into-artists.genres, and the
-// artist_musicbrainz_genres write, so the two trigger paths can't drift out
-// of sync with each other.
+// the lookup, the merge-into-artists.genres, and the artist_genres write, so
+// the two trigger paths can't drift out of sync with each other.
 async function enrichOneArtist(db: D1Database, artist: { id: string; spotify_id: string; genres: string }): Promise<EnrichOneOutcome> {
   const now = Date.now();
   try {
@@ -77,11 +76,11 @@ async function enrichOneArtist(db: D1Database, artist: { id: string; spotify_id:
       ...mbGenres.map((g) =>
         db
           .prepare(
-            `INSERT INTO artist_musicbrainz_genres (artist_id, mb_genre_id, name, count, created_at)
-             VALUES (?, ?, ?, ?, ?)
-             ON CONFLICT (artist_id, mb_genre_id) DO UPDATE SET count = excluded.count`
+            `INSERT INTO artist_genres (id, artist_id, mb_genre_id, name, count, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (artist_id, mb_genre_id) DO UPDATE SET count = excluded.count, updated_at = excluded.updated_at`
           )
-          .bind(artist.id, g.id, g.name, g.count, now)
+          .bind(crypto.randomUUID(), artist.id, g.id, g.name, g.count, now, now)
       ),
     ];
     await db.batch(statements);
