@@ -130,6 +130,64 @@ describe('POST /internal/enrich-genres', () => {
   });
 });
 
+describe('POST /internal/enrich-genres/hourly', () => {
+  beforeEach(async () => {
+    await env.DB.prepare('DELETE FROM artist_musicbrainz_genres').run();
+    await env.DB.prepare('DELETE FROM artists').run();
+    await env.RATE_LIMIT_KV.delete('musicbrainz-enrichment-lock');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('rejects requests without the correct seed secret', async () => {
+    const req = new Request('http://localhost/internal/enrich-genres/hourly', { method: 'POST' });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(403);
+  });
+
+  it('runs the same deadline-and-lock-governed function the hourly cron uses', async () => {
+    await env.DB.prepare(
+      `INSERT INTO artists (id, spotify_id, name, genres, source, approved, created_at) VALUES ('a1', 'sp1', 'A1', '{}', 'seed', 1, 1000)`
+    ).run();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ urls: [] }), { status: 200 })));
+
+    vi.useFakeTimers();
+    const req = new Request('http://localhost/internal/enrich-genres/hourly', {
+      method: 'POST',
+      headers: { 'X-Seed-Secret': env.SEED_SECRET },
+    });
+    const resPromise = worker.fetch(req, env, {} as ExecutionContext);
+    await vi.runAllTimersAsync();
+    const res = await resPromise;
+
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    expect(body).toEqual({ attempted: 1, matched: 0, noMbidMatch: 1, matchedButNoGenres: 0, failed: 0 });
+    expect(await env.RATE_LIMIT_KV.get('musicbrainz-enrichment-lock')).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it('reports skipped rather than double-running when a run is already in flight', async () => {
+    await env.RATE_LIMIT_KV.put('musicbrainz-enrichment-lock', '1', { expirationTtl: 3600 });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const req = new Request('http://localhost/internal/enrich-genres/hourly', {
+      method: 'POST',
+      headers: { 'X-Seed-Secret': env.SEED_SECRET },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    expect(body).toEqual({ skipped: true, reason: 'already_running' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+});
+
 describe('POST /internal/users/:id/delete', () => {
   beforeEach(async () => {
     await env.DB.exec('DELETE FROM sessions; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;');
