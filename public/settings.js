@@ -149,9 +149,14 @@ export function createSettingsApp() {
               // logs in on the same shared device/browser. Re-POSTing it
               // re-points ownership at the current session's user via the
               // subscribe route's ON CONFLICT(endpoint) DO UPDATE SET
-              // user_id = excluded.user_id.
+              // user_id = excluded.user_id. This call needs the same timeout
+              // guard as the serviceWorker.ready check above to prevent
+              // hanging indefinitely on network stalls.
               try {
-                await api.pushSubscribe(existingSubscription.toJSON());
+                await Promise.race([
+                  api.pushSubscribe(existingSubscription.toJSON()),
+                  new Promise((resolve) => setTimeout(resolve, 4000)),
+                ]);
               } catch (err) {
                 console.error('Re-subscribing existing push subscription failed:', err);
               }
