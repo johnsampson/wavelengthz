@@ -107,7 +107,7 @@ function withSecurityHeaders(response: Response): Response {
     // embed (public/artist.html et al) -- Spotify stopped returning
     // preview_url for tracks, so that fallback plays via
     // https://open.spotify.com/embed/track/{id} instead of an <audio> tag.
-    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://sdk.scdn.co; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https://*.scdn.co data:; connect-src 'self' https://*.spotify.com wss://*.spotify.com https://*.scdn.co; frame-src https://open.spotify.com https://sdk.scdn.co; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://sdk.scdn.co; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https://img.wavelengthz.com https://*.scdn.co data:; connect-src 'self' https://*.spotify.com wss://*.spotify.com https://*.scdn.co; frame-src https://open.spotify.com https://sdk.scdn.co; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
   );
   headers.set('X-Frame-Options', 'DENY');
   headers.set('X-Content-Type-Options', 'nosniff');

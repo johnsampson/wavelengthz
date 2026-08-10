@@ -35,8 +35,9 @@
 // notificationclick's existing-tab match: message pushes now deep-link with
 // a matchId query string, so comparing only pathname (the old check) wrongly
 // treated any open /messages tab as "the same" conversation regardless of
-// which match it was actually showing.
-const CACHE_NAME = 'wavelengthz-shell-v21';
+// which match it was actually showing. v22 points push notifications' icon
+// at the hosted app logo instead of the local placeholder /icons/icon-192.png.
+const CACHE_NAME = 'wavelengthz-shell-v22';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -115,7 +116,7 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(payload.title, {
       body: payload.body,
-      icon: '/icons/icon-192.png',
+      icon: 'https://img.wavelengthz.com/wavelengthz-logo-transparent.png',
       data: { url: payload.url },
     })
   );
