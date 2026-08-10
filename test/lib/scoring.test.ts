@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   haversineKm,
-  proximityScore,
   bucketedDistanceLabel,
   weightedOverlap,
   jaccard,
@@ -18,18 +17,6 @@ describe('haversineKm', () => {
     const km = haversineKm(30.2672, -97.7431, 32.7767, -96.797);
     expect(km).toBeGreaterThan(280);
     expect(km).toBeLessThan(320);
-  });
-});
-
-describe('proximityScore', () => {
-  it('is 1 at zero distance', () => {
-    expect(proximityScore(0, 80)).toBe(1);
-  });
-  it('is 0 beyond max distance', () => {
-    expect(proximityScore(81, 80)).toBe(0);
-  });
-  it('decreases linearly within range', () => {
-    expect(proximityScore(40, 80)).toBeCloseTo(0.5, 5);
   });
 });
 
@@ -85,21 +72,29 @@ describe('computeBlendedScore', () => {
       spotifyOverlap: 1,
       musicSwipeOverlap: 1,
       mutualInterestBoost: 1,
-      proximityScore: 1,
     });
-    expect(score).toBeCloseTo(1, 5);
+    // Weights intentionally sum to 0.8, not 1 -- this score is sort-order
+    // only, never displayed as an absolute/percentage value (see
+    // computeBlendedScore's comment).
+    expect(score).toBeCloseTo(0.8, 5);
   });
 
   it('is 0 when every input is 0', () => {
-    expect(
-      computeBlendedScore({ spotifyOverlap: 0, musicSwipeOverlap: 0, mutualInterestBoost: 0, proximityScore: 0 })
-    ).toBe(0);
+    expect(computeBlendedScore({ spotifyOverlap: 0, musicSwipeOverlap: 0, mutualInterestBoost: 0 })).toBe(0);
   });
 
-  it('weights spotifyOverlap most heavily among the four inputs', () => {
-    const onlySpotify = computeBlendedScore({ spotifyOverlap: 1, musicSwipeOverlap: 0, mutualInterestBoost: 0, proximityScore: 0 });
-    const onlyProximity = computeBlendedScore({ spotifyOverlap: 0, musicSwipeOverlap: 0, mutualInterestBoost: 0, proximityScore: 1 });
-    expect(onlySpotify).toBeGreaterThan(onlyProximity);
+  it('weights spotifyOverlap most heavily among the three inputs', () => {
+    const onlySpotify = computeBlendedScore({ spotifyOverlap: 1, musicSwipeOverlap: 0, mutualInterestBoost: 0 });
+    const onlyMutualInterest = computeBlendedScore({ spotifyOverlap: 0, musicSwipeOverlap: 0, mutualInterestBoost: 1 });
+    expect(onlySpotify).toBeGreaterThan(onlyMutualInterest);
     expect(onlySpotify).toBeCloseTo(0.35, 5);
+  });
+
+  it('ignores a stray proximityScore field, proving distance no longer influences the score at all', () => {
+    // Geography is a pool filter (peopleSwipes.ts's SQL/haversine check
+    // against max_distance_km), not a scoring input -- issue #35 §5.4.
+    const withProximity = computeBlendedScore({ spotifyOverlap: 1, musicSwipeOverlap: 1, mutualInterestBoost: 1, proximityScore: 0 } as any);
+    const without = computeBlendedScore({ spotifyOverlap: 1, musicSwipeOverlap: 1, mutualInterestBoost: 1 });
+    expect(withProximity).toBe(without);
   });
 });

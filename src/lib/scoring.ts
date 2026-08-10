@@ -7,7 +7,6 @@ export interface BlendedScoreInput {
   spotifyOverlap: number;
   musicSwipeOverlap: number;
   mutualInterestBoost: number;
-  proximityScore: number;
 }
 
 const EARTH_RADIUS_KM = 6371;
@@ -20,12 +19,6 @@ export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: numb
     Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
   return EARTH_RADIUS_KM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-export function proximityScore(distanceKm: number, maxDistanceKm: number): number {
-  if (distanceKm > maxDistanceKm) return 0;
-  if (maxDistanceKm === 0) return distanceKm === 0 ? 1 : 0;
-  return 1 - distanceKm / maxDistanceKm;
 }
 
 export function bucketedDistanceLabel(distanceKm: number): string {
@@ -72,11 +65,14 @@ export function spotifyOverlap(a: MusicProfile, b: MusicProfile): number {
   return (artistScore + genreScore) / 2;
 }
 
+// Geography is a pure eligibility filter (the SQL lat/lng band + haversine
+// check in peopleSwipes.ts, enforced against max_distance_km before this
+// ever runs), not a scoring input -- per issue #35 §5.4, distance decides
+// who's in the candidate pool at all, not how eligible people rank against
+// each other. These three weights intentionally sum to 0.8, not 1 -- this
+// score is only ever used for sort ordering (never displayed as an absolute
+// or percentage value), and ordering is unaffected by a constant scalar, so
+// there's no reason to rescale them just to hit a round number.
 export function computeBlendedScore(input: BlendedScoreInput): number {
-  return (
-    0.35 * input.spotifyOverlap +
-    0.3 * input.musicSwipeOverlap +
-    0.15 * input.mutualInterestBoost +
-    0.2 * input.proximityScore
-  );
+  return 0.35 * input.spotifyOverlap + 0.3 * input.musicSwipeOverlap + 0.15 * input.mutualInterestBoost;
 }
