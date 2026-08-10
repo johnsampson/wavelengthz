@@ -1,7 +1,7 @@
 import type { UserRow } from './session';
 import { getMusicProfile, getRightSwipedItemIds } from './profile';
 import type { MusicProfile } from './scoring';
-import { haversineKm, proximityScore, spotifyOverlap, jaccard, computeBlendedScore } from './scoring';
+import { haversineKm, spotifyOverlap, jaccard, computeBlendedScore } from './scoring';
 import { isMutuallyWithinAgeRange, type AgePreferences } from './age';
 
 /** Everything scoring needs about one participant, already loaded. */
@@ -28,13 +28,15 @@ export function scoreCandidateFromInputs(
   candidateInputs: ScoringInputs,
   alreadyLikedMe: boolean
 ): { score: number; distanceKm: number } {
+  // Still computed and returned -- distanceKm feeds bucketedDistanceLabel
+  // for display ("12 miles away") and the caller's own radius filtering.
+  // It no longer feeds the score itself; see computeBlendedScore's comment.
   const distanceKm = haversineKm(me.lat!, me.lng!, candidate.lat!, candidate.lng!);
 
   const score = computeBlendedScore({
     spotifyOverlap: spotifyOverlap(meInputs.profile, candidateInputs.profile),
     musicSwipeOverlap: jaccard(meInputs.rightSwiped, candidateInputs.rightSwiped),
     mutualInterestBoost: alreadyLikedMe ? 1 : 0,
-    proximityScore: proximityScore(distanceKm, me.max_distance_km),
   });
 
   return { score, distanceKm };
