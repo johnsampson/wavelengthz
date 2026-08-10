@@ -71,7 +71,7 @@ MATCH_NOTIFICATION_DELAY_MINUTES = "5"
 # push sends will fail (importVapidPrivateKey in src/lib/webPush.ts throws)
 # until VAPID_PRIVATE_KEY is also set via `wrangler secret put
 # VAPID_PRIVATE_KEY` for whichever account this actually deploys to.
-VAPID_PUBLIC_KEY = "BLgDkH4E0sjLy8Pt1p0SUYC8KBwqwIkBgFOTo9zZkHWwtE94N4f_jc2MdRBsl8rSJWOEwxY34OAK0f24ZsHazmE"
+VAPID_PUBLIC_KEY = "BCwiQZeDBv-OpwX4qhUY1jF3prRgwPUiU2HVe1ZuVGv6GQG08tyYXCgqFWNAZEY7Z-9mzM29AFkP9hbsVxdG2LA"
 
 [[queues.producers]]
 # Enqueued right after a brand-new artist is inserted (see upsertArtist's
