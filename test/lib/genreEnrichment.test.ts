@@ -220,6 +220,7 @@ describe('enrichArtistGenresFromMusicBrainz', () => {
 describe('runHourlyGenreEnrichment', () => {
   beforeEach(async () => {
     await env.RATE_LIMIT_KV.delete('musicbrainz-enrichment-lock');
+    await env.DB.prepare('DELETE FROM genres').run();
   });
 
   it('acquires and releases the lock around a normal run', async () => {
@@ -231,8 +232,33 @@ describe('runHourlyGenreEnrichment', () => {
     await vi.runAllTimersAsync();
     const result = await resultPromise;
 
-    expect(result).toEqual({ attempted: 1, matched: 0, noMbidMatch: 1, matchedButNoGenres: 0, failed: 0 });
+    expect(result).toEqual({
+      artists: { attempted: 1, matched: 0, noMbidMatch: 1, matchedButNoGenres: 0, failed: 0 },
+      genreDensity: { attempted: 0, updated: 0, failed: 0 },
+    });
     expect(await env.RATE_LIMIT_KV.get('musicbrainz-enrichment-lock')).toBeNull();
+  });
+
+  it('also runs the genre-density phase, sharing the same deadline as artist enrichment', async () => {
+    await env.DB.prepare(
+      `INSERT INTO genres (id, genre, artist_count, track_count, created_at, updated_at) VALUES ('g1', 'pop', 1, 0, 1000, 1000)`
+    ).run();
+    // stubNoMbidMatch's response has no `count` field, so the genre-density
+    // phase's fetchGenreArtistCount reads it as 0 -- fine, this test only
+    // cares that the phase runs and writes something, not the exact value.
+    stubNoMbidMatch();
+
+    vi.useFakeTimers();
+    const resultPromise = runHourlyGenreEnrichment(env.DB, env.RATE_LIMIT_KV);
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result).toEqual({
+      artists: { attempted: 0, matched: 0, noMbidMatch: 0, matchedButNoGenres: 0, failed: 0 },
+      genreDensity: { attempted: 1, updated: 1, failed: 0 },
+    });
+    const row = await env.DB.prepare('SELECT musicbrainz_artist_count FROM genres WHERE id = ?').bind('g1').first<any>();
+    expect(row.musicbrainz_artist_count).toBe(0);
   });
 
   it('skips the run entirely when a previous run has not released the lock yet', async () => {

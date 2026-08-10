@@ -56,3 +56,21 @@ export async function fetchMusicBrainzGenres(mbid: string): Promise<MusicBrainzG
   const data = await res.json<{ genres?: Array<{ id: string; name: string; count: number }> }>();
   return (data.genres ?? []).map((g) => ({ id: g.id, name: g.name, count: g.count }));
 }
+
+// Corpus-wide "how common is this genre" density, distinct from a single
+// artist's own genre tags above -- this is the *search* endpoint's top-level
+// `count` field, confirmed live to be the total number of matching artists
+// across all of MusicBrainz, not the page size (`limit=1` keeps the actual
+// result payload minimal since only the count is used). Queried per genre,
+// not per artist -- a small, slow-changing set, a completely different rate
+// budget than the per-artist enrichment pipeline.
+export async function fetchGenreArtistCount(genre: string): Promise<number> {
+  const query = `tag:${JSON.stringify(genre)}`;
+  const res = await fetch(`https://musicbrainz.org/ws/2/artist/?query=${encodeURIComponent(query)}&limit=1&fmt=json`, {
+    headers: { 'User-Agent': MUSICBRAINZ_USER_AGENT },
+  });
+  if (!res.ok) throw new Error(`MusicBrainz genre density search failed: ${res.status} ${await res.text()}`);
+
+  const data = await res.json<{ count?: number }>();
+  return data.count ?? 0;
+}
