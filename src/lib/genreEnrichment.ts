@@ -1,5 +1,6 @@
 import { lookupMusicBrainzArtistId, fetchMusicBrainzGenres } from './musicbrainz';
 import { genresToObject, genresFromRow } from './genres';
+import { fetchGenreDensities, type GenreDensityResult } from './genreDensity';
 
 // MusicBrainz's documented rate limit is 1 request/second per IP, strictly
 // enforced (a 503 on violation). Padded further than the usual 10% margin
@@ -147,11 +148,22 @@ export async function enrichArtistGenresFromMusicBrainz(
   return result;
 }
 
-export type HourlyGenreEnrichmentResult = GenreEnrichmentResult | { skipped: true; reason: 'already_running' };
+export interface HourlyGenreEnrichmentRunResult {
+  artists: GenreEnrichmentResult;
+  genreDensity: GenreDensityResult;
+}
+
+export type HourlyGenreEnrichmentResult = HourlyGenreEnrichmentRunResult | { skipped: true; reason: 'already_running' };
 
 // Cron entry point (see src/index.ts's scheduled handler, event.cron ===
-// '0 * * * *'). Wraps the deadline-governed run above with the soft
-// overlap guard described near MUSICBRAINZ_LOCK_KV_KEY.
+// '0 * * * *'). Wraps two deadline-governed phases -- artist genre
+// enrichment, then genre density (genreDensity.ts) -- with the soft overlap
+// guard described near MUSICBRAINZ_LOCK_KV_KEY. Both phases share one
+// deadline and one lock rather than each getting their own: they hit the
+// same global MusicBrainz rate limit, so they must never run concurrently
+// with each other, and a single shared 55-minute budget (not 55 minutes
+// each) is what actually keeps this run finishing before the next hourly
+// tick.
 export async function runHourlyGenreEnrichment(db: D1Database, kv: KVNamespace): Promise<HourlyGenreEnrichmentResult> {
   let lockAcquired = true;
   try {
@@ -166,7 +178,10 @@ export async function runHourlyGenreEnrichment(db: D1Database, kv: KVNamespace):
   }
 
   try {
-    return await enrichArtistGenresFromMusicBrainz(db, { deadline: Date.now() + MUSICBRAINZ_CRON_MAX_RUNTIME_MS });
+    const deadline = Date.now() + MUSICBRAINZ_CRON_MAX_RUNTIME_MS;
+    const artists = await enrichArtistGenresFromMusicBrainz(db, { deadline });
+    const genreDensity = await fetchGenreDensities(db, { deadline });
+    return { artists, genreDensity };
   } finally {
     if (lockAcquired) {
       try {

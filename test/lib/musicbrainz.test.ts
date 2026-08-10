@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { lookupMusicBrainzArtistId, fetchMusicBrainzGenres } from '../../src/lib/musicbrainz';
+import { lookupMusicBrainzArtistId, fetchMusicBrainzGenres, fetchGenreArtistCount } from '../../src/lib/musicbrainz';
 
 describe('lookupMusicBrainzArtistId', () => {
   it('extracts the linked MBID from a matched Spotify-URL relationship', async () => {
@@ -108,6 +108,52 @@ describe('fetchMusicBrainzGenres', () => {
     const genres = await fetchMusicBrainzGenres('some-mbid');
 
     expect(genres).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('fetchGenreArtistCount', () => {
+  it('returns the search response\'s top-level count -- the corpus-wide total, not the page size', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ count: 29075, offset: 0, artists: [{ id: 'x' }] }), { status: 200 }))
+    );
+
+    const count = await fetchGenreArtistCount('pop');
+
+    expect(count).toBe(29075);
+    vi.unstubAllGlobals();
+  });
+
+  it('quotes multi-word genre names in the tag query', async () => {
+    let requestedUrl = '';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        requestedUrl = input.toString();
+        return new Response(JSON.stringify({ count: 1253 }), { status: 200 });
+      })
+    );
+
+    await fetchGenreArtistCount('deep house');
+
+    expect(decodeURIComponent(requestedUrl)).toContain('tag:"deep house"');
+    vi.unstubAllGlobals();
+  });
+
+  it('returns 0 when the response has no count field', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({}), { status: 200 })));
+
+    const count = await fetchGenreArtistCount('some-obscure-tag');
+
+    expect(count).toBe(0);
+    vi.unstubAllGlobals();
+  });
+
+  it('throws with the response body on a non-OK response', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('rate limited', { status: 503 })));
+
+    await expect(fetchGenreArtistCount('pop')).rejects.toThrow(/503/);
     vi.unstubAllGlobals();
   });
 });
