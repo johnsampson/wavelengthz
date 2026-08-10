@@ -134,6 +134,7 @@ describe('POST /internal/enrich-genres/hourly', () => {
   beforeEach(async () => {
     await env.DB.prepare('DELETE FROM artist_genres').run();
     await env.DB.prepare('DELETE FROM artists').run();
+    await env.DB.prepare('DELETE FROM genres').run();
     await env.RATE_LIMIT_KV.delete('musicbrainz-enrichment-lock');
   });
 
@@ -147,7 +148,7 @@ describe('POST /internal/enrich-genres/hourly', () => {
     expect(res.status).toBe(403);
   });
 
-  it('runs the same deadline-and-lock-governed function the hourly cron uses', async () => {
+  it('runs the same deadline-and-lock-governed function the hourly cron uses, including the genre-density phase', async () => {
     await env.DB.prepare(
       `INSERT INTO artists (id, spotify_id, name, genres, source, approved, created_at) VALUES ('a1', 'sp1', 'A1', '{}', 'seed', 1, 1000)`
     ).run();
@@ -164,7 +165,10 @@ describe('POST /internal/enrich-genres/hourly', () => {
 
     expect(res.status).toBe(200);
     const body = await res.json<any>();
-    expect(body).toEqual({ attempted: 1, matched: 0, noMbidMatch: 1, matchedButNoGenres: 0, failed: 0 });
+    expect(body).toEqual({
+      artists: { attempted: 1, matched: 0, noMbidMatch: 1, matchedButNoGenres: 0, failed: 0 },
+      genreDensity: { attempted: 0, updated: 0, failed: 0 },
+    });
     expect(await env.RATE_LIMIT_KV.get('musicbrainz-enrichment-lock')).toBeNull();
     vi.unstubAllGlobals();
   });
@@ -185,6 +189,55 @@ describe('POST /internal/enrich-genres/hourly', () => {
     expect(body).toEqual({ skipped: true, reason: 'already_running' });
     expect(fetchMock).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
+  });
+});
+
+describe('POST /internal/enrich-genre-density', () => {
+  beforeEach(async () => {
+    await env.DB.prepare('DELETE FROM genres').run();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects requests without the correct seed secret', async () => {
+    const req = new Request('http://localhost/internal/enrich-genre-density', { method: 'POST' });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(403);
+  });
+
+  it('runs density fetching and returns counts when the secret matches', async () => {
+    await env.DB.prepare(
+      `INSERT INTO genres (id, genre, artist_count, track_count, created_at, updated_at) VALUES ('g1', 'pop', 1, 0, 1000, 1000)`
+    ).run();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ count: 29075 }), { status: 200 })));
+
+    const req = new Request('http://localhost/internal/enrich-genre-density', {
+      method: 'POST',
+      headers: { 'X-Seed-Secret': env.SEED_SECRET },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    expect(body).toEqual({ attempted: 1, updated: 1, failed: 0 });
+  });
+
+  it('rejects a non-numeric or non-positive ?count= with 400, without touching MusicBrainz', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    for (const bad of ['not-a-number', '0', '-5']) {
+      const req = new Request(`http://localhost/internal/enrich-genre-density?count=${bad}`, {
+        method: 'POST',
+        headers: { 'X-Seed-Secret': env.SEED_SECRET },
+      });
+      const res = await worker.fetch(req, env, {} as ExecutionContext);
+      expect(res.status).toBe(400);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
