@@ -15,6 +15,15 @@ const LOCATION_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_AGE = 18;
 const MAX_AGE = 100;
 
+// Converts the VAPID public key (base64url, from GET /api/push/vapid-public-key)
+// into the Uint8Array pushManager.subscribe()'s applicationServerKey expects.
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+}
+
 export function createSettingsApp() {
   return {
     maxDistanceKm: 80,
@@ -42,6 +51,10 @@ export function createSettingsApp() {
     error: null,
     saved: false,
     loading: true,
+    pushSupported: false,
+    pushEnabled: false,
+    pushPermissionDenied: false,
+    showIosInstallBanner: false,
 
     get locationCooldownRemainingMs() {
       if (this.locationUpdatedAt == null) return 0;
@@ -88,6 +101,10 @@ export function createSettingsApp() {
           if (params.has('spotify_connected') || params.has('spotify_error')) {
             window.history.replaceState({}, '', '/settings');
           }
+
+          const isIos = /iP(hone|ad|od)/.test(navigator.userAgent);
+          const isStandalone = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator?.standalone === true;
+          this.showIosInstallBanner = isIos && !isStandalone && !localStorage.getItem('wl_ios_install_dismissed');
         }
         this.gender = me.user.gender ?? '';
         this.seeking = me.user.seeking ?? '';
@@ -105,6 +122,47 @@ export function createSettingsApp() {
         this.locationLabel = me.user.location_label;
         this.locationUpdatedAt = me.user.location_updated_at;
         this.photos = photosRes.photos;
+
+        if (typeof window !== 'undefined') {
+          this.pushSupported = typeof navigator !== 'undefined' && 'serviceWorker' in navigator && typeof Notification !== 'undefined';
+          if (this.pushSupported) {
+            this.pushPermissionDenied = Notification.permission === 'denied';
+            // navigator.serviceWorker.ready never rejects, and never
+            // resolves at all if no service worker has been registered for
+            // this page's scope yet (the SW is only registered from
+            // index.html -- a user who bookmarks /settings directly and
+            // never visits '/' first has none). This block runs last in the
+            // try, after everything else has already been assigned, and is
+            // additionally raced against a timeout so a missing
+            // registration degrades pushSupported/pushEnabled to their
+            // false defaults instead of leaving `loading` stuck true
+            // forever.
+            const existingSubscription = await Promise.race([
+              navigator.serviceWorker.ready.then((registration) => registration.pushManager.getSubscription()),
+              new Promise((resolve) => setTimeout(() => resolve(null), 4000)),
+            ]);
+            this.pushEnabled = existingSubscription != null;
+            if (existingSubscription) {
+              // A browser's push subscription belongs to whichever account
+              // last subscribed on this device, not necessarily the one now
+              // logged in -- e.g. user A enables push, logs out, and user B
+              // logs in on the same shared device/browser. Re-POSTing it
+              // re-points ownership at the current session's user via the
+              // subscribe route's ON CONFLICT(endpoint) DO UPDATE SET
+              // user_id = excluded.user_id. This call needs the same timeout
+              // guard as the serviceWorker.ready check above to prevent
+              // hanging indefinitely on network stalls.
+              try {
+                await Promise.race([
+                  api.pushSubscribe(existingSubscription.toJSON()),
+                  new Promise((resolve) => setTimeout(resolve, 4000)),
+                ]);
+              } catch (err) {
+                console.error('Re-subscribing existing push subscription failed:', err);
+              }
+            }
+          }
+        }
       } catch (e) {
         if (e.status === 401) {
           window.location.href = '/login';
@@ -223,6 +281,48 @@ export function createSettingsApp() {
       } catch (e) {
         this.photoError = 'Could not remove that photo. Please try again.';
       }
+    },
+
+    async enablePush() {
+      this.error = null;
+      try {
+        const permission = await Notification.requestPermission();
+        this.pushPermissionDenied = permission === 'denied';
+        if (permission !== 'granted') return;
+
+        const { publicKey } = await api.pushVapidPublicKey();
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey),
+        });
+        await api.pushSubscribe(subscription.toJSON());
+        this.pushEnabled = true;
+      } catch (e) {
+        console.error('Enable notifications failed:', e);
+        this.error = 'Could not enable notifications. Please try again.';
+      }
+    },
+
+    async disablePush() {
+      this.error = null;
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        if (subscription) {
+          await api.pushUnsubscribe(subscription.endpoint);
+          await subscription.unsubscribe();
+        }
+        this.pushEnabled = false;
+      } catch (e) {
+        console.error('Disable notifications failed:', e);
+        this.error = 'Could not disable notifications. Please try again.';
+      }
+    },
+
+    dismissIosInstallBanner() {
+      this.showIosInstallBanner = false;
+      if (typeof localStorage !== 'undefined') localStorage.setItem('wl_ios_install_dismissed', '1');
     },
 
     async logout() {

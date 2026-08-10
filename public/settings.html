@@ -24,6 +24,23 @@
     <a href="/login/spotify?intent=connect" class="btn-primary block w-full text-center">Connect Spotify</a>
     <p class="mt-1 text-center text-xs text-neutral-500">Link your Spotify account for music-taste matching.</p>
   </div>
+  <div x-show="showIosInstallBanner" class="card mx-auto mb-4 max-w-md p-4 text-sm">
+    <p class="font-semibold text-neutral-200">Get notifications on iPhone</p>
+    <p class="mt-1 text-neutral-400">Tap the Share button, then "Add to Home Screen" -- notifications only work once Wavelengthz is installed this way.</p>
+    <button type="button" class="btn-ghost mt-2" @click="dismissIosInstallBanner()">Got it</button>
+  </div>
+
+  <div x-show="pushSupported" class="card mx-auto mb-4 flex max-w-md items-center justify-between p-4">
+    <div class="text-sm">
+      <p class="font-semibold text-neutral-200">Notifications</p>
+      <p class="text-neutral-500" x-show="!pushPermissionDenied">Get notified about new matches and messages.</p>
+      <p class="text-neutral-500" x-show="pushPermissionDenied">Blocked in your browser settings -- notifications can't be re-requested from here.</p>
+    </div>
+    <button type="button" class="btn-secondary" :disabled="pushPermissionDenied" @click="pushEnabled ? disablePush() : enablePush()">
+      <span x-text="pushEnabled ? 'On' : 'Off'"></span>
+    </button>
+  </div>
+
   <p x-show="info" x-text="info" class="mx-auto mb-4 max-w-md text-brand-400" role="status"></p>
 
   <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>

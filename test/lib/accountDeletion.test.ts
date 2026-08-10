@@ -23,6 +23,7 @@ beforeEach(async () => {
     DELETE FROM messages; DELETE FROM matches; DELETE FROM user_photos;
     DELETE FROM people_swipes; DELETE FROM music_swipes; DELETE FROM user_genres; DELETE FROM music_profiles;
     DELETE FROM blocks; DELETE FROM reports; DELETE FROM notifications; DELETE FROM sessions;
+    DELETE FROM push_subscriptions;
     DELETE FROM tracks; DELETE FROM artists;
     DELETE FROM music_source_tokens; DELETE FROM auth_identities;
     DELETE FROM users;
@@ -45,6 +46,9 @@ describe('hardDeleteUser', () => {
     await env.DB.prepare(`INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at) VALUES ('mp8', 'u1', '[]', '[]', '[]', 'medium_term', 1000, 1000, 1000)`).run();
     await env.DB.prepare(`INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES ('b1', 'u1', 'u2', 1000)`).run();
     await env.DB.prepare(`INSERT INTO notifications (id, user_id, type, related_id, created_at) VALUES ('n1', 'u1', 'match', 'm1', 1000)`).run();
+    await env.DB.prepare(
+      `INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, created_at, updated_at) VALUES ('ps-sub-1', 'u1', 'https://push.example/u1-device', 'p256dh-key', 'auth-key', 1000, 1000)`
+    ).run();
     const { id: sessionId } = await createSession(env.DB, 'u1');
 
     await hardDeleteUser(env as any, 'u1');
@@ -64,6 +68,7 @@ describe('hardDeleteUser', () => {
     expect(await env.DB.prepare('SELECT * FROM music_profiles WHERE user_id = ?').bind('u1').first()).toBeNull();
     expect(await env.DB.prepare('SELECT * FROM blocks WHERE id = ?').bind('b1').first()).toBeNull();
     expect(await env.DB.prepare('SELECT * FROM notifications WHERE id = ?').bind('n1').first()).toBeNull();
+    expect(await env.DB.prepare('SELECT * FROM push_subscriptions WHERE id = ?').bind('ps-sub-1').first()).toBeNull();
     expect(await env.DB.prepare('SELECT * FROM sessions WHERE id = ?').bind(sessionId).first()).toBeNull();
   });
 });

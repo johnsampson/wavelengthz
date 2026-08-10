@@ -23,8 +23,8 @@ email — built on Cloudflare Workers + D1 + R2. Full design in `docs/PLAN.md`.
    `wrangler d1 migrations create wavelengthz-db <name>`, applied the same
    way to both targets — never a hand-run `wrangler d1 execute --command=...`
    against either database, which leaves no record of what changed or when.
-6. Set secrets. All eleven are required — the list must stay in sync with the
-   `Env` interface in `src/env.d.ts`. Note that `R2_BUCKET_NAME` and
+6. Set secrets. All thirteen are required — the list must stay in sync with
+   the `Env` interface in `src/env.d.ts`. Note that `R2_BUCKET_NAME` and
    `RESEND_FROM_ADDRESS` fail *silently* when missing: photo uploads and every
    transactional email respectively just stop working, with no startup error.
    ```
@@ -39,6 +39,8 @@ email — built on Cloudflare Workers + D1 + R2. Full design in `docs/PLAN.md`.
    wrangler secret put RESEND_API_KEY
    wrangler secret put RESEND_FROM_ADDRESS    # verified Resend sender, e.g. matches@wavelengthz.app
    wrangler secret put SENTRY_DSN
+   wrangler secret put VAPID_PRIVATE_KEY      # matches VAPID_PUBLIC_KEY in wrangler.toml -- generate both together, see the comment there
+   wrangler secret put VAPID_SUBJECT          # mailto: contact address RFC 8292 requires, e.g. mailto:support@wavelengthz.com
    ```
 7. `npm run build:css` to build Tailwind's output before first run/deploy.
 8. `wrangler dev` for local development.
@@ -49,7 +51,8 @@ email — built on Cloudflare Workers + D1 + R2. Full design in `docs/PLAN.md`.
 
 - [ ] Change `SPOTIFY_REDIRECT_URI` in `wrangler.toml` from `http://localhost:8787/callback` to the real production URL, and register that exact URL in the Spotify app dashboard — OAuth fails for every user until both sides match.
 - [ ] Confirm the production schema was applied with `--remote` (step 5) — the default targets the local dev DB.
-- [ ] Confirm all eleven secrets from step 6 are set in production (`wrangler secret list`); `R2_BUCKET_NAME` and `RESEND_FROM_ADDRESS` fail silently if missing.
+- [ ] Confirm all thirteen secrets from step 6 are set in production (`wrangler secret list`); `R2_BUCKET_NAME` and `RESEND_FROM_ADDRESS` fail silently if missing.
+- [ ] Confirm `VAPID_PUBLIC_KEY` in `wrangler.toml` has been replaced with a real generated key (not the placeholder) — push notifications are 100% non-functional otherwise — and that the matching `VAPID_PRIVATE_KEY`/`VAPID_SUBJECT` secrets are set (step 6).
 - [ ] Confirm Cloudflare D1 point-in-time recovery is enabled for the production database in the dashboard — it is not on by default.
 - [ ] Confirm the `wavelengthz` domain is registered (docs/PLAN.md §16).
 - [ ] Have `legal/privacy-policy.md` and `legal/terms-of-service.md` reviewed by counsel and replace the draft placeholders.

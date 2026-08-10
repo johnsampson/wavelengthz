@@ -66,6 +66,7 @@ export async function hardDeleteUser(env: Env, userId: string): Promise<void> {
 
   await env.DB.prepare('DELETE FROM notifications WHERE user_id = ?').bind(userId).run();
   await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId).run();
+  await env.DB.prepare('DELETE FROM push_subscriptions WHERE user_id = ?').bind(userId).run();
 
   // Catalog rows (artists/tracks a user added via search-and-add) outlive the user;
   // added_by_user_id is nullable, so null it rather than leaving it dangling.

@@ -13,6 +13,7 @@ import { registerSafetyRoutes } from './routes/safety';
 import { registerAccountRoutes } from './routes/account';
 import { registerGroupRoutes } from './routes/groups';
 import { registerPlayerRoutes } from './routes/player';
+import { registerPushRoutes } from './routes/push';
 import { purgeExpiredDeletions } from './lib/accountDeletion';
 import { refreshCatalogFromProfiles } from './db/catalogRefresh';
 import { sendDelayedMatchNotificationEmails } from './lib/notifications';
@@ -37,6 +38,7 @@ registerSafetyRoutes(router);
 registerAccountRoutes(router);
 registerGroupRoutes(router);
 registerPlayerRoutes(router);
+registerPushRoutes(router);
 
 // Falls back to the ASSETS binding (static HTML/JS/CSS under public/) for
 // anything that isn't an API route -- required once [assets].run_worker_first

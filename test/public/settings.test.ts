@@ -9,6 +9,15 @@ function stubApi(user: Record<string, unknown>, photos: Array<Record<string, unk
     if (path === '/api/photos' && (!options.method || options.method === 'GET')) {
       return new Response(JSON.stringify({ photos }), { status: 200 });
     }
+    if (path === '/api/push/vapid-public-key') {
+      // A real-shaped (65-byte, base64url) VAPID key, not an arbitrary string:
+      // urlBase64ToUint8Array()'s padding math only produces valid base64 for
+      // inputs whose length isn't ≡1 (mod 4), which a short placeholder like
+      // 'test-vapid-public-key' violates (21 chars → 3 padding chars, always
+      // invalid) and atob() rejects in this runtime. Reuses the same fixture
+      // key as test/lib/webPush.test.ts / test/lib/notifications.test.ts.
+      return new Response(JSON.stringify({ publicKey: 'BC-IIfT4yho1Lp9x06rIRv0bo-Ns2hq77fpxI61ELRF2DQm0TxTLnyzHcWd2QRB6vJyJIN1gGG8In355vJGGF5E' }), { status: 200 });
+    }
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -472,6 +481,160 @@ describe('settings page', () => {
 
     expect(app.ageMax).toBe(41);
     expect(app.activeAgeThumb).toBe('max');
+    vi.unstubAllGlobals();
+  });
+});
+
+function fakeServiceWorker(subscription: Record<string, unknown> | null) {
+  // Real PushSubscription objects always have toJSON(); default one in for
+  // fixtures that pass a plain object without it (init()'s re-subscribe
+  // step calls it on whatever getSubscription() resolves to).
+  const sub = subscription && typeof subscription.toJSON !== 'function'
+    ? { ...subscription, toJSON: () => ({ endpoint: subscription.endpoint, keys: subscription.keys ?? { p256dh: 'p', auth: 'a' } }) }
+    : subscription;
+  return {
+    ready: Promise.resolve({
+      pushManager: {
+        getSubscription: async () => sub,
+        subscribe: async () => ({
+          endpoint: 'https://push.example/new',
+          toJSON: () => ({ endpoint: 'https://push.example/new', keys: { p256dh: 'p', auth: 'a' } }),
+        }),
+      },
+    }),
+  };
+}
+
+describe('push notifications', () => {
+  it('init() detects an existing subscription as pushEnabled', async () => {
+    stubApi(ONBOARDED_USER);
+    vi.stubGlobal('window', { location: { search: '' }, matchMedia: () => ({ matches: false }), navigator: {} });
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows)', serviceWorker: fakeServiceWorker({ endpoint: 'https://push.example/existing' }) });
+    vi.stubGlobal('Notification', { permission: 'granted' });
+
+    const app = createSettingsApp();
+    await app.init();
+
+    expect(app.pushSupported).toBe(true);
+    expect(app.pushEnabled).toBe(true);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('init() re-subscribes an existing subscription to re-point ownership at the current user', async () => {
+    // Regression: on a shared device, an existing browser subscription
+    // belongs to whichever account last subscribed, not necessarily the one
+    // now logged in. init() must re-POST it so the subscribe route's
+    // ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id
+    // re-points it at the current session's user, even though
+    // getSubscription() already found one (pushEnabled would otherwise read
+    // "On" for an account that never actually re-subscribed).
+    const { calls } = stubApi(ONBOARDED_USER);
+    vi.stubGlobal('window', { location: { search: '' }, matchMedia: () => ({ matches: false }) });
+    vi.stubGlobal('navigator', {
+      userAgent: 'Mozilla/5.0 (Windows)',
+      serviceWorker: fakeServiceWorker({ endpoint: 'https://push.example/existing', keys: { p256dh: 'p1', auth: 'a1' } }),
+    });
+    vi.stubGlobal('Notification', { permission: 'granted' });
+
+    const app = createSettingsApp();
+    await app.init();
+
+    expect(app.pushEnabled).toBe(true);
+    const subscribeCall = calls.find((c) => c.path === '/api/push/subscribe');
+    expect(subscribeCall).toBeTruthy();
+    expect(JSON.parse(subscribeCall!.options.body)).toEqual({ endpoint: 'https://push.example/existing', keys: { p256dh: 'p1', auth: 'a1' } });
+
+    vi.unstubAllGlobals();
+  });
+
+  it('enablePush() requests permission, subscribes, and posts the subscription', async () => {
+    const { calls } = stubApi(ONBOARDED_USER);
+    vi.stubGlobal('window', { location: { search: '' }, matchMedia: () => ({ matches: false }) });
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows)', serviceWorker: fakeServiceWorker(null) });
+    vi.stubGlobal('Notification', { permission: 'default', requestPermission: async () => 'granted' });
+
+    const app = createSettingsApp();
+    await app.init();
+    await app.enablePush();
+
+    expect(app.pushEnabled).toBe(true);
+    const subscribeCall = calls.find((c) => c.path === '/api/push/subscribe')!;
+    expect(JSON.parse(subscribeCall.options.body)).toEqual({ endpoint: 'https://push.example/new', keys: { p256dh: 'p', auth: 'a' } });
+
+    vi.unstubAllGlobals();
+  });
+
+  it('enablePush() sets pushPermissionDenied and does not subscribe when permission is denied', async () => {
+    const { calls } = stubApi(ONBOARDED_USER);
+    vi.stubGlobal('window', { location: { search: '' }, matchMedia: () => ({ matches: false }) });
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows)', serviceWorker: fakeServiceWorker(null) });
+    vi.stubGlobal('Notification', { permission: 'default', requestPermission: async () => 'denied' });
+
+    const app = createSettingsApp();
+    await app.init();
+    await app.enablePush();
+
+    expect(app.pushEnabled).toBe(false);
+    expect(app.pushPermissionDenied).toBe(true);
+    expect(calls.some((c) => c.path === '/api/push/subscribe')).toBe(false);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('disablePush() unsubscribes and posts the endpoint to /api/push/unsubscribe', async () => {
+    const { calls } = stubApi(ONBOARDED_USER);
+    const unsubscribe = vi.fn(async () => true);
+    vi.stubGlobal('window', { location: { search: '' }, matchMedia: () => ({ matches: false }) });
+    vi.stubGlobal('navigator', {
+      userAgent: 'Mozilla/5.0 (Windows)',
+      serviceWorker: fakeServiceWorker({ endpoint: 'https://push.example/existing', unsubscribe }),
+    });
+    vi.stubGlobal('Notification', { permission: 'granted' });
+
+    const app = createSettingsApp();
+    await app.init();
+    await app.disablePush();
+
+    expect(unsubscribe).toHaveBeenCalled();
+    expect(app.pushEnabled).toBe(false);
+    const unsubCall = calls.find((c) => c.path === '/api/push/unsubscribe')!;
+    expect(JSON.parse(unsubCall.options.body)).toEqual({ endpoint: 'https://push.example/existing' });
+
+    vi.unstubAllGlobals();
+  });
+
+  it('shows the iOS install banner only on non-standalone iOS Safari, and hides it once dismissed', async () => {
+    stubApi(ONBOARDED_USER);
+    const store: Record<string, string> = {};
+    vi.stubGlobal('window', { location: { search: '' }, matchMedia: () => ({ matches: false }) });
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)' });
+    vi.stubGlobal('localStorage', { getItem: (k: string) => store[k] ?? null, setItem: (k: string, v: string) => { store[k] = v; } });
+
+    const app = createSettingsApp();
+    await app.init();
+    expect(app.showIosInstallBanner).toBe(true);
+
+    app.dismissIosInstallBanner();
+    expect(app.showIosInstallBanner).toBe(false);
+
+    const app2 = createSettingsApp();
+    await app2.init();
+    expect(app2.showIosInstallBanner).toBe(false); // dismissal persisted
+
+    vi.unstubAllGlobals();
+  });
+
+  it('does not show the iOS install banner on Android', async () => {
+    stubApi(ONBOARDED_USER);
+    vi.stubGlobal('window', { location: { search: '' }, matchMedia: () => ({ matches: false }) });
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Linux; Android 14)' });
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} });
+
+    const app = createSettingsApp();
+    await app.init();
+    expect(app.showIosInstallBanner).toBe(false);
+
     vi.unstubAllGlobals();
   });
 });
