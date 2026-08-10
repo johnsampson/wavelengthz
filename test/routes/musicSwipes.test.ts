@@ -491,7 +491,7 @@ describe('GET /api/swipes/music and PATCH', () => {
     await env.DB.prepare(
       `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s1', 'u1', 'artist', 'a1', 'right', 1000, 1000)`
     ).run();
-    await env.DB.prepare(`INSERT INTO user_genres (user_id, genre, artist_count, track_count, updated_at) VALUES ('u1', 'pop', 1, 0, 1000)`).run();
+    await env.DB.prepare(`INSERT INTO user_genres (id, user_id, genre, artist_count, track_count, created_at, updated_at) VALUES ('ug4', 'u1', 'pop', 1, 0, 1000, 1000)`).run();
 
     await worker.fetch(
       new Request('http://localhost/api/swipes/music/s1', {

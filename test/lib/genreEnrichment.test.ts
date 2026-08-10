@@ -13,7 +13,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await env.DB.prepare('DELETE FROM artist_musicbrainz_genres').run();
+  await env.DB.prepare('DELETE FROM artist_genres').run();
   await env.DB.prepare('DELETE FROM artists').run();
 });
 
@@ -79,11 +79,35 @@ describe('enrichArtistGenresFromMusicBrainz', () => {
 
     await runEnrichment();
 
-    const rows = await env.DB.prepare('SELECT mb_genre_id, name, count FROM artist_musicbrainz_genres WHERE artist_id = ? ORDER BY name').bind('a1').all<any>();
+    const rows = await env.DB.prepare('SELECT mb_genre_id, name, count FROM artist_genres WHERE artist_id = ? ORDER BY name').bind('a1').all<any>();
     expect(rows.results).toEqual([
       { mb_genre_id: 'g1', name: 'house', count: 20 },
       { mb_genre_id: 'g2', name: 'techno', count: 1 },
     ]);
+  });
+
+  it('gives each artist_genres row its own id, distinct from the (artist_id, mb_genre_id) natural key', async () => {
+    await insertArtist('a1', 'sp1');
+    stubMatchedWithGenres([{ id: 'g1', name: 'house', count: 20 }]);
+
+    await runEnrichment();
+
+    const row = await env.DB.prepare('SELECT id, updated_at FROM artist_genres WHERE artist_id = ? AND mb_genre_id = ?').bind('a1', 'g1').first<any>();
+    expect(row.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(row.updated_at).not.toBeNull();
+  });
+
+  it('updates count and updated_at (not a duplicate row) when the same genre tag is seen again on a later run', async () => {
+    await insertArtist('a1', 'sp1');
+    await env.DB.prepare(
+      `INSERT INTO artist_genres (id, artist_id, mb_genre_id, name, count, created_at, updated_at) VALUES ('existing', 'a1', 'g1', 'house', 5, 100, 100)`
+    ).run();
+    stubMatchedWithGenres([{ id: 'g1', name: 'house', count: 25 }]);
+
+    await runEnrichment();
+
+    const rows = await env.DB.prepare('SELECT id, count FROM artist_genres WHERE artist_id = ?').bind('a1').all<any>();
+    expect(rows.results).toEqual([{ id: 'existing', count: 25 }]);
   });
 
   it('marks genre_enriched_at (but leaves mbid null) when no MusicBrainz link exists, so it is not retried every run', async () => {

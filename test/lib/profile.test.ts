@@ -30,7 +30,7 @@ describe('getDisplayMusicProfile', () => {
     ]);
     const topGenres = JSON.stringify(['pop', 'indie']);
     await env.DB.prepare(
-      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u1', ?, ?, ?, 'medium_term', 1000)`
+      `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at) VALUES ('mp3', 'u1', ?, ?, ?, 'medium_term', 1000, 1000, 1000)`
     ).bind(topArtists, topTracks, topGenres).run();
 
     const result = await getDisplayMusicProfile(env.DB, 'u1');
@@ -56,7 +56,7 @@ describe('getDisplayMusicProfile', () => {
       Array.from({ length: 15 }, (_, i) => ({ artist_id: `a${i}`, rank: i + 1, name: `Artist ${i}`, imageUrl: null }))
     );
     await env.DB.prepare(
-      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u1', ?, '[]', '[]', 'medium_term', 1000)`
+      `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at) VALUES ('mp4', 'u1', ?, '[]', '[]', 'medium_term', 1000, 1000, 1000)`
     ).bind(topArtists).run();
 
     const result = await getDisplayMusicProfile(env.DB, 'u1');
@@ -108,10 +108,10 @@ describe('getAnthemTracksForUsers', () => {
     const topTracks1 = JSON.stringify([{ track_id: 't1', rank: 1, name: 'My Anthem', imageUrl: 'https://img/t1.jpg' }]);
     const topTracks2 = JSON.stringify([{ track_id: 't9', rank: 1, name: 'Their Anthem', imageUrl: 'https://img/t9.jpg' }]);
     await env.DB.prepare(
-      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u1', '[]', ?, '[]', 'medium_term', 1000)`
+      `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at) VALUES ('mp5', 'u1', '[]', ?, '[]', 'medium_term', 1000, 1000, 1000)`
     ).bind(topTracks1).run();
     await env.DB.prepare(
-      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u2', '[]', ?, '[]', 'medium_term', 1000)`
+      `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at) VALUES ('mp6', 'u2', '[]', ?, '[]', 'medium_term', 1000, 1000, 1000)`
     ).bind(topTracks2).run();
 
     const result = await getAnthemTracksForUsers(env.DB, [
@@ -126,7 +126,7 @@ describe('getAnthemTracksForUsers', () => {
   it('omits a user whose chosen anthem has fallen out of their top_tracks', async () => {
     const topTracks = JSON.stringify([{ track_id: 't1', rank: 1, name: 'First Track', imageUrl: null }]);
     await env.DB.prepare(
-      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u1', '[]', ?, '[]', 'medium_term', 1000)`
+      `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at) VALUES ('mp7', 'u1', '[]', ?, '[]', 'medium_term', 1000, 1000, 1000)`
     ).bind(topTracks).run();
 
     const result = await getAnthemTracksForUsers(env.DB, [{ id: 'u1', anthem_track_id: 'stale-track-id' }]);

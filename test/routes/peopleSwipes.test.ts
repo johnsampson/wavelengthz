@@ -208,7 +208,7 @@ describe('GET /api/candidates/people', () => {
   it('includes a candidate\'s anthemTrack when set, and null when not', async () => {
     const topTracks = JSON.stringify([{ track_id: 'sp-t1', rank: 1, name: 'Their Anthem', imageUrl: 'https://img/t1.jpg' }]);
     await env.DB.prepare(
-      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u2', '[]', ?, '[]', 'medium_term', 1000)`
+      `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at) VALUES ('mp9', 'u2', '[]', ?, '[]', 'medium_term', 1000, 1000, 1000)`
     ).bind(topTracks).run();
     await env.DB.prepare(`UPDATE users SET anthem_track_id = 'sp-t1' WHERE id = 'u2'`).run();
 
@@ -423,9 +423,9 @@ describe('GET /api/candidates/people query count does not scale with pool size',
         createdAt: 1000, updatedAt: 1000,
       });
       await env.DB.prepare(
-        `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at)
-         VALUES (?, '[{"artist_id":"a1","rank":1}]', '[]', '["pop"]', 'medium_term', 1000)`
-      ).bind(id).run();
+        `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at)
+         VALUES (?, ?, '[{"artist_id":"a1","rank":1}]', '[]', '["pop"]', 'medium_term', 1000, 1000, 1000)`
+      ).bind(`mp-${id}`, id).run();
       await env.DB.prepare(
         `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at)
          VALUES (?, ?, 'artist', 'a1', 'right', 1000, 1000)`
@@ -777,7 +777,7 @@ describe('GET /api/people/:id/profile', () => {
     const topArtists = JSON.stringify([{ artist_id: 'sp-a1', rank: 1, name: 'Their Fave Artist', imageUrl: 'https://img/a1.jpg' }]);
     const topTracks = JSON.stringify([{ track_id: 'sp-t1', rank: 1, name: 'Their Fave Track', imageUrl: 'https://img/t1.jpg' }]);
     await env.DB.prepare(
-      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u2', ?, ?, '["indie","pop"]', 'medium_term', 1000)`
+      `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at) VALUES ('mp11', 'u2', ?, ?, '["indie","pop"]', 'medium_term', 1000, 1000, 1000)`
     ).bind(topArtists, topTracks).run();
     const cookie = await cookieFor('u1');
 
@@ -792,7 +792,7 @@ describe('GET /api/people/:id/profile', () => {
   it('includes anthemTrack when the target has one set, resolved against their own top_tracks', async () => {
     const topTracks = JSON.stringify([{ track_id: 'sp-t1', rank: 1, name: 'Their Fave Track', imageUrl: 'https://img/t1.jpg' }]);
     await env.DB.prepare(
-      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u2', '[]', ?, '[]', 'medium_term', 1000)`
+      `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at) VALUES ('mp12', 'u2', '[]', ?, '[]', 'medium_term', 1000, 1000, 1000)`
     ).bind(topTracks).run();
     await env.DB.prepare(`UPDATE users SET anthem_track_id = 'sp-t1' WHERE id = 'u2'`).run();
     const cookie = await cookieFor('u1');
@@ -816,7 +816,7 @@ describe('GET /api/people/:id/profile', () => {
   it('includes the caller\'s own top Spotify genres/artists/tracks on self-preview', async () => {
     const topArtists = JSON.stringify([{ artist_id: 'sp-a2', rank: 1, name: 'My Fave Artist', imageUrl: 'https://img/a2.jpg' }]);
     await env.DB.prepare(
-      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u1', ?, '[]', '["rock"]', 'medium_term', 1000)`
+      `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at) VALUES ('mp13', 'u1', ?, '[]', '["rock"]', 'medium_term', 1000, 1000, 1000)`
     ).bind(topArtists).run();
     const cookie = await cookieFor('u1');
 

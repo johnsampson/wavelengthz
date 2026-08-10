@@ -36,10 +36,11 @@ export function registerPushRoutes(router: RouterType) {
       return Response.json({ error: 'invalid_subscription' }, { status: 400 });
     }
 
+    const now = Date.now();
     await env.DB.prepare(
-      `INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth`
-    ).bind(crypto.randomUUID(), user.id, endpoint, keys.p256dh, keys.auth, Date.now()).run();
+      `INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth, updated_at = excluded.updated_at`
+    ).bind(crypto.randomUUID(), user.id, endpoint, keys.p256dh, keys.auth, now, now).run();
 
     return Response.json({ ok: true });
   });

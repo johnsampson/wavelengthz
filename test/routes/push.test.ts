@@ -177,8 +177,8 @@ describe('POST /api/push/unsubscribe', () => {
   });
 
   it('deletes only the current user\'s matching subscription', async () => {
-    await env.DB.prepare(`INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, created_at) VALUES ('s1', 'u1', 'https://push.example/x', 'p', 'a', ?)`).bind(Date.now()).run();
-    await env.DB.prepare(`INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, created_at) VALUES ('s2', 'u2', 'https://push.example/y', 'p', 'a', ?)`).bind(Date.now()).run();
+    await env.DB.prepare(`INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, created_at, updated_at) VALUES ('s1', 'u1', 'https://push.example/x', 'p', 'a', ?, ?)`).bind(Date.now(), Date.now()).run();
+    await env.DB.prepare(`INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, created_at, updated_at) VALUES ('s2', 'u2', 'https://push.example/y', 'p', 'a', ?, ?)`).bind(Date.now(), Date.now()).run();
 
     const cookie = await cookieFor('u1');
     const res = await worker.fetch(
@@ -196,7 +196,7 @@ describe('POST /api/push/unsubscribe', () => {
   });
 
   it('does not delete another user\'s subscription at the same endpoint mismatch attempt', async () => {
-    await env.DB.prepare(`INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, created_at) VALUES ('s2', 'u2', 'https://push.example/y', 'p', 'a', ?)`).bind(Date.now()).run();
+    await env.DB.prepare(`INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, created_at, updated_at) VALUES ('s2', 'u2', 'https://push.example/y', 'p', 'a', ?, ?)`).bind(Date.now(), Date.now()).run();
 
     const cookie = await cookieFor('u1');
     await worker.fetch(

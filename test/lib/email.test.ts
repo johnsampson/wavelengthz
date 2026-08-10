@@ -30,4 +30,16 @@ describe('sendEmail', () => {
     await expect(sendEmail(env, { to: 'a@b.com', subject: 's', html: 'h' })).rejects.toThrow();
     vi.unstubAllGlobals();
   });
+
+  it('includes Resend\'s response body in the thrown error, not just the status code', async () => {
+    // Resend's actual error body (e.g. "domain not verified", "invalid
+    // recipient") is the only way to tell *why* a send failed -- discarding
+    // it left every Sentry report for this saying nothing but a bare status.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ statusCode: 403, message: 'domain not verified' }), { status: 403 }))
+    );
+    await expect(sendEmail(env, { to: 'a@b.com', subject: 's', html: 'h' })).rejects.toThrow(/domain not verified/);
+    vi.unstubAllGlobals();
+  });
 });

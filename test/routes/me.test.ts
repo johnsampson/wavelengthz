@@ -110,12 +110,16 @@ describe('GET /api/me', () => {
               const boundReal = real.bind(...args);
               return {
                 run: async () => {
+                  const racingNow = Date.now();
+                  // args[1] is user_id -- matches src/routes/me.ts's own bind
+                  // order (id, user_id, ...), since this intercepts and
+                  // mirrors that exact INSERT.
                   await realDb
                     .prepare(
-                      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at)
-                       VALUES (?, '[]', '[]', '[]', 'medium_term', ?)`
+                      `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at)
+                       VALUES (?, ?, '[]', '[]', '[]', 'medium_term', ?, ?, ?)`
                     )
-                    .bind(args[0], Date.now())
+                    .bind(crypto.randomUUID(), args[1], racingNow, racingNow, racingNow)
                     .run();
                   return boundReal.run();
                 },
@@ -270,7 +274,7 @@ describe('POST /api/me/anthem', () => {
     });
     const topTracks = JSON.stringify([{ track_id: 't1', rank: 1, name: 'My Track', imageUrl: null }]);
     await env.DB.prepare(
-      `INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u5', '[]', ?, '[]', 'medium_term', 1000)`
+      `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at) VALUES ('mp14', 'u5', '[]', ?, '[]', 'medium_term', 1000, 1000, 1000)`
     ).bind(topTracks).run();
     const { cookie } = await createSession(env.DB, 'u5');
     return cookie.split(';')[0].split('=')[1];

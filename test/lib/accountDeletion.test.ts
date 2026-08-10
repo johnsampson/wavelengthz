@@ -42,12 +42,12 @@ describe('hardDeleteUser', () => {
     await env.DB.prepare(`INSERT INTO reports (id, reporter_id, reported_id, reason, status, created_at) VALUES ('r1', 'u1', 'u2', 'spam', 'open', 1000)`).run();
     await env.DB.prepare(`INSERT INTO reports (id, reporter_id, reported_id, reason, status, created_at) VALUES ('r2', 'u2', 'u1', 'spam', 'open', 1000)`).run();
     await env.DB.prepare(`INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('msw1', 'u1', 'artist', 'artist-x', 'right', 1000, 1000)`).run();
-    await env.DB.prepare(`INSERT INTO user_genres (user_id, genre, artist_count, track_count, updated_at) VALUES ('u1', 'pop', 3, 0, 1000)`).run();
-    await env.DB.prepare(`INSERT INTO music_profiles (user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at) VALUES ('u1', '[]', '[]', '[]', 'medium_term', 1000)`).run();
+    await env.DB.prepare(`INSERT INTO user_genres (id, user_id, genre, artist_count, track_count, created_at, updated_at) VALUES ('ug3', 'u1', 'pop', 3, 0, 1000, 1000)`).run();
+    await env.DB.prepare(`INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at) VALUES ('mp8', 'u1', '[]', '[]', '[]', 'medium_term', 1000, 1000, 1000)`).run();
     await env.DB.prepare(`INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES ('b1', 'u1', 'u2', 1000)`).run();
     await env.DB.prepare(`INSERT INTO notifications (id, user_id, type, related_id, created_at) VALUES ('n1', 'u1', 'match', 'm1', 1000)`).run();
     await env.DB.prepare(
-      `INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, created_at) VALUES ('ps-sub-1', 'u1', 'https://push.example/u1-device', 'p256dh-key', 'auth-key', 1000)`
+      `INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, created_at, updated_at) VALUES ('ps-sub-1', 'u1', 'https://push.example/u1-device', 'p256dh-key', 'auth-key', 1000, 1000)`
     ).run();
     const { id: sessionId } = await createSession(env.DB, 'u1');
 

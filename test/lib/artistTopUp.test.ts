@@ -40,10 +40,10 @@ function stubSpotify(artistsByGenre: Record<string, any[]>) {
 describe('topUpArtistsForUser', () => {
   it('inserts artists from the user\'s top genre by affinity', async () => {
     await env.DB.prepare(
-      `INSERT INTO user_genres (user_id, genre, artist_count, track_count, updated_at) VALUES ('u1', 'indie', 5, 2, 1000)`
+      `INSERT INTO user_genres (id, user_id, genre, artist_count, track_count, created_at, updated_at) VALUES ('ug1', 'u1', 'indie', 5, 2, 1000, 1000)`
     ).run();
     await env.DB.prepare(
-      `INSERT INTO user_genres (user_id, genre, artist_count, track_count, updated_at) VALUES ('u1', 'pop', 1, 0, 1000)`
+      `INSERT INTO user_genres (id, user_id, genre, artist_count, track_count, created_at, updated_at) VALUES ('ug2', 'u1', 'pop', 1, 0, 1000, 1000)`
     ).run();
     stubSpotify({
       indie: [{ id: 'a1', name: 'Indie Artist', genres: ['indie'], images: [{ url: 'https://img/a1.jpg' }], popularity: 50 }],

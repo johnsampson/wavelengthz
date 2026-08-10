@@ -53,8 +53,9 @@ export function registerNotificationRoutes(router: RouterType) {
     const user = await getSessionUser(request, env.DB);
     if (!user) return new Response('Unauthorized', { status: 401 });
 
-    const result = await env.DB.prepare('UPDATE notifications SET read_at = ? WHERE id = ? AND user_id = ?')
-      .bind(Date.now(), request.params.id, user.id)
+    const readAt = Date.now();
+    const result = await env.DB.prepare('UPDATE notifications SET read_at = ?, updated_at = ? WHERE id = ? AND user_id = ?')
+      .bind(readAt, readAt, request.params.id, user.id)
       .run();
 
     if (result.meta.changes === 0) return new Response('Not found', { status: 404 });

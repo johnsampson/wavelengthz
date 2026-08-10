@@ -95,7 +95,8 @@ export async function notifyMatch(db: D1Database, env: Env, matchId: string): Pr
     // isn't reprocessed by every future cron sweep the way it would be if
     // this stayed keyed to email alone.
     if (row.email || pushed) {
-      await db.prepare('UPDATE notifications SET email_sent_at = ? WHERE id = ?').bind(Date.now(), row.notification_id).run();
+      const sentAt = Date.now();
+      await db.prepare('UPDATE notifications SET email_sent_at = ?, updated_at = ? WHERE id = ?').bind(sentAt, sentAt, row.notification_id).run();
     }
   }
 }
@@ -138,7 +139,8 @@ export async function notifyMessage(db: D1Database, env: Env, messageId: string,
   }
 
   if (recipient.email || pushed) {
-    await db.prepare('UPDATE notifications SET email_sent_at = ? WHERE id = ?').bind(Date.now(), notification.id).run();
+    const sentAt = Date.now();
+    await db.prepare('UPDATE notifications SET email_sent_at = ?, updated_at = ? WHERE id = ?').bind(sentAt, sentAt, notification.id).run();
   }
 }
 
