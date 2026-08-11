@@ -13,7 +13,9 @@ beforeAll(async () => {
 beforeEach(async () => {
   // music_profiles and sessions both FK-reference users(id), so they must be
   // cleared before users to avoid a foreign key constraint violation.
-  await env.DB.exec('DELETE FROM sessions; DELETE FROM music_profiles; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;');
+  await env.DB.exec(
+    'DELETE FROM sessions; DELETE FROM music_profiles; DELETE FROM user_photos; DELETE FROM music_swipes; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;'
+  );
 });
 
 describe('GET /api/me', () => {
@@ -420,5 +422,105 @@ describe('POST /api/me/email-notifications', () => {
 
     const row = await env.DB.prepare('SELECT email_notifications_enabled FROM users WHERE id = ?').bind('u6').first<any>();
     expect(row.email_notifications_enabled).toBe(1);
+  });
+});
+
+describe('GET /api/me/messaging-status', () => {
+  async function makeUser(overrides: Record<string, unknown> = {}) {
+    await insertTestUser(env.DB, { id: 'u7', spotifyId: 'sp7', createdAt: 1000, updatedAt: 1000, ...overrides });
+    const { cookie } = await createSession(env.DB, 'u7');
+    return cookie.split(';')[0].split('=')[1];
+  }
+
+  it('returns 401 when not logged in', async () => {
+    const res = await worker.fetch(new Request('http://localhost/api/me/messaging-status'), env, {} as ExecutionContext);
+    expect(res.status).toBe(401);
+  });
+
+  it('reports every requirement unmet, with real thresholds and zero counts, for a bare-minimum account', async () => {
+    const sessionId = await makeUser();
+    const res = await worker.fetch(
+      new Request('http://localhost/api/me/messaging-status', { headers: { Cookie: `wl_session=${sessionId}` } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+
+    expect(body.ready).toBe(false);
+    expect(body.bio).toEqual({ met: false, length: 0, required: 20 });
+    expect(body.photos).toEqual({ met: false, count: 0, required: 3 });
+    expect(body.likedSongs).toEqual({ met: false, count: 0, required: 25 });
+    expect(body.phone).toEqual({ met: false, phoneNumber: null });
+  });
+
+  it('reports ready: true and every requirement met once all four are satisfied', async () => {
+    const sessionId = await makeUser({
+      bio: 'A bio long enough to pass the profile-completeness gate.',
+      phoneNumber: '+15551234567',
+      phoneVerifiedAt: 1000,
+    });
+    for (let i = 0; i < 3; i++) {
+      await env.DB.prepare(
+        `INSERT INTO user_photos (id, user_id, r2_key, position, created_at, updated_at) VALUES (?, 'u7', ?, ?, 1000, 1000)`
+      )
+        .bind(`photo-${i}`, `users/u7/photo${i}.jpg`, i)
+        .run();
+    }
+    for (let i = 0; i < 25; i++) {
+      await env.DB.prepare(
+        `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES (?, 'u7', 'track', ?, 'right', 1000, 1000)`
+      )
+        .bind(`swipe-${i}`, `track-${i}`)
+        .run();
+    }
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/me/messaging-status', { headers: { Cookie: `wl_session=${sessionId}` } }),
+      env,
+      {} as ExecutionContext
+    );
+    const body = await res.json<any>();
+
+    expect(body.ready).toBe(true);
+    expect(body.bio.met).toBe(true);
+    expect(body.photos).toEqual({ met: true, count: 3, required: 3 });
+    expect(body.likedSongs).toEqual({ met: true, count: 25, required: 25 });
+    expect(body.phone).toEqual({ met: true, phoneNumber: '+15551234567' });
+  });
+
+  it('is not ready when every requirement but one is met -- reports the specific gap', async () => {
+    const sessionId = await makeUser({
+      bio: 'A bio long enough to pass the profile-completeness gate.',
+      phoneNumber: null,
+      phoneVerifiedAt: null,
+    });
+    for (let i = 0; i < 3; i++) {
+      await env.DB.prepare(
+        `INSERT INTO user_photos (id, user_id, r2_key, position, created_at, updated_at) VALUES (?, 'u7', ?, ?, 1000, 1000)`
+      )
+        .bind(`photo-${i}`, `users/u7/photo${i}.jpg`, i)
+        .run();
+    }
+    for (let i = 0; i < 25; i++) {
+      await env.DB.prepare(
+        `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES (?, 'u7', 'track', ?, 'right', 1000, 1000)`
+      )
+        .bind(`swipe-${i}`, `track-${i}`)
+        .run();
+    }
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/me/messaging-status', { headers: { Cookie: `wl_session=${sessionId}` } }),
+      env,
+      {} as ExecutionContext
+    );
+    const body = await res.json<any>();
+
+    expect(body.ready).toBe(false);
+    expect(body.bio.met).toBe(true);
+    expect(body.photos.met).toBe(true);
+    expect(body.likedSongs.met).toBe(true);
+    expect(body.phone).toEqual({ met: false, phoneNumber: null });
   });
 });

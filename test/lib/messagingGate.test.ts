@@ -1,39 +1,79 @@
 import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { applySchema } from '../apply-schema';
-import { hasCompleteProfile, photoCountFor, MIN_BIO_LENGTH } from '../../src/lib/messagingGate';
+import {
+  hasCompleteProfile,
+  messagingRequirements,
+  photoCountFor,
+  likedSongCountFor,
+  MIN_BIO_LENGTH,
+  MIN_PHOTOS,
+  MIN_LIKED_SONGS,
+} from '../../src/lib/messagingGate';
 import { insertTestUser } from '../helpers/createUser';
 
-describe('hasCompleteProfile', () => {
-  it('is false with no bio and no photos', () => {
-    expect(hasCompleteProfile({ bio: null }, 0)).toBe(false);
+const COMPLETE_BIO = 'a'.repeat(MIN_BIO_LENGTH);
+const VERIFIED_AT = 1000;
+
+beforeAll(async () => {
+  await applySchema(env.DB);
+});
+
+describe('messagingRequirements', () => {
+  it('flags every requirement independently -- an all-null/zero user meets none of them', () => {
+    const r = messagingRequirements({ bio: null, phone_verified_at: null }, 0, 0);
+    expect(r).toEqual({ bio: false, photos: false, likedSongs: false, phone: false });
   });
 
-  it('is false with a photo but a bio under the minimum length', () => {
-    expect(hasCompleteProfile({ bio: 'too short' }, 1)).toBe(false);
+  it('flags each requirement true once its own threshold is met, independent of the others', () => {
+    const r = messagingRequirements({ bio: COMPLETE_BIO, phone_verified_at: VERIFIED_AT }, MIN_PHOTOS, MIN_LIKED_SONGS);
+    expect(r).toEqual({ bio: true, photos: true, likedSongs: true, phone: true });
   });
 
-  it('is false with a long enough bio but zero photos', () => {
-    expect(hasCompleteProfile({ bio: 'a'.repeat(MIN_BIO_LENGTH) }, 0)).toBe(false);
-  });
-
-  it('is true with a bio at exactly the minimum length and at least one photo', () => {
-    expect(hasCompleteProfile({ bio: 'a'.repeat(MIN_BIO_LENGTH) }, 1)).toBe(true);
+  it('bio is false under the minimum length and true at exactly the minimum', () => {
+    expect(messagingRequirements({ bio: 'too short', phone_verified_at: null }, 0, 0).bio).toBe(false);
+    expect(messagingRequirements({ bio: COMPLETE_BIO, phone_verified_at: null }, 0, 0).bio).toBe(true);
   });
 
   it('trims whitespace before measuring bio length -- padding does not count', () => {
     const padded = ' '.repeat(50) + 'short' + ' '.repeat(50);
-    expect(hasCompleteProfile({ bio: padded }, 1)).toBe(false);
+    expect(messagingRequirements({ bio: padded, phone_verified_at: null }, 0, 0).bio).toBe(false);
+  });
+
+  it('photos is false below MIN_PHOTOS and true at exactly MIN_PHOTOS', () => {
+    expect(messagingRequirements({ bio: null, phone_verified_at: null }, MIN_PHOTOS - 1, 0).photos).toBe(false);
+    expect(messagingRequirements({ bio: null, phone_verified_at: null }, MIN_PHOTOS, 0).photos).toBe(true);
+  });
+
+  it('likedSongs is false below MIN_LIKED_SONGS and true at exactly MIN_LIKED_SONGS', () => {
+    expect(messagingRequirements({ bio: null, phone_verified_at: null }, 0, MIN_LIKED_SONGS - 1).likedSongs).toBe(false);
+    expect(messagingRequirements({ bio: null, phone_verified_at: null }, 0, MIN_LIKED_SONGS).likedSongs).toBe(true);
+  });
+
+  it('phone is false when phone_verified_at is null, true otherwise', () => {
+    expect(messagingRequirements({ bio: null, phone_verified_at: null }, 0, 0).phone).toBe(false);
+    expect(messagingRequirements({ bio: null, phone_verified_at: VERIFIED_AT }, 0, 0).phone).toBe(true);
+  });
+});
+
+describe('hasCompleteProfile', () => {
+  it('is false when only some requirements are met', () => {
+    // Bio and photos met, liked songs and phone are not.
+    expect(hasCompleteProfile({ bio: COMPLETE_BIO, phone_verified_at: null }, MIN_PHOTOS, 0)).toBe(false);
+    // Everything but phone verification.
+    expect(hasCompleteProfile({ bio: COMPLETE_BIO, phone_verified_at: null }, MIN_PHOTOS, MIN_LIKED_SONGS)).toBe(false);
+  });
+
+  it('is true only once every requirement is met', () => {
+    expect(hasCompleteProfile({ bio: COMPLETE_BIO, phone_verified_at: VERIFIED_AT }, MIN_PHOTOS, MIN_LIKED_SONGS)).toBe(true);
   });
 });
 
 describe('photoCountFor', () => {
-  beforeAll(async () => {
-    await applySchema(env.DB);
-  });
-
   beforeEach(async () => {
-    await env.DB.exec('DELETE FROM user_photos; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;');
+    await env.DB.exec(
+      'DELETE FROM user_photos; DELETE FROM music_swipes; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;'
+    );
     await insertTestUser(env.DB, { id: 'u1', spotifyId: 'sp1', createdAt: 1000, updatedAt: 1000 });
   });
 
@@ -48,5 +88,45 @@ describe('photoCountFor', () => {
     await env.DB.prepare(`INSERT INTO user_photos (id, user_id, r2_key, position, created_at, updated_at) VALUES ('p3', 'u2', 'k3', 0, 1000, 1000)`).run();
 
     expect(await photoCountFor(env.DB, 'u1')).toBe(2);
+  });
+});
+
+describe('likedSongCountFor', () => {
+  beforeEach(async () => {
+    await env.DB.exec(
+      'DELETE FROM user_photos; DELETE FROM music_swipes; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;'
+    );
+    await insertTestUser(env.DB, { id: 'u1', spotifyId: 'sp1', createdAt: 1000, updatedAt: 1000 });
+  });
+
+  // music_swipes.item_id carries no FK to artists/tracks (it's a plain TEXT
+  // column, see migrations/0001), so fabricated ids are fine here -- this
+  // is purely a COUNT query, never a join.
+  async function insertSwipe(userId: string, id: string, itemType: 'artist' | 'track', direction: 'left' | 'right') {
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1000, 1000)`
+    )
+      .bind(id, userId, itemType, `item-${id}`, direction)
+      .run();
+  }
+
+  it('returns 0 for a user with no liked tracks', async () => {
+    expect(await likedSongCountFor(env.DB, 'u1')).toBe(0);
+  });
+
+  it('counts only right-swiped tracks -- not left-swiped tracks, not artists of either direction', async () => {
+    await insertSwipe('u1', 's1', 'track', 'right');
+    await insertSwipe('u1', 's2', 'track', 'left');
+    await insertSwipe('u1', 's3', 'artist', 'right');
+
+    expect(await likedSongCountFor(env.DB, 'u1')).toBe(1);
+  });
+
+  it('counts only the given user\'s own liked tracks', async () => {
+    await insertTestUser(env.DB, { id: 'u2', spotifyId: 'sp2', createdAt: 1000, updatedAt: 1000 });
+    await insertSwipe('u1', 's1', 'track', 'right');
+    await insertSwipe('u2', 's2', 'track', 'right');
+
+    expect(await likedSongCountFor(env.DB, 'u1')).toBe(1);
   });
 });

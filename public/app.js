@@ -68,6 +68,16 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
     }),
+  messagingStatus: () => request('/api/me/messaging-status'),
+  /** @param {string} phoneNumber - E.164, e.g. "+15551234567" */
+  startPhoneVerification: (phoneNumber) =>
+    request('/api/phone/verify/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phoneNumber }) }),
+  checkPhoneVerification: (phoneNumber, code) =>
+    request('/api/phone/verify/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phoneNumber, code }),
+    }),
   block: (userId) =>
     request('/api/block', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: userId }) }),
   blocks: () => request('/api/blocks'),

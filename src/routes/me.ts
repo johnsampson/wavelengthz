@@ -2,6 +2,14 @@ import type { RouterType } from 'itty-router';
 import { getSessionUser } from '../lib/session';
 import { getValidAccessToken } from '../lib/tokens';
 import { fetchTopArtists, fetchTopTracks } from '../lib/spotify';
+import {
+  messagingRequirements,
+  photoCountFor,
+  likedSongCountFor,
+  MIN_BIO_LENGTH,
+  MIN_PHOTOS,
+  MIN_LIKED_SONGS,
+} from '../lib/messagingGate';
 
 const TIME_RANGE = 'medium_term';
 
@@ -76,6 +84,33 @@ export function registerMeRoutes(router: RouterType) {
 
     const safeUser = { ...user, spotify_avatar_url: tokenRow?.avatar_url ?? null };
     return Response.json({ user: safeUser, musicProfile: profile, hasSpotify });
+  });
+
+  // Backs Settings → Messaging (public/settings/messaging.html) -- a single
+  // endpoint returning every messagingGate.ts requirement's live count
+  // alongside its threshold and met/not-met flag, so the page can render an
+  // honest checklist instead of the frontend re-deriving thresholds that
+  // already live server-side. Requirement logic itself stays entirely in
+  // src/lib/messagingGate.ts (also the actual enforcement point, in
+  // src/routes/matches.ts and src/routes/groups.ts) -- this route only
+  // reads and reports it, never a second copy of the rules.
+  router.get('/api/me/messaging-status', async (request: Request, env: Env) => {
+    const user = await getSessionUser(request, env.DB);
+    if (!user) return new Response('Unauthorized', { status: 401 });
+
+    const [photoCount, likedSongCount] = await Promise.all([
+      photoCountFor(env.DB, user.id),
+      likedSongCountFor(env.DB, user.id),
+    ]);
+    const requirements = messagingRequirements(user, photoCount, likedSongCount);
+
+    return Response.json({
+      ready: requirements.bio && requirements.photos && requirements.likedSongs && requirements.phone,
+      bio: { met: requirements.bio, length: user.bio?.trim().length ?? 0, required: MIN_BIO_LENGTH },
+      photos: { met: requirements.photos, count: photoCount, required: MIN_PHOTOS },
+      likedSongs: { met: requirements.likedSongs, count: likedSongCount, required: MIN_LIKED_SONGS },
+      phone: { met: requirements.phone, phoneNumber: user.phone_number },
+    });
   });
 
   // Sets or clears the caller's anthem -- the one track that plays from a tap
