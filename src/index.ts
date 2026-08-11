@@ -15,6 +15,7 @@ import { registerGroupRoutes } from './routes/groups';
 import { registerPlayerRoutes } from './routes/player';
 import { registerPushRoutes } from './routes/push';
 import { registerGenreBlockRoutes } from './routes/genreBlocks';
+import { registerPhoneRoutes } from './routes/phone';
 import { purgeExpiredDeletions } from './lib/accountDeletion';
 import { refreshCatalogFromProfiles } from './db/catalogRefresh';
 import { sendDelayedMatchNotificationEmails } from './lib/notifications';
@@ -41,6 +42,7 @@ registerGroupRoutes(router);
 registerPlayerRoutes(router);
 registerPushRoutes(router);
 registerGenreBlockRoutes(router);
+registerPhoneRoutes(router);
 
 // Falls back to the ASSETS binding (static HTML/JS/CSS under public/) for
 // anything that isn't an API route -- required once [assets].run_worker_first
@@ -62,6 +64,11 @@ const SWIPE_LIMIT = { limit: 30, windowSeconds: 60 };
 // still leaves generous headroom for a shared NAT / carrier-grade IP while
 // cutting the ceiling on scripted mass account creation by 6x.
 const CALLBACK_LIMIT = { limit: 20, windowSeconds: 60 };
+// Each call that gets past the VOIP/invalid-number check sends a real,
+// billed SMS via Twilio Verify -- a much tighter bucket than the general
+// limit is warranted purely on cost/abuse grounds, independent of anything
+// Twilio's own Verify service rate-limits on its side.
+const PHONE_VERIFY_LIMIT = { limit: 5, windowSeconds: 60 };
 
 // Static HTML/JS/CSS under public/ is served directly by the Assets binding
 // and never reaches this fetch() handler at all (no run_worker_first), so
@@ -183,6 +190,11 @@ export default {
       if (url.pathname === '/callback') {
         const callbackAllowed = await rateLimitAllows(env.RATE_LIMIT_KV, `callback:${ip}`, CALLBACK_LIMIT.limit, CALLBACK_LIMIT.windowSeconds, env, ctx, url.pathname);
         if (!callbackAllowed) return withSecurityHeaders(Response.json({ error: 'rate_limited' }, { status: 429 }));
+      }
+
+      if (url.pathname === '/api/phone/verify/start') {
+        const phoneVerifyAllowed = await checkRateLimit(env.RATE_LIMIT_KV, `phone-verify:${ip}`, PHONE_VERIFY_LIMIT.limit, PHONE_VERIFY_LIMIT.windowSeconds);
+        if (!phoneVerifyAllowed) return withSecurityHeaders(Response.json({ error: 'rate_limited' }, { status: 429 }));
       }
 
       if (url.pathname.startsWith('/api/')) {
