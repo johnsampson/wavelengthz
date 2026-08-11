@@ -16,16 +16,16 @@
     <div class="flex items-center gap-2 rounded-full bg-surface2 p-1" x-show="authed === true">
       <button
         class="pill-toggle"
-        :class="mode === 'people' ? 'pill-toggle-active' : 'pill-toggle-inactive'"
-        @click="setMode('people')"
-        :aria-pressed="mode === 'people'"
-      >People</button>
-      <button
-        class="pill-toggle"
         :class="mode === 'music' ? 'pill-toggle-active' : 'pill-toggle-inactive'"
         @click="setMode('music')"
         :aria-pressed="mode === 'music'"
       >Music</button>
+      <button
+        class="pill-toggle"
+        :class="mode === 'people' ? 'pill-toggle-active' : 'pill-toggle-inactive'"
+        @click="setMode('people')"
+        :aria-pressed="mode === 'people'"
+      >People</button>
     </div>
   </header>
 
@@ -123,8 +123,8 @@
     </div>
 
     <div x-show="authed === true && !current" class="card flex w-full max-w-sm flex-col items-center gap-2 px-6 py-10 text-center">
-      <span class="text-3xl">✨</span>
-      <p class="font-semibold text-neutral-200">No more candidates right now</p>
+      <span class="text-3xl">🌊</span>
+      <p class="font-semibold text-neutral-200">No new waves right now</p>
       <p class="text-sm text-neutral-400" x-text="mode === 'music' ? 'Check back later, or search for an artist you like.' : 'Check back later for more matches.'"></p>
       <button
         x-show="mode === 'music'"
