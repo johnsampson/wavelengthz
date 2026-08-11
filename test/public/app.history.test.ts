@@ -5,8 +5,8 @@ describe('api client — history and photo methods', () => {
   it('api.swipeHistory builds the right query string', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ swipes: [] }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
-    await api.swipeHistory('music', 20, 10);
-    expect(fetchMock).toHaveBeenCalledWith('/api/swipes/music?limit=20&offset=10', expect.anything());
+    await api.swipeHistory('people', 20, 10);
+    expect(fetchMock).toHaveBeenCalledWith('/api/swipes/people?limit=20&offset=10', expect.anything());
     vi.unstubAllGlobals();
   });
 

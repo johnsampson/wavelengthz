@@ -79,11 +79,21 @@ export const api = {
   deleteAccount: () => request('/api/account', { method: 'DELETE' }),
   myPhotos: () => request('/api/photos'),
   deletePhoto: (photoId) => request(`/api/photos/${photoId}`, { method: 'DELETE' }),
-  /** @param {'left'|'right'|null} [direction] */
-  swipeHistory: (mode, limit = 20, offset = 0, direction = null) =>
-    request(`/api/swipes/${mode}?limit=${limit}&offset=${offset}${direction ? `&direction=${direction}` : ''}`),
-  updateSwipe: (mode, id, direction) =>
-    request(`/api/swipes/${mode}/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }) }),
+  /**
+   * @param {'people'|'artist'|'track'} mode - 'artist'/'track' both hit the
+   *   same GET /api/swipes/music, distinguished by an item_type param --
+   *   there's no separate /api/swipes/artist or /api/swipes/track route.
+   * @param {'left'|'right'|null} [direction]
+   */
+  swipeHistory: (mode, limit = 20, offset = 0, direction = null) => {
+    const isMusic = mode === 'artist' || mode === 'track';
+    const params = `limit=${limit}&offset=${offset}${direction ? `&direction=${direction}` : ''}${isMusic ? `&item_type=${mode}` : ''}`;
+    return request(`/api/swipes/${isMusic ? 'music' : mode}?${params}`);
+  },
+  updateSwipe: (mode, id, direction) => {
+    const endpoint = mode === 'artist' || mode === 'track' ? 'music' : mode;
+    return request(`/api/swipes/${endpoint}/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }) });
+  },
   notifications: () => request('/api/notifications'),
   markNotificationRead: (id) => request(`/api/notifications/${id}/read`, { method: 'POST' }),
   groups: () => request('/api/groups'),

@@ -34,9 +34,10 @@ export function createHistoryApp() {
     async setMode(mode) {
       this.mode = mode;
       this.offset = 0;
-      // "Blocked" is a people-only concept -- switching to music mode with it
-      // still selected would silently try (and fail) to load music history.
-      if (mode === 'music' && this.directionFilter === 'blocked') this.directionFilter = null;
+      // "Blocked" is a people-only concept -- switching to an Artists/Tracks
+      // tab with it still selected would silently try (and fail) to load
+      // blocked-users data for a music mode.
+      if (mode !== 'people' && this.directionFilter === 'blocked') this.directionFilter = null;
       await this.load();
     },
 

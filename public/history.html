@@ -14,7 +14,8 @@
   <h1 class="mx-auto mb-4 max-w-md text-2xl font-bold">Your history</h1>
   <div class="mx-auto mb-3 flex max-w-md gap-2 rounded-full bg-surface2 p-1">
     <button class="pill-toggle flex-1" :class="mode === 'people' ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="setMode('people')">People</button>
-    <button class="pill-toggle flex-1" :class="mode === 'music' ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="setMode('music')">Music</button>
+    <button class="pill-toggle flex-1" :class="mode === 'artist' ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="setMode('artist')">Artists</button>
+    <button class="pill-toggle flex-1" :class="mode === 'track' ? 'pill-toggle-active' : 'pill-toggle-inactive'" @click="setMode('track')">Tracks</button>
   </div>
 
   <div class="mx-auto mb-4 flex max-w-md gap-2 rounded-full bg-surface2 p-1">
