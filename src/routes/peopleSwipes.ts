@@ -206,8 +206,13 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
     // candidate was pure waste — and with a full pool it pushed the request
     // past the Workers subrequest limit outright.
     const scoringIds = [me.id, ...inRangePool.map((u) => u.id)];
+    // likePriority candidates skip scoring entirely (see `selected` below),
+    // so they don't need right-swipes -- but their profile is still needed
+    // for the topGenres shown on their card, which scoring alone wouldn't
+    // have pulled in.
+    const profileIds = [...scoringIds, ...likePriority.map((u) => u.id)];
     const [profiles, rightSwipes] = await Promise.all([
-      getMusicProfiles(env.DB, scoringIds),
+      getMusicProfiles(env.DB, profileIds),
       getRightSwipedItemIdsFor(env.DB, scoringIds),
     ]);
     const meInputs = inputsFor(me.id, profiles, rightSwipes);
@@ -244,6 +249,11 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
       // top_tracks (see pickAnthemTrack) -- absent entirely otherwise, so the
       // card's anthem chip (public/index.html) has a single falsy check.
       anthemTrack: anthemTracks.get(user.id) ?? null,
+      // Already in memory from the scoring pass above (getMusicProfiles) --
+      // no extra query needed. Ranked, so slicing to the top 10 here keeps
+      // the payload small and matches what the card actually has room to
+      // show, rather than pushing that decision onto the client.
+      topGenres: (profiles.get(user.id)?.topGenres ?? []).slice(0, 10),
     }));
 
     return Response.json({ candidates });
