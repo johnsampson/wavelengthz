@@ -14,16 +14,18 @@ export function createNotificationsApp() {
     pushSupported: false,
     pushEnabled: false,
     pushPermissionDenied: false,
+    emailEnabled: true,
     showIosInstallBanner: false,
     error: null,
     loading: true,
 
     async init() {
       try {
-        // This page has no use for the user object itself -- it only needs
-        // the session-liveness check, so every other Settings page's
-        // "redirect to /login on 401" behavior applies here too.
-        await api.me();
+        // Unlike every other Settings page's "session-liveness check only"
+        // comment this used to carry, this page does need the user object
+        // now -- email_notifications_enabled lives on it.
+        const me = await api.me();
+        this.emailEnabled = me.user.email_notifications_enabled !== 0;
         if (typeof window !== 'undefined') {
           const isIos = /iP(hone|ad|od)/.test(navigator.userAgent);
           const isStandalone = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator?.standalone === true;
@@ -113,6 +115,30 @@ export function createNotificationsApp() {
     dismissIosInstallBanner() {
       this.showIosInstallBanner = false;
       if (typeof localStorage !== 'undefined') localStorage.setItem('wl_ios_install_dismissed', '1');
+    },
+
+    async enableEmail() {
+      this.error = null;
+      const previous = this.emailEnabled;
+      this.emailEnabled = true; // optimistic -- reverted below on failure
+      try {
+        await api.setEmailNotificationsEnabled(true);
+      } catch (e) {
+        this.emailEnabled = previous;
+        this.error = 'Could not enable email notifications. Please try again.';
+      }
+    },
+
+    async disableEmail() {
+      this.error = null;
+      const previous = this.emailEnabled;
+      this.emailEnabled = false;
+      try {
+        await api.setEmailNotificationsEnabled(false);
+      } catch (e) {
+        this.emailEnabled = previous;
+        this.error = 'Could not disable email notifications. Please try again.';
+      }
     },
   };
 }

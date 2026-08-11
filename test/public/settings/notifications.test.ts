@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createNotificationsApp } from '../../../public/settings/notifications.js';
 
-function stubApi() {
+function stubApi(user: Record<string, unknown> = {}) {
   const calls: Array<{ path: string; options: any }> = [];
   const fetchMock = vi.fn(async (path: string, options: any = {}) => {
     calls.push({ path, options });
-    if (path === '/api/me') return new Response(JSON.stringify({ user: {} }), { status: 200 });
+    if (path === '/api/me') return new Response(JSON.stringify({ user }), { status: 200 });
     if (path === '/api/push/vapid-public-key') {
       return new Response(JSON.stringify({ publicKey: 'BC-IIfT4yho1Lp9x06rIRv0bo-Ns2hq77fpxI61ELRF2DQm0TxTLnyzHcWd2QRB6vJyJIN1gGG8In355vJGGF5E' }), { status: 200 });
     }
@@ -155,6 +155,79 @@ describe('notifications page', () => {
     await app.init();
     expect(app.showIosInstallBanner).toBe(false);
 
+    vi.unstubAllGlobals();
+  });
+
+  it('defaults emailEnabled to true for a user with no explicit preference on the object yet', async () => {
+    stubApi({});
+    vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows)' });
+
+    const app = createNotificationsApp();
+    await app.init();
+
+    expect(app.emailEnabled).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it('loads emailEnabled: false from the user object', async () => {
+    stubApi({ email_notifications_enabled: 0 });
+    vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows)' });
+
+    const app = createNotificationsApp();
+    await app.init();
+
+    expect(app.emailEnabled).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it('enableEmail() optimistically flips on and posts to the API', async () => {
+    const { calls } = stubApi({ email_notifications_enabled: 0 });
+    vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows)' });
+
+    const app = createNotificationsApp();
+    await app.init();
+    await app.enableEmail();
+
+    expect(app.emailEnabled).toBe(true);
+    const call = calls.find((c) => c.path === '/api/me/email-notifications')!;
+    expect(JSON.parse(call.options.body)).toEqual({ enabled: true });
+    vi.unstubAllGlobals();
+  });
+
+  it('disableEmail() optimistically flips off and posts to the API', async () => {
+    const { calls } = stubApi({ email_notifications_enabled: 1 });
+    vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows)' });
+
+    const app = createNotificationsApp();
+    await app.init();
+    await app.disableEmail();
+
+    expect(app.emailEnabled).toBe(false);
+    const call = calls.find((c) => c.path === '/api/me/email-notifications')!;
+    expect(JSON.parse(call.options.body)).toEqual({ enabled: false });
+    vi.unstubAllGlobals();
+  });
+
+  it('reverts the optimistic flip and shows an error when disableEmail() fails', async () => {
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: { email_notifications_enabled: 1 } }), { status: 200 });
+      if (path === '/api/me/email-notifications') return new Response('nope', { status: 500 });
+      throw new Error(`unexpected ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows)' });
+
+    const app = createNotificationsApp();
+    await app.init();
+    await app.disableEmail();
+
+    expect(app.emailEnabled).toBe(true);
+    expect(app.error).toBeTruthy();
     vi.unstubAllGlobals();
   });
 });

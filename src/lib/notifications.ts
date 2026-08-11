@@ -67,12 +67,12 @@ export async function notifyMatch(db: D1Database, env: Env, matchId: string): Pr
   // recipient who was already sent one.
   const rows = await db
     .prepare(
-      `SELECT n.id as notification_id, n.user_id, u.email FROM notifications n
+      `SELECT n.id as notification_id, n.user_id, u.email, u.email_notifications_enabled FROM notifications n
        JOIN users u ON u.id = n.user_id
        WHERE n.related_id = ? AND n.type = 'match' AND u.deleted_at IS NULL AND n.email_sent_at IS NULL`
     )
     .bind(matchId)
-    .all<{ notification_id: string; user_id: string; email: string | null }>();
+    .all<{ notification_id: string; user_id: string; email: string | null; email_notifications_enabled: number }>();
 
   for (const row of rows.results) {
     const pushed = await sendPushToUser(db, env, row.user_id, {
@@ -85,8 +85,10 @@ export async function notifyMatch(db: D1Database, env: Env, matchId: string): Pr
     // notification -- only sent when push wasn't attempted at all (no
     // subscription on file), not when it was attempted and failed
     // mid-send. A transient push failure shouldn't silently escalate into
-    // also emailing someone who chose push as their channel.
-    if (!pushed && row.email) {
+    // also emailing someone who chose push as their channel. Also gated on
+    // the user's own opt-out (Settings → Notifications) -- unlike the push
+    // fallback logic above, this one the user can turn off outright.
+    if (!pushed && row.email && row.email_notifications_enabled) {
       await sendEmail(env, {
         to: row.email,
         subject: "You've got a new match!",
@@ -112,9 +114,9 @@ export async function notifyMessage(db: D1Database, env: Env, messageId: string,
   // short-circuits this early -- a push-only recipient still needs the
   // notification-row check below and a push attempt.
   const recipient = await db
-    .prepare('SELECT email FROM users WHERE id = ? AND deleted_at IS NULL')
+    .prepare('SELECT email, email_notifications_enabled FROM users WHERE id = ? AND deleted_at IS NULL')
     .bind(recipientId)
-    .first<{ email: string | null }>();
+    .first<{ email: string | null; email_notifications_enabled: number }>();
   if (!recipient) return;
 
   const notification = await db
@@ -136,8 +138,8 @@ export async function notifyMessage(db: D1Database, env: Env, messageId: string,
   });
 
   // See notifyMatch's comment: email is the fallback channel, only sent
-  // when push wasn't attempted at all.
-  if (!pushed && recipient.email) {
+  // when push wasn't attempted at all, and gated on the user's own opt-out.
+  if (!pushed && recipient.email && recipient.email_notifications_enabled) {
     await sendEmail(env, {
       to: recipient.email,
       subject: 'New message on Wavelengthz',

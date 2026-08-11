@@ -342,3 +342,83 @@ describe('POST /api/me/anthem', () => {
     expect(row.anthem_track_id).toBeNull();
   });
 });
+
+describe('POST /api/me/email-notifications', () => {
+  async function makeUser() {
+    await insertTestUser(env.DB, { id: 'u6', spotifyId: 'sp6', createdAt: 1000, updatedAt: 1000 });
+    const { cookie } = await createSession(env.DB, 'u6');
+    return cookie.split(';')[0].split('=')[1];
+  }
+
+  it('returns 401 when not logged in', async () => {
+    const res = await worker.fetch(
+      new Request('http://localhost/api/me/email-notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: false }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('is enabled by default -- matches the notification-sending behavior every existing row already has', async () => {
+    await insertTestUser(env.DB, { id: 'u6', spotifyId: 'sp6', createdAt: 1000, updatedAt: 1000 });
+    const row = await env.DB.prepare('SELECT email_notifications_enabled FROM users WHERE id = ?').bind('u6').first<any>();
+    expect(row.email_notifications_enabled).toBe(1);
+  });
+
+  it('disables email notifications', async () => {
+    const sessionId = await makeUser();
+    const res = await worker.fetch(
+      new Request('http://localhost/api/me/email-notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: `wl_session=${sessionId}` },
+        body: JSON.stringify({ enabled: false }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(200);
+
+    const row = await env.DB.prepare('SELECT email_notifications_enabled FROM users WHERE id = ?').bind('u6').first<any>();
+    expect(row.email_notifications_enabled).toBe(0);
+  });
+
+  it('re-enables email notifications', async () => {
+    const sessionId = await makeUser();
+    await env.DB.prepare('UPDATE users SET email_notifications_enabled = 0 WHERE id = ?').bind('u6').run();
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/me/email-notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: `wl_session=${sessionId}` },
+        body: JSON.stringify({ enabled: true }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(200);
+
+    const row = await env.DB.prepare('SELECT email_notifications_enabled FROM users WHERE id = ?').bind('u6').first<any>();
+    expect(row.email_notifications_enabled).toBe(1);
+  });
+
+  it('rejects a non-boolean enabled value, writing nothing', async () => {
+    const sessionId = await makeUser();
+    const res = await worker.fetch(
+      new Request('http://localhost/api/me/email-notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: `wl_session=${sessionId}` },
+        body: JSON.stringify({ enabled: 'yes' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+
+    const row = await env.DB.prepare('SELECT email_notifications_enabled FROM users WHERE id = ?').bind('u6').first<any>();
+    expect(row.email_notifications_enabled).toBe(1);
+  });
+});
