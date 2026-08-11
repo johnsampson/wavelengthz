@@ -22,6 +22,10 @@
       <span class="field-label">Display name</span>
       <input class="field" type="text" x-model="displayName" maxlength="50" pattern="[-A-Za-z0-9 ]+" :disabled="loading" />
     </label>
+    <label class="flex flex-col gap-1">
+      <span class="field-label">Bio</span>
+      <textarea class="field" x-model="bio" maxlength="500" rows="4" :disabled="loading"></textarea>
+    </label>
     <button type="submit" class="btn-primary" :disabled="loading">Save</button>
   </form>
 

@@ -4,6 +4,7 @@ import { MAX_PHOTOS, uploadPhotoFile } from '../photos.js';
 export function createProfileApp() {
   return {
     displayName: '',
+    bio: '',
     photos: [],
     maxPhotos: MAX_PHOTOS,
     photoError: null,
@@ -16,6 +17,7 @@ export function createProfileApp() {
       try {
         const [me, photosRes] = await Promise.all([api.me(), api.myPhotos()]);
         this.displayName = me.user.display_name ?? '';
+        this.bio = me.user.bio ?? '';
         this.photos = photosRes.photos;
       } catch (e) {
         if (e.status === 401) {
@@ -48,9 +50,10 @@ export function createProfileApp() {
         // Preferences' saved values get wiped the next time someone saves
         // from this page.
         const me = await api.me();
+        const trimmedBio = this.bio.trim();
         await api.onboard({
           display_name: this.displayName.trim(),
-          bio: me.user.bio ?? null,
+          bio: trimmedBio || null,
           date_of_birth: me.user.date_of_birth,
           location_label: me.user.location_label,
           lat: me.user.lat,
@@ -63,10 +66,13 @@ export function createProfileApp() {
           intent: me.user.intent,
         });
         this.displayName = this.displayName.trim();
+        this.bio = trimmedBio;
         this.saved = true;
       } catch (e) {
         if (e.status === 400 && e.body?.error === 'invalid_intent') {
           this.error = "Please choose what you're interested in under Settings → Preferences first.";
+        } else if (e.status === 400 && e.body?.error === 'invalid_bio') {
+          this.error = 'Your bio is too long, or contains language that isn\'t allowed.';
         } else {
           this.error = 'Could not save your settings. Please try again.';
         }

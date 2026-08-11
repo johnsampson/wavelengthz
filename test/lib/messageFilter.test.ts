@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isValidMessageBody, MAX_MESSAGE_LENGTH } from '../../src/lib/messageFilter';
+import { containsBlockedWord, isValidMessageBody, MAX_MESSAGE_LENGTH } from '../../src/lib/messageFilter';
 
 describe('isValidMessageBody', () => {
   it('accepts a normal sentence with common punctuation', () => {
@@ -39,5 +39,21 @@ describe('isValidMessageBody', () => {
     // Regression guard: a naive substring check would false-positive on
     // "classic" (contains "ass") or "Scunthorpe"-style names.
     expect(isValidMessageBody('that concert was a classic show')).toBe(true);
+  });
+});
+
+// Exported for reuse on bios (src/routes/onboarding.ts) -- profile language
+// held to the same bar as message language, without pulling in
+// isValidMessageBody's other message-specific rules (length, link/emoji
+// lockdown) that don't make sense for a bio.
+describe('containsBlockedWord', () => {
+  it('flags a blocked word case-insensitively and as a whole word', () => {
+    expect(containsBlockedWord('such a fucking mess')).toBe(true);
+    expect(containsBlockedWord('such a FUCKING mess')).toBe(true);
+  });
+
+  it('does not flag ordinary text or a word that merely contains a blocked substring', () => {
+    expect(containsBlockedWord('I love live music and loud guitars')).toBe(false);
+    expect(containsBlockedWord('that concert was a classic show')).toBe(false);
   });
 });

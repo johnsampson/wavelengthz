@@ -13,7 +13,11 @@ const ALLOWED_CHARS_RE = /^[-A-Za-z0-9 .,!?']*$/;
 // a first line of defense against the most common cases.
 const BLOCKED_WORDS = new Set(['fuck', 'fucking', 'shit', 'bitch', 'asshole', 'cunt', 'nigger', 'faggot']);
 
-function containsBlockedWord(body: string): boolean {
+// Exported: also used on bios (src/routes/onboarding.ts) so profile language
+// is held to the same bar as message language, without pulling in
+// isValidMessageBody's other message-specific rules (length, link/emoji
+// lockdown) that don't apply to a bio.
+export function containsBlockedWord(body: string): boolean {
   const words = body.toLowerCase().split(/[^a-z0-9']+/).filter(Boolean);
   return words.some((w) => BLOCKED_WORDS.has(w));
 }
