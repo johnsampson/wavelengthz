@@ -209,6 +209,8 @@
           } catch (e) {
             if (e.status === 400 && e.body?.error === 'invalid_message') {
               this.error = 'That message isn\'t allowed. Please rephrase it.';
+            } else if (e.status === 403 && e.body?.error === 'profile_incomplete') {
+              this.error = 'Add a bio and at least one photo in Settings before messaging.';
             } else {
               this.error = 'Could not send that message. Please try again.';
             }

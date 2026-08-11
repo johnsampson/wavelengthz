@@ -17,12 +17,21 @@ async function makeUser(id: string, lat = 30.27, lng = -97.74, maxDistanceKm = 8
     lng,
     maxDistanceKm,
     onboardedAt: 1000,
+    // Message-eligible by default (issue #36's profile-completeness gate,
+    // src/lib/messagingGate.ts) -- this file's tests are about group
+    // membership/messages, not about the gate itself.
+    bio: 'A bio long enough to pass the profile-completeness gate.',
     accessToken: 'a',
     refreshToken: 'r',
     tokenExpiresAt: 9999999999999,
     createdAt: 1000,
     updatedAt: 1000,
   });
+  await env.DB.prepare(
+    `INSERT INTO user_photos (id, user_id, r2_key, position, created_at, updated_at) VALUES (?, ?, ?, 0, 1000, 1000)`
+  )
+    .bind(`photo-${id}`, id, `users/${id}/photo.jpg`)
+    .run();
 }
 
 async function cookieFor(userId: string) {
@@ -33,7 +42,7 @@ async function cookieFor(userId: string) {
 beforeEach(async () => {
   // Children before parents -- D1 enforces FK constraints.
   await env.DB.exec(
-    'DELETE FROM group_messages; DELETE FROM group_members; DELETE FROM groups; DELETE FROM blocks; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM sessions; DELETE FROM users;'
+    'DELETE FROM group_messages; DELETE FROM group_members; DELETE FROM groups; DELETE FROM blocks; DELETE FROM user_photos; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM sessions; DELETE FROM users;'
   );
   await makeUser('u1');
 });
@@ -383,6 +392,27 @@ describe('group messages', () => {
     expect(body.messages.length).toBe(1);
     expect(body.messages[0].body).toBe('Hey everyone!');
     expect(body.messages[0].sender_id).toBe('u1');
+  });
+
+  it('rejects sending with an incomplete profile (issue #36\'s messaging gate)', async () => {
+    const cookie = await cookieFor('u1');
+    const groupId = await createGroup(cookie);
+    await env.DB.prepare(`UPDATE users SET bio = NULL WHERE id = 'u1'`).run();
+    await env.DB.prepare(`DELETE FROM user_photos WHERE user_id = 'u1'`).run();
+
+    const res = await worker.fetch(
+      new Request(`http://localhost/api/groups/${groupId}/messages`, {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: 'hi' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+
+    expect(res.status).toBe(403);
+    const body = await res.json<any>();
+    expect(body.error).toBe('profile_incomplete');
   });
 
   it('rejects a message from a non-member', async () => {

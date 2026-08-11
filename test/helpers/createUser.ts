@@ -3,6 +3,7 @@ export interface TestUserOverrides {
   spotifyId?: string;
   email?: string | null;
   displayName?: string | null;
+  bio?: string | null;
   lat?: number | null;
   lng?: number | null;
   maxDistanceKm?: number;
@@ -37,12 +38,13 @@ export async function insertTestUser(db: D1Database, overrides: TestUserOverride
          id, spotify_id, display_name, bio, date_of_birth, age_verified_at, location_label, lat, lng,
          location_updated_at, max_distance_km, age_min, age_max, gender, seeking, intent, email,
          onboarded_at, deleted_at, created_at, updated_at
-       ) VALUES (?, ?, ?, NULL, ?, ?, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`
+       ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`
     )
     .bind(
       id,
       spotifyId,
       overrides.displayName ?? null,
+      overrides.bio ?? null,
       overrides.dateOfBirth ?? null,
       overrides.ageVerifiedAt ?? null,
       overrides.lat ?? null,

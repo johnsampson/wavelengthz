@@ -74,6 +74,23 @@ describe('notifyMatch', () => {
     vi.unstubAllGlobals();
   });
 
+  it('sends push only, skipping email, when a recipient has both a push subscription and an email on file', async () => {
+    // Issue #45: email is a fallback for people without push, not a second
+    // copy of every notification once push exists.
+    await insertPushSubscription(env.DB, 'u1', 'https://push.example/u1-device');
+    const fetchMock = vi.fn(async (url: string) => new Response('', { status: url.includes('push.example') ? 201 : 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await notifyMatch(env.DB, { ...VAPID_TEST_ENV, RESEND_API_KEY: 'k', RESEND_FROM_ADDRESS: 'f@x.com' } as any, 'm1');
+
+    expect(fetchMock).toHaveBeenCalledWith('https://push.example/u1-device', expect.anything());
+    expect(fetchMock).not.toHaveBeenCalledWith('https://api.resend.com/emails', expect.anything());
+    const n1 = await env.DB.prepare('SELECT email_sent_at FROM notifications WHERE id = ?').bind('n1').first<any>();
+    expect(n1.email_sent_at).not.toBeNull(); // still marked processed -- via push, not email
+
+    vi.unstubAllGlobals();
+  });
+
   it('deletes an expired (410) subscription but keeps sending to the recipient\'s other devices', async () => {
     await insertPushSubscription(env.DB, 'u2', 'https://push.example/u2-dead');
     await insertPushSubscription(env.DB, 'u2', 'https://push.example/u2-alive');
@@ -216,6 +233,28 @@ describe('notifyMessage', () => {
     await notifyMessage(env.DB, { ...VAPID_TEST_ENV, RESEND_API_KEY: 'k', RESEND_FROM_ADDRESS: 'f@x.com' } as any, 'msg1', 'u1');
 
     expect(fetchMock).toHaveBeenCalledWith('https://push.example/u1-device', expect.anything());
+    const n3 = await env.DB.prepare('SELECT email_sent_at FROM notifications WHERE id = ?').bind('n3').first<any>();
+    expect(n3.email_sent_at).not.toBeNull();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('sends push only, skipping email, when the recipient has both a push subscription and an email on file', async () => {
+    // Issue #45: email is a fallback for people without push, not a second
+    // copy of every notification once push exists. u1 keeps its email from
+    // beforeEach here (not nulled), unlike the other push-focused tests above.
+    await insertPushSubscription(env.DB, 'u1', 'https://push.example/u1-device');
+    await env.DB.prepare(`INSERT INTO messages (id, match_id, sender_id, body, created_at) VALUES ('msg1', 'm1', 'u2', 'hi', 1000)`).run();
+    await env.DB.prepare(
+      `INSERT INTO notifications (id, user_id, type, related_id, created_at) VALUES ('n3', 'u1', 'message', 'msg1', 1000)`
+    ).run();
+    const fetchMock = vi.fn(async (url: string) => new Response('', { status: url.includes('push.example') ? 201 : 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await notifyMessage(env.DB, { ...VAPID_TEST_ENV, RESEND_API_KEY: 'k', RESEND_FROM_ADDRESS: 'f@x.com' } as any, 'msg1', 'u1');
+
+    expect(fetchMock).toHaveBeenCalledWith('https://push.example/u1-device', expect.anything());
+    expect(fetchMock).not.toHaveBeenCalledWith('https://api.resend.com/emails', expect.anything());
     const n3 = await env.DB.prepare('SELECT email_sent_at FROM notifications WHERE id = ?').bind('n3').first<any>();
     expect(n3.email_sent_at).not.toBeNull();
 

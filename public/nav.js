@@ -5,6 +5,19 @@
 // active-tab logic in one place instead of duplicated (and inevitably
 // drifting) across six separate HTML files.
 import { api } from './app.js';
+import { showToast } from './toast.js';
+
+// How often an already-open page re-checks for new notifications, so a
+// match/message that arrives while you're using the app growls in instead
+// of only ever surfacing via the bell badge on next navigation.
+const NOTIFICATION_POLL_MS = 45000;
+
+// Set on the first fetch (in mountHeader), then updated after every poll --
+// null specifically means "haven't fetched yet," distinct from an empty
+// Set, so the very first poll after mount never growls the user's whole
+// existing backlog as if it just arrived.
+let previousUnreadIds = null;
+let pollTimer = null;
 
 const ICONS = {
   '/':
@@ -101,6 +114,62 @@ export function mountNav(pathname = window.location.pathname) {
   if (root) root.innerHTML = renderNavHtml(pathname);
 }
 
+// Pure, so it's unit-testable independent of the fetch/DOM side effects
+// around it (this module can't unit test those -- no `document`/`fetch` in
+// the Workers test pool this repo runs under, same reason mountNav/
+// mountHeader themselves aren't unit tested, only the render* functions).
+export function pickNewlyUnread(previousUnreadIds, currentNotifications) {
+  return currentNotifications.filter((n) => !n.readAt && !previousUnreadIds.has(n.id));
+}
+
+function updateUnreadBadge(count) {
+  const link = document.querySelector('#wl-header-root a[aria-label="Notifications"]');
+  if (!link) return;
+  let badge = link.querySelector('[data-unread-badge]');
+  if (count > 0) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.setAttribute('data-unread-badge', '');
+      badge.className =
+        'absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-500 px-1 text-[10px] font-semibold text-white';
+      link.appendChild(badge);
+    }
+    badge.textContent = count > 9 ? '9+' : String(count);
+  } else if (badge) {
+    badge.remove();
+  }
+}
+
+async function pollNotifications() {
+  // Skip the fetch entirely while backgrounded -- no point spending battery/
+  // requests on a tab the user isn't looking at, and there'd be nowhere to
+  // show a toast anyway.
+  if (document.visibilityState !== 'visible') return;
+
+  let res;
+  try {
+    res = await api.notifications();
+  } catch (e) {
+    return; // logged out or a transient failure -- just try again next tick
+  }
+
+  if (previousUnreadIds !== null) {
+    for (const n of pickNewlyUnread(previousUnreadIds, res.notifications)) {
+      showToast({
+        message: n.type === 'match' ? 'New match!' : 'New message',
+        icon: n.type === 'match' ? '🎉' : '💬',
+        onClick: () => {
+          api.markNotificationRead(n.id).catch(() => {});
+          if (n.matchId) window.location.href = `/match?id=${n.matchId}`;
+        },
+      });
+    }
+  }
+
+  previousUnreadIds = new Set(res.notifications.filter((n) => !n.readAt).map((n) => n.id));
+  updateUnreadBadge(previousUnreadIds.size);
+}
+
 export async function mountHeader() {
   const root = document.getElementById('wl-header-root');
   if (!root) return;
@@ -108,9 +177,12 @@ export async function mountHeader() {
   try {
     const res = await api.notifications();
     unreadCount = res.notifications.filter((n) => !n.readAt).length;
+    previousUnreadIds = new Set(res.notifications.filter((n) => !n.readAt).map((n) => n.id));
   } catch (e) {
     // Notifications are a nice-to-have -- a logged-out caller (401) or any
     // other failure shouldn't block the header itself from rendering.
   }
   root.innerHTML = renderHeaderHtml(unreadCount);
+
+  if (!pollTimer) pollTimer = setInterval(pollNotifications, NOTIFICATION_POLL_MS);
 }

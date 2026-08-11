@@ -113,6 +113,11 @@
           </template>
           <h2 class="text-2xl font-bold" x-text="current?.name || current?.displayName"></h2>
           <p class="text-neutral-200" x-text="current?.bio || current?.distanceLabel"></p>
+          <div x-show="mode === 'people' && current?.topGenres?.length > 0" class="mt-2 flex flex-wrap gap-1.5">
+            <template x-for="g in current?.topGenres || []" :key="g">
+              <span class="pill-toggle pill-toggle-inactive text-xs" x-text="g"></span>
+            </template>
+          </div>
         </div>
       </article>
     </div>
@@ -225,6 +230,22 @@
     </div>
   </div>
 
+  <div
+    x-show="genrePrompt"
+    class="fixed inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-base/95 p-6 text-center backdrop-blur-sm"
+    role="dialog"
+    aria-modal="true"
+    :aria-label="`Hide ${genrePrompt} going forward?`"
+  >
+    <span class="text-3xl">🙈</span>
+    <h2 class="text-xl font-bold">Not into <span x-text="genrePrompt" class="text-brand-400"></span>?</h2>
+    <p class="text-neutral-300">You've passed on 10 artists in this genre. Want to stop seeing it in your deck?</p>
+    <div class="mt-2 flex w-full max-w-xs flex-col gap-2">
+      <button class="btn-primary" @click="blockGenrePrompt()">Hide "<span x-text="genrePrompt"></span>" Going Forward</button>
+      <button class="btn-secondary" @click="genrePrompt = null">Keep Showing It</button>
+    </div>
+  </div>
+
   <script type="module">
     import { api } from '/app.js';
     import { attachSwipeDeck } from '/swipe.js';
@@ -249,6 +270,10 @@
         searchError: null,
         debouncedSearch: null,
         matchModal: null,
+        // Set to a genre name once the swipe response reports that genre's
+        // pass count just crossed the threshold (src/routes/musicSwipes.ts);
+        // null the rest of the time.
+        genrePrompt: null,
         error: null,
         // Whether the current card's anthem player is expanded -- reset
         // wherever `current` changes (showNext, decide) so a track never
@@ -338,7 +363,11 @@
                 return;
               }
             } else {
-              await api.swipe('music', { item_type: swiped.itemType, item_id: swiped.itemId, direction });
+              const res = await api.swipe('music', { item_type: swiped.itemType, item_id: swiped.itemId, direction });
+              // Shown once the queue/card transition below has already
+              // moved on -- the prompt is about a genre in general, not
+              // this specific card, so it doesn't need to block advancing.
+              if (res.crossedGenre) this.genrePrompt = res.crossedGenre;
             }
           } catch (e) {
             // Leave `current` in place either way -- the swipe didn't save,
@@ -358,6 +387,19 @@
           this.matchModal = null;
           if (this.queue.length === 0) await this.loadQueue();
           else this.showNext();
+        },
+
+        async blockGenrePrompt() {
+          const genre = this.genrePrompt;
+          this.genrePrompt = null;
+          try {
+            await api.blockGenre(genre);
+          } catch (e) {
+            // Non-fatal -- the deck already moved on by the time this
+            // prompt appears, so a failed block just means the genre
+            // keeps showing up; nothing here to roll back or retry inline.
+            this.error = 'Could not hide that genre. You can try again from Settings.';
+          }
         },
 
         openSearch() {

@@ -63,6 +63,38 @@ async function applyGenreAffinity(
   }
 }
 
+// Once a user's passes on a single genre cross this, the client shows a
+// "hide this genre?" prompt (see the crossedGenre field on POST
+// /api/swipe/music and PATCH /api/swipes/music/:id below). Not split by
+// item type (artist vs. track) -- artist-level swiping is the primary mode
+// (see the product spec's §4.1), and the ask was simply "10 or more," not a
+// per-type nuance.
+const GENRE_PASS_THRESHOLD = 10;
+
+// Symmetric to applyGenreAffinity, but for pass_count (left-swipes) instead
+// of artist_count/track_count (right-swipes/likes) -- same table, same
+// transition-based increment/decrement discipline. Returns the first genre
+// that just crossed GENRE_PASS_THRESHOLD on this call (delta > 0 only;
+// undoing a pass never re-triggers the prompt), or null if none did.
+async function applyGenrePass(db: D1Database, userId: string, genres: string[], delta: 1 | -1, now: number): Promise<string | null> {
+  let crossedGenre: string | null = null;
+  for (const genre of genres) {
+    await db
+      .prepare(
+        `INSERT INTO user_genres (id, user_id, genre, pass_count, created_at, updated_at) VALUES (?, ?, ?, MAX(0, ?), ?, ?)
+         ON CONFLICT(user_id, genre) DO UPDATE SET pass_count = MAX(0, pass_count + ?), updated_at = ?`
+      )
+      .bind(crypto.randomUUID(), userId, genre, delta, now, now, delta, now)
+      .run();
+
+    if (delta > 0 && crossedGenre === null) {
+      const row = await db.prepare('SELECT pass_count FROM user_genres WHERE user_id = ? AND genre = ?').bind(userId, genre).first<{ pass_count: number }>();
+      if (row?.pass_count === GENRE_PASS_THRESHOLD) crossedGenre = genre;
+    }
+  }
+  return crossedGenre;
+}
+
 // Once fewer than this many unswiped artists remain, kick off a background
 // top-up (see below) instead of waiting for the pool to hit exactly zero.
 const LOW_ARTIST_POOL_THRESHOLD = 15;
@@ -82,6 +114,17 @@ export function registerMusicSwipeRoutes(router: RouterType) {
     // their album art is nearly always present since it comes from the
     // release itself rather than an artist's own uploaded image.
     const photoFilter = itemType === 'artist' ? `AND ${imageColumn} IS NOT NULL AND ${imageColumn} != ''` : '';
+    // Tracks don't carry their own genres column (see genresForItem above) --
+    // reach through to the parent artist's for the same check.
+    const genresExpr = itemType === 'track' ? '(SELECT genres FROM artists WHERE artists.id = tracks.artist_id)' : 'genres';
+    // Excludes any candidate carrying a genre the user has explicitly
+    // blocked (src/routes/genreBlocks.ts). json_each walks the genres JSON
+    // object's keys -- confirmed working against D1's SQLite build, same
+    // shape genresFromRow already assumes elsewhere in this codebase.
+    const blockedGenreFilter = `AND NOT EXISTS (
+      SELECT 1 FROM json_each(${genresExpr}) je
+      WHERE je.key IN (SELECT genre FROM user_blocked_genres WHERE user_id = ?)
+    )`;
 
     const queryCandidates = () =>
       env.DB.prepare(
@@ -89,9 +132,10 @@ export function registerMusicSwipeRoutes(router: RouterType) {
          WHERE approved = 1 ${photoFilter} AND id NOT IN (
            SELECT item_id FROM music_swipes WHERE user_id = ? AND item_type = ?
          )
+         ${blockedGenreFilter}
          ORDER BY created_at ASC
          LIMIT ?`
-      ).bind(user.id, itemType, limit).all<{ id: string; name: string; image_url: string | null }>();
+      ).bind(user.id, itemType, user.id, limit).all<{ id: string; name: string; image_url: string | null }>();
 
     let rows = await queryCandidates();
 
@@ -104,8 +148,9 @@ export function registerMusicSwipeRoutes(router: RouterType) {
         `SELECT COUNT(*) as c FROM ${table}
          WHERE approved = 1 ${photoFilter} AND id NOT IN (
            SELECT item_id FROM music_swipes WHERE user_id = ? AND item_type = ?
-         )`
-      ).bind(user.id, itemType).first<{ c: number }>();
+         )
+         ${blockedGenreFilter}`
+      ).bind(user.id, itemType, user.id).first<{ c: number }>();
       const remaining = remainingRow?.c ?? 0;
 
       if (remaining === 0) {
@@ -165,16 +210,21 @@ export function registerMusicSwipeRoutes(router: RouterType) {
     // on an actual transition -- a repeat right-swipe of an already-liked
     // item must not double-count, and a left-swipe only decrements genres
     // that were counted from a prior right-swipe in the first place.
+    // Pass tracking (genre_pass_count) is the exact mirror for left-swipes,
+    // so the same transition-based discipline applies to it too.
+    let crossedGenre: string | null = null;
     if (direction === 'right' && previous?.direction !== 'right') {
       const genres = await genresForItem(env.DB, item_type, item_id);
       await applyGenreAffinity(env.DB, user.id, genres, item_type, 1, now);
       if (item_type === 'track') await likeArtistForTrack(env.DB, user.id, item_id, now);
-    } else if (direction === 'left' && previous?.direction === 'right') {
+      if (previous?.direction === 'left') await applyGenrePass(env.DB, user.id, genres, -1, now);
+    } else if (direction === 'left' && previous?.direction !== 'left') {
       const genres = await genresForItem(env.DB, item_type, item_id);
-      await applyGenreAffinity(env.DB, user.id, genres, item_type, -1, now);
+      if (previous?.direction === 'right') await applyGenreAffinity(env.DB, user.id, genres, item_type, -1, now);
+      crossedGenre = await applyGenrePass(env.DB, user.id, genres, 1, now);
     }
 
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, crossedGenre });
   });
 
   router.get('/api/swipes/music', async (request: Request, env: Env) => {
@@ -220,16 +270,19 @@ export function registerMusicSwipeRoutes(router: RouterType) {
 
     // Same transition-based logic as the fresh-swipe POST handler -- changing
     // a past decision via the History "Change" toggle must move genre
-    // affinity too, not just record the new direction.
+    // affinity (and pass tracking) too, not just record the new direction.
+    let crossedGenre: string | null = null;
     if (direction === 'right' && swipe.direction !== 'right') {
       const genres = await genresForItem(env.DB, swipe.item_type, swipe.item_id);
       await applyGenreAffinity(env.DB, user.id, genres, swipe.item_type, 1, now);
       if (swipe.item_type === 'track') await likeArtistForTrack(env.DB, user.id, swipe.item_id, now);
-    } else if (direction === 'left' && swipe.direction === 'right') {
+      if (swipe.direction === 'left') await applyGenrePass(env.DB, user.id, genres, -1, now);
+    } else if (direction === 'left' && swipe.direction !== 'left') {
       const genres = await genresForItem(env.DB, swipe.item_type, swipe.item_id);
-      await applyGenreAffinity(env.DB, user.id, genres, swipe.item_type, -1, now);
+      if (swipe.direction === 'right') await applyGenreAffinity(env.DB, user.id, genres, swipe.item_type, -1, now);
+      crossedGenre = await applyGenrePass(env.DB, user.id, genres, 1, now);
     }
 
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, crossedGenre });
   });
 }
