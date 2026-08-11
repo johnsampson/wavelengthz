@@ -385,6 +385,76 @@ describe('POST /api/onboarding', () => {
     expect(row.max_distance_km).toBe(50);
   });
 
+  it('locks gender after initial onboarding -- a later call attempting a different gender is silently ignored', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const post = (payload: Record<string, unknown>) =>
+      worker.fetch(
+        new Request('http://localhost/api/onboarding', {
+          method: 'POST',
+          headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }),
+        env,
+        {} as ExecutionContext
+      );
+
+    await post({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'female', intent: 'something_casual' });
+
+    // Settings → Preferences has no gender picker at all, but nothing stops
+    // a hand-crafted request from trying anyway -- this is the actual
+    // guarantee, not just the missing UI control.
+    const resaved = await post({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'female', seeking: 'female', intent: 'something_casual' });
+    expect(resaved.status).toBe(200);
+
+    const row = await env.DB.prepare('SELECT gender FROM users WHERE id = ?').bind('u1').first<any>();
+    expect(row.gender).toBe('male');
+  });
+
+  it('does not require gender at all on a post-onboarding save -- it is ignored either way', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const post = (payload: Record<string, unknown>) =>
+      worker.fetch(
+        new Request('http://localhost/api/onboarding', {
+          method: 'POST',
+          headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }),
+        env,
+        {} as ExecutionContext
+      );
+
+    await post({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'female', intent: 'something_casual' });
+
+    const resaved = await post({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, seeking: 'friends', intent: 'something_casual' });
+    expect(resaved.status).toBe(200);
+
+    const row = await env.DB.prepare('SELECT gender, seeking FROM users WHERE id = ?').bind('u1').first<any>();
+    expect(row.gender).toBe('male');
+    expect(row.seeking).toBe('friends');
+  });
+
+  it('does not even validate a malformed gender post-onboarding -- the field is wholly inert by then', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const post = (payload: Record<string, unknown>) =>
+      worker.fetch(
+        new Request('http://localhost/api/onboarding', {
+          method: 'POST',
+          headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }),
+        env,
+        {} as ExecutionContext
+      );
+
+    await post({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'male', seeking: 'female', intent: 'something_casual' });
+
+    const resaved = await post({ display_name: 'Jordan', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74, gender: 'nonbinary', seeking: 'female', intent: 'something_casual' });
+    expect(resaved.status).toBe(200);
+
+    const row = await env.DB.prepare('SELECT gender FROM users WHERE id = ?').bind('u1').first<any>();
+    expect(row.gender).toBe('male');
+  });
+
   it('documents that omitting bio clears it — the exact bug settings.js works around', async () => {
     const cookie = await sessionCookieFor('u1');
     const post = (payload: Record<string, unknown>) =>
