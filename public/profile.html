@@ -76,10 +76,10 @@
         <h2 class="mb-3 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Top artists on Spotify</h2>
         <div class="grid grid-cols-3 gap-3">
           <template x-for="a in profile.topArtists" :key="a.id">
-            <div class="flex flex-col items-center gap-1 text-center">
+            <a :href="`/artist?id=${a.id}`" class="flex flex-col items-center gap-1 text-center">
               <img :src="a.imageUrl" :alt="a.name" class="h-16 w-16 rounded-full object-cover ring-1 ring-white/10" />
               <span class="text-xs text-neutral-300" x-text="a.name"></span>
-            </div>
+            </a>
           </template>
         </div>
       </section>
@@ -180,10 +180,10 @@
             <h2 class="mb-3 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Artists you both like</h2>
             <div class="grid grid-cols-3 gap-3">
               <template x-for="a in overlap.sharedArtists.slice(0, visibleArtistsCount)" :key="a.id">
-                <div class="flex flex-col items-center gap-1 text-center">
+                <a :href="`/artist?id=${a.id}`" class="flex flex-col items-center gap-1 text-center">
                   <img :src="a.imageUrl" :alt="a.name" class="h-16 w-16 rounded-full object-cover ring-1 ring-white/10" />
                   <span class="text-xs text-neutral-300" x-text="a.name"></span>
-                </div>
+                </a>
               </template>
             </div>
             <button
@@ -282,10 +282,10 @@
             <h2 class="mb-3 text-sm font-semibold text-neutral-400 uppercase tracking-wide">Your recent artists</h2>
             <div class="grid grid-cols-3 gap-3">
               <template x-for="a in profile.recentArtists" :key="a.id">
-                <div class="flex flex-col items-center gap-1 text-center">
+                <a :href="`/artist?id=${a.id}`" class="flex flex-col items-center gap-1 text-center">
                   <img :src="a.imageUrl" :alt="a.name" class="h-16 w-16 rounded-full object-cover ring-1 ring-white/10" />
                   <span class="text-xs text-neutral-300" x-text="a.name"></span>
-                </div>
+                </a>
               </template>
             </div>
           </section>
