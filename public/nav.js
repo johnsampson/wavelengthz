@@ -25,7 +25,12 @@ export const NAV_ITEMS = [
 ];
 
 export function getActiveTab(pathname) {
-  const item = NAV_ITEMS.find((i) => i.href === pathname);
+  // Exact match for four of the five tabs, but /settings now has real
+  // sub-pages (/settings/profile, /settings/preferences, ...) that must
+  // still highlight the same bottom-tab icon -- prefix-match only for
+  // /settings specifically, since none of the other four tabs have
+  // sub-pages and an exact match stays correct (and cheaper) for them.
+  const item = NAV_ITEMS.find((i) => i.href === pathname || (i.href === '/settings' && pathname.startsWith('/settings/')));
   return item ? item.href : null;
 }
 

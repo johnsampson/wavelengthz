@@ -20,6 +20,13 @@ describe('getActiveTab', () => {
     expect(getActiveTab('/messages')).toBeNull();
     expect(getActiveTab('/onboarding')).toBeNull();
   });
+
+  it('matches /settings for any nested settings sub-page, not just the exact path', () => {
+    expect(getActiveTab('/settings/profile')).toBe('/settings');
+    expect(getActiveTab('/settings/preferences')).toBe('/settings');
+    expect(getActiveTab('/settings/notifications')).toBe('/settings');
+    expect(getActiveTab('/settings/connections')).toBe('/settings');
+  });
 });
 
 describe('getNavItemsWithActive', () => {
