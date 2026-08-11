@@ -21,6 +21,7 @@ export function createPreferencesApp() {
     error: null,
     saved: false,
     loading: true,
+    blockedGenres: [],
 
     get locationCooldownRemainingMs() {
       if (this.locationUpdatedAt == null) return 0;
@@ -45,7 +46,8 @@ export function createPreferencesApp() {
 
     async init() {
       try {
-        const me = await api.me();
+        const [me, blockedGenresRes] = await Promise.all([api.me(), api.blockedGenres()]);
+        this.blockedGenres = blockedGenresRes.genres ?? [];
         if (me.user.max_distance_km != null) this.maxDistanceKm = me.user.max_distance_km;
         if (me.user.age_min != null) this.ageMin = me.user.age_min;
         if (me.user.age_max != null) this.ageMax = me.user.age_max;
@@ -141,6 +143,16 @@ export function createPreferencesApp() {
         } else {
           this.error = 'Could not save your settings. Please try again.';
         }
+      }
+    },
+
+    async unblockGenre(genre) {
+      this.error = null;
+      try {
+        await api.unblockGenre(genre);
+        this.blockedGenres = this.blockedGenres.filter((g) => g !== genre);
+      } catch (e) {
+        this.error = 'Could not unblock that genre. Please try again.';
       }
     },
   };

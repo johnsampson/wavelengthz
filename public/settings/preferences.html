@@ -108,6 +108,18 @@
     <button type="submit" class="btn-primary" :disabled="loading">Save</button>
   </form>
 
+  <div x-show="blockedGenres.length > 0" class="card mx-auto mt-4 flex max-w-md flex-col gap-2 p-5">
+    <span class="field-label">Blocked genres</span>
+    <p class="text-sm text-neutral-400">Hidden from your music deck. Tap to show them again.</p>
+    <div class="flex flex-wrap gap-2">
+      <template x-for="genre in blockedGenres" :key="genre">
+        <button type="button" class="pill-toggle pill-toggle-active" @click="unblockGenre(genre)">
+          <span x-text="genre"></span> ✕
+        </button>
+      </template>
+    </div>
+  </div>
+
   <script type="module">
     import { createPreferencesApp } from '/settings/preferences.js';
     import { mountHeader, mountNav } from '/nav.js';

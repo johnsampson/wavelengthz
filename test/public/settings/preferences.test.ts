@@ -1,11 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createPreferencesApp } from '../../../public/settings/preferences.js';
 
-function stubApi(user: Record<string, unknown>) {
+function stubApi(user: Record<string, unknown>, blockedGenres: string[] = []) {
   const calls: Array<{ path: string; options: any }> = [];
   const fetchMock = vi.fn(async (path: string, options: any = {}) => {
     calls.push({ path, options });
     if (path === '/api/me') return new Response(JSON.stringify({ user }), { status: 200 });
+    if (path === '/api/genres/blocked') return new Response(JSON.stringify({ genres: blockedGenres }), { status: 200 });
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -204,6 +205,7 @@ describe('preferences page', () => {
       if (path === '/api/onboarding') {
         return new Response(JSON.stringify({ error: 'location_change_cooldown', retryAfterMs: 2 * 24 * 60 * 60 * 1000 }), { status: 429 });
       }
+      if (path === '/api/genres/blocked') return new Response(JSON.stringify({ genres: [] }), { status: 200 });
       throw new Error(`unexpected ${path}`);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -273,6 +275,66 @@ describe('preferences page', () => {
 
     expect(fakeWindow.location.href).toBe('/login');
     expect(app.error).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it('starts with no blocked genres before init', () => {
+    const app = createPreferencesApp();
+
+    expect(app.blockedGenres).toEqual([]);
+  });
+
+  it('loads blocked genres on init, alongside the rest of the profile', async () => {
+    stubApi(ONBOARDED_USER, ['emo', 'polka']);
+    const app = createPreferencesApp();
+
+    await app.init();
+
+    expect(app.blockedGenres).toEqual(['emo', 'polka']);
+    // The rest of init's usual work still happens in the same pass.
+    expect(app.gender).toBe('male');
+    vi.unstubAllGlobals();
+  });
+
+  it('leaves blockedGenres empty (so the card stays hidden) when the user has none blocked', async () => {
+    stubApi(ONBOARDED_USER, []);
+    const app = createPreferencesApp();
+
+    await app.init();
+
+    expect(app.blockedGenres).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+
+  it('unblocking a genre calls the unblock endpoint and removes it from the list', async () => {
+    const apiStub = stubApi(ONBOARDED_USER, ['emo', 'polka']);
+    const app = createPreferencesApp();
+    await app.init();
+
+    await app.unblockGenre('emo');
+
+    expect(app.blockedGenres).toEqual(['polka']);
+    const unblockCall = apiStub.calls.find((c) => c.path === '/api/genres/emo/unblock');
+    expect(unblockCall).toBeTruthy();
+    expect(unblockCall!.options.method).toBe('POST');
+    vi.unstubAllGlobals();
+  });
+
+  it('shows an error and keeps the genre in the list when unblocking fails', async () => {
+    const fetchMock = vi.fn(async (path: string, options: any = {}) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: ONBOARDED_USER }), { status: 200 });
+      if (path === '/api/genres/blocked') return new Response(JSON.stringify({ genres: ['emo'] }), { status: 200 });
+      if (path === '/api/genres/emo/unblock') return new Response('nope', { status: 500 });
+      throw new Error(`unexpected ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createPreferencesApp();
+    await app.init();
+
+    await app.unblockGenre('emo');
+
+    expect(app.error).toBeTruthy();
+    expect(app.blockedGenres).toEqual(['emo']);
     vi.unstubAllGlobals();
   });
 });
