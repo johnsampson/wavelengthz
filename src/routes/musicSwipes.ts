@@ -99,6 +99,14 @@ async function applyGenrePass(db: D1Database, userId: string, genres: string[], 
 // top-up (see below) instead of waiting for the pool to hit exactly zero.
 const LOW_ARTIST_POOL_THRESHOLD = 15;
 
+// 'skip' (issue: "no reason to pass if you don't know who they are") defers
+// a decision on an artist you don't recognize rather than forcing a
+// like/pass verdict -- it still counts as swiped (migrations/0019) so the
+// deck moves on, but doesn't touch genre affinity or pass tracking either
+// way, and is revisited later through History's existing "Change" control
+// rather than a second UI for un-skipping.
+const VALID_DIRECTIONS = new Set(['left', 'right', 'skip']);
+
 export function registerMusicSwipeRoutes(router: RouterType) {
   router.get('/api/candidates/music', async (request: Request, env: Env, ctx: ExecutionContext) => {
     const user = await getSessionUser(request, env.DB);
@@ -192,8 +200,11 @@ export function registerMusicSwipeRoutes(router: RouterType) {
     const { item_type, item_id, direction } = await request.json<{
       item_type: 'artist' | 'track';
       item_id: string;
-      direction: 'left' | 'right';
+      direction: 'left' | 'right' | 'skip';
     }>();
+    if (!VALID_DIRECTIONS.has(direction)) {
+      return Response.json({ error: 'invalid_direction' }, { status: 400 });
+    }
     const now = Date.now();
 
     const previous = await env.DB.prepare(
@@ -211,7 +222,12 @@ export function registerMusicSwipeRoutes(router: RouterType) {
     // item must not double-count, and a left-swipe only decrements genres
     // that were counted from a prior right-swipe in the first place.
     // Pass tracking (genre_pass_count) is the exact mirror for left-swipes,
-    // so the same transition-based discipline applies to it too.
+    // so the same transition-based discipline applies to it too. 'skip'
+    // touches neither on its own -- it's not a like or a pass -- but the
+    // third branch below still has to undo a prior 'right's affinity if a
+    // swipe is ever changed away from it via skip specifically (not
+    // reachable from today's UI, which only offers skip on a fresh,
+    // never-swiped candidate, but the API shouldn't depend on that holding).
     let crossedGenre: string | null = null;
     if (direction === 'right' && previous?.direction !== 'right') {
       const genres = await genresForItem(env.DB, item_type, item_id);
@@ -222,6 +238,9 @@ export function registerMusicSwipeRoutes(router: RouterType) {
       const genres = await genresForItem(env.DB, item_type, item_id);
       if (previous?.direction === 'right') await applyGenreAffinity(env.DB, user.id, genres, item_type, -1, now);
       crossedGenre = await applyGenrePass(env.DB, user.id, genres, 1, now);
+    } else if (direction === 'skip' && previous?.direction === 'right') {
+      const genres = await genresForItem(env.DB, item_type, item_id);
+      await applyGenreAffinity(env.DB, user.id, genres, item_type, -1, now);
     }
 
     return Response.json({ ok: true, crossedGenre });
@@ -256,7 +275,10 @@ export function registerMusicSwipeRoutes(router: RouterType) {
     const user = await getSessionUser(request, env.DB);
     if (!user) return new Response('Unauthorized', { status: 401 });
 
-    const { direction } = await request.json<{ direction: 'left' | 'right' }>();
+    const { direction } = await request.json<{ direction: 'left' | 'right' | 'skip' }>();
+    if (!VALID_DIRECTIONS.has(direction)) {
+      return Response.json({ error: 'invalid_direction' }, { status: 400 });
+    }
 
     const swipe = await env.DB.prepare('SELECT item_type, item_id, direction FROM music_swipes WHERE id = ? AND user_id = ?')
       .bind(request.params.id, user.id)
@@ -271,6 +293,11 @@ export function registerMusicSwipeRoutes(router: RouterType) {
     // Same transition-based logic as the fresh-swipe POST handler -- changing
     // a past decision via the History "Change" toggle must move genre
     // affinity (and pass tracking) too, not just record the new direction.
+    // The skip branch below is defensive for the same reason as the
+    // fresh-swipe POST handler's: public/history.js's toggle() only ever
+    // sends 'left' or 'right' (never 'skip'), so a skip row's first "Change"
+    // tap turns it into a real like, and there's no UI path back to 'skip'
+    // once that happens -- but this endpoint shouldn't rely on that holding.
     let crossedGenre: string | null = null;
     if (direction === 'right' && swipe.direction !== 'right') {
       const genres = await genresForItem(env.DB, swipe.item_type, swipe.item_id);
@@ -281,6 +308,9 @@ export function registerMusicSwipeRoutes(router: RouterType) {
       const genres = await genresForItem(env.DB, swipe.item_type, swipe.item_id);
       if (swipe.direction === 'right') await applyGenreAffinity(env.DB, user.id, genres, swipe.item_type, -1, now);
       crossedGenre = await applyGenrePass(env.DB, user.id, genres, 1, now);
+    } else if (direction === 'skip' && swipe.direction === 'right') {
+      const genres = await genresForItem(env.DB, swipe.item_type, swipe.item_id);
+      await applyGenreAffinity(env.DB, user.id, genres, swipe.item_type, -1, now);
     }
 
     return Response.json({ ok: true, crossedGenre });

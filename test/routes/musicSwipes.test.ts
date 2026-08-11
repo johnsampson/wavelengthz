@@ -263,6 +263,114 @@ describe('POST /api/swipe/music', () => {
     expect(rows.results.length).toBe(1); // upsert, not a second row
     expect(rows.results[0].direction).toBe('right');
   });
+
+  it('rejects an invalid direction, writing nothing', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/swipe/music', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_type: 'artist', item_id: 'a1', direction: 'up' }),
+      }),
+      env,
+      ctx
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_direction');
+    const row = await env.DB.prepare('SELECT * FROM music_swipes WHERE user_id = ? AND item_id = ?').bind('u1', 'a1').first<any>();
+    expect(row).toBeNull();
+  });
+
+  it('accepts "skip" as a real direction (issue: no reason to pass on an artist you do not recognize)', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/swipe/music', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_type: 'artist', item_id: 'a1', direction: 'skip' }),
+      }),
+      env,
+      ctx
+    );
+    expect(res.status).toBe(200);
+    const row = await env.DB.prepare('SELECT direction FROM music_swipes WHERE user_id = ? AND item_id = ?').bind('u1', 'a1').first<any>();
+    expect(row.direction).toBe('skip');
+  });
+
+  it('skip removes the artist from the candidate pool, same as a real left/right swipe', async () => {
+    const cookie = await cookieFor('u1');
+    await worker.fetch(
+      new Request('http://localhost/api/swipe/music', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_type: 'artist', item_id: 'a1', direction: 'skip' }),
+      }),
+      env,
+      ctx
+    );
+
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/music', { headers: { Cookie: cookie } }), env, ctx);
+    const body = await res.json<any>();
+    expect(body.candidates.some((c: any) => c.itemId === 'a1')).toBe(false);
+  });
+});
+
+describe('skip and genre tracking', () => {
+  async function affinityFor(userId: string, genre: string): Promise<number> {
+    const row = await env.DB.prepare('SELECT (artist_count + track_count) as total FROM user_genres WHERE user_id = ? AND genre = ?')
+      .bind(userId, genre)
+      .first<{ total: number }>();
+    return row?.total ?? 0;
+  }
+
+  async function passCountFor(userId: string, genre: string): Promise<number> {
+    const row = await env.DB.prepare('SELECT pass_count FROM user_genres WHERE user_id = ? AND genre = ?').bind(userId, genre).first<{ pass_count: number }>();
+    return row?.pass_count ?? 0;
+  }
+
+  it('skipping a fresh candidate touches neither genre affinity nor pass tracking', async () => {
+    await env.DB.prepare(`UPDATE artists SET genres = ? WHERE id = 'a1'`).bind(JSON.stringify(genresToObject(['indie']))).run();
+    const cookie = await cookieFor('u1');
+
+    await worker.fetch(
+      new Request('http://localhost/api/swipe/music', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_type: 'artist', item_id: 'a1', direction: 'skip' }),
+      }),
+      env,
+      ctx
+    );
+
+    expect(await affinityFor('u1', 'indie')).toBe(0);
+    expect(await passCountFor('u1', 'indie')).toBe(0);
+  });
+
+  it('undoes genre affinity if a right-swiped item is later changed to skip via PATCH', async () => {
+    // Not reachable from today's History UI (public/history.js's toggle()
+    // only ever sends 'left'/'right'), but the endpoint itself must stay
+    // correct regardless -- genre affinity tracks *currently* right-swiped
+    // items, and this is the one path that could otherwise leave it stale.
+    await env.DB.prepare(`UPDATE artists SET genres = ? WHERE id = 'a1'`).bind(JSON.stringify(genresToObject(['indie']))).run();
+    const cookie = await cookieFor('u1');
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s1', 'u1', 'artist', 'a1', 'right', 1000, 1000)`
+    ).run();
+    await env.DB.prepare(`INSERT INTO user_genres (id, user_id, genre, artist_count, track_count, created_at, updated_at) VALUES ('ug1', 'u1', 'indie', 1, 0, 1000, 1000)`).run();
+
+    await worker.fetch(
+      new Request('http://localhost/api/swipes/music/s1', {
+        method: 'PATCH',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ direction: 'skip' }),
+      }),
+      env,
+      ctx
+    );
+
+    expect(await affinityFor('u1', 'indie')).toBe(0);
+  });
 });
 
 describe('genre affinity tracking on POST /api/swipe/music', () => {
@@ -573,6 +681,28 @@ describe('GET /api/swipes/music and PATCH', () => {
     expect(patchRes.status).toBe(200);
     const row = await env.DB.prepare('SELECT direction FROM music_swipes WHERE id = ?').bind('s1').first<any>();
     expect(row.direction).toBe('right');
+  });
+
+  it('rejects an invalid direction via PATCH, writing nothing', async () => {
+    const cookie = await cookieFor('u1');
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s1', 'u1', 'artist', 'a1', 'left', 1000, 1000)`
+    ).run();
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/swipes/music/s1', {
+        method: 'PATCH',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ direction: 'up' }),
+      }),
+      env,
+      ctx
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_direction');
+    const row = await env.DB.prepare('SELECT direction FROM music_swipes WHERE id = ?').bind('s1').first<any>();
+    expect(row.direction).toBe('left');
   });
 
   it('tracks genre passes and reports crossedGenre via PATCH too, the same as a fresh POST swipe', async () => {
