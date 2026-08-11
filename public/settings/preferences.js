@@ -46,7 +46,15 @@ export function createPreferencesApp() {
 
     async init() {
       try {
-        const [me, blockedGenresRes] = await Promise.all([api.me(), api.blockedGenres()]);
+        // A transient failure fetching blocked genres shouldn't take down the
+        // whole page -- api.me() unwrapped still fails init() (and shows the
+        // existing error/401 handling) since the core preference fields
+        // genuinely can't be shown without it, but blocked genres degrading
+        // to an empty list is harmless and keeps the rest of the form usable.
+        const [me, blockedGenresRes] = await Promise.all([
+          api.me(),
+          api.blockedGenres().catch(() => ({ genres: [] })),
+        ]);
         this.blockedGenres = blockedGenresRes.genres ?? [];
         if (me.user.max_distance_km != null) this.maxDistanceKm = me.user.max_distance_km;
         if (me.user.age_min != null) this.ageMin = me.user.age_min;

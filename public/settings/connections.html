@@ -17,14 +17,14 @@
   <p x-show="info" x-text="info" class="mx-auto mb-4 max-w-md text-brand-400" role="status"></p>
   <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
 
-  <div x-show="hasSpotify" class="mx-auto mb-4 flex max-w-md items-center gap-3">
+  <div x-show="!loading && hasSpotify" class="mx-auto mb-4 flex max-w-md items-center gap-3">
     <img :src="spotifyAvatarUrl" alt="" class="h-12 w-12 rounded-full object-cover ring-1 ring-white/10" />
     <div class="text-sm">
       <p class="font-semibold text-neutral-200">Connected via Spotify</p>
       <p class="text-neutral-500">This photo is never shown to matches -- it's just your account identity.</p>
     </div>
   </div>
-  <div x-show="!hasSpotify" class="mx-auto mb-4 max-w-md">
+  <div x-show="!loading && !hasSpotify" class="mx-auto mb-4 max-w-md">
     <a href="/login/spotify?intent=connect" class="btn-primary block w-full text-center">Connect Spotify</a>
     <p class="mt-1 text-center text-xs text-neutral-500">Link your Spotify account for music-taste matching.</p>
   </div>
