@@ -81,7 +81,12 @@ export async function notifyMatch(db: D1Database, env: Env, matchId: string): Pr
       url: '/matches',
     });
 
-    if (row.email) {
+    // Email is the fallback channel, not a second copy of the same
+    // notification -- only sent when push wasn't attempted at all (no
+    // subscription on file), not when it was attempted and failed
+    // mid-send. A transient push failure shouldn't silently escalate into
+    // also emailing someone who chose push as their channel.
+    if (!pushed && row.email) {
       await sendEmail(env, {
         to: row.email,
         subject: "You've got a new match!",
@@ -130,7 +135,9 @@ export async function notifyMessage(db: D1Database, env: Env, messageId: string,
     url: message ? `/messages?matchId=${message.match_id}` : '/messages',
   });
 
-  if (recipient.email) {
+  // See notifyMatch's comment: email is the fallback channel, only sent
+  // when push wasn't attempted at all.
+  if (!pushed && recipient.email) {
     await sendEmail(env, {
       to: recipient.email,
       subject: 'New message on Wavelengthz',
