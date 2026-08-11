@@ -263,6 +263,7 @@ describe('settings page', () => {
       if (path === '/api/onboarding') {
         return new Response(JSON.stringify({ error: 'location_change_cooldown', retryAfterMs: 2 * 24 * 60 * 60 * 1000 }), { status: 429 });
       }
+      if (path === '/api/genres/blocked') return new Response(JSON.stringify({ genres: [] }), { status: 200 });
       throw new Error(`unexpected ${path}`);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -353,6 +354,7 @@ describe('settings page', () => {
       if (path === '/api/photos' && options.method === 'POST') {
         return new Response(JSON.stringify({ photoId: 'p2', url: '/photos/p2' }), { status: 200 });
       }
+      if (path === '/api/genres/blocked') return new Response(JSON.stringify({ genres: [] }), { status: 200 });
       throw new Error(`unexpected ${path}`);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -373,6 +375,7 @@ describe('settings page', () => {
       if (path === '/api/photos' && (!options.method || options.method === 'GET')) {
         return new Response(JSON.stringify({ photos }), { status: 200 });
       }
+      if (path === '/api/genres/blocked') return new Response(JSON.stringify({ genres: [] }), { status: 200 });
       throw new Error(`unexpected ${path}`);
     });
     vi.stubGlobal('fetch', fetchMock);

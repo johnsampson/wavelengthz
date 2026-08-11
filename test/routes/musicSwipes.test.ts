@@ -12,8 +12,15 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await env.DB.exec(
-    'DELETE FROM user_genres; DELETE FROM music_swipes; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM sessions; DELETE FROM tracks; DELETE FROM users; DELETE FROM artists;'
+    'DELETE FROM user_blocked_genres; DELETE FROM user_genres; DELETE FROM music_swipes; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM sessions; DELETE FROM tracks; DELETE FROM users; DELETE FROM artists;'
   );
+  // SWIPE_LIMIT (src/index.ts) is a real 30-per-60s cap, keyed by IP -- test
+  // requests all share the same fallback 'unknown' IP, so without this a
+  // test file with enough /api/swipe/music calls across its tests silently
+  // starts getting 429'd partway through (tests that only check DB state
+  // afterward, not response.status, see it as "nothing happened").
+  const rateLimitKeys = await env.RATE_LIMIT_KV.list();
+  await Promise.all(rateLimitKeys.keys.map((k) => env.RATE_LIMIT_KV.delete(k.name)));
   await insertTestUser(env.DB, {
     id: 'u1',
     spotifyId: 'sp1',
@@ -64,6 +71,38 @@ describe('GET /api/candidates/music', () => {
     const res = await worker.fetch(req, env, ctx);
     const body = await res.json<any>();
     expect(body.candidates.map((c: any) => c.itemId)).not.toContain('a3');
+  });
+
+  it('excludes an artist carrying a genre the user has blocked', async () => {
+    await env.DB.prepare(`UPDATE artists SET genres = ? WHERE id = 'a1'`).bind(JSON.stringify(genresToObject(['country', 'pop']))).run();
+    await env.DB.prepare(
+      `INSERT INTO user_blocked_genres (id, user_id, genre, created_at, updated_at) VALUES ('bg1', 'u1', 'country', 1000, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+
+    const req = new Request('http://localhost/api/candidates/music?limit=10', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, ctx);
+    const body = await res.json<any>();
+
+    expect(body.candidates.map((c: any) => c.itemId)).not.toContain('a1');
+    expect(body.candidates.map((c: any) => c.itemId)).toContain('a2'); // a2 has no genres, unaffected
+  });
+
+  it('excludes a track whose parent artist carries a blocked genre', async () => {
+    await env.DB.prepare(`UPDATE artists SET genres = ? WHERE id = 'a1'`).bind(JSON.stringify(genresToObject(['country']))).run();
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('t1', 'Track One', 'a1', 'https://img.example/t1.jpg', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO user_blocked_genres (id, user_id, genre, created_at, updated_at) VALUES ('bg1', 'u1', 'country', 1000, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+
+    const req = new Request('http://localhost/api/candidates/music?item_type=track', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, ctx);
+    const body = await res.json<any>();
+
+    expect(body.candidates.map((c: any) => c.itemId)).not.toContain('t1');
   });
 
   it('includes each artist\'s image URL', async () => {
@@ -311,6 +350,99 @@ describe('genre affinity tracking on POST /api/swipe/music', () => {
   });
 });
 
+describe('genre pass tracking on POST /api/swipe/music', () => {
+  async function passCountFor(userId: string, genre: string): Promise<number> {
+    const row = await env.DB.prepare('SELECT pass_count FROM user_genres WHERE user_id = ? AND genre = ?')
+      .bind(userId, genre)
+      .first<{ pass_count: number }>();
+    return row?.pass_count ?? 0;
+  }
+
+  const swipe = (cookie: string, itemType: string, itemId: string, direction: string) =>
+    worker.fetch(
+      new Request('http://localhost/api/swipe/music', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_type: itemType, item_id: itemId, direction }),
+      }),
+      env,
+      ctx
+    );
+
+  it('increments pass_count on a fresh left-swipe', async () => {
+    await env.DB.prepare(`UPDATE artists SET genres = ? WHERE id = 'a1'`).bind(JSON.stringify(genresToObject(['country']))).run();
+    const cookie = await cookieFor('u1');
+
+    await swipe(cookie, 'artist', 'a1', 'left');
+
+    expect(await passCountFor('u1', 'country')).toBe(1);
+  });
+
+  it('does not double-increment when the same item is left-swiped again', async () => {
+    await env.DB.prepare(`UPDATE artists SET genres = ? WHERE id = 'a1'`).bind(JSON.stringify(genresToObject(['country']))).run();
+    const cookie = await cookieFor('u1');
+
+    await swipe(cookie, 'artist', 'a1', 'left');
+    await swipe(cookie, 'artist', 'a1', 'left');
+
+    expect(await passCountFor('u1', 'country')).toBe(1);
+  });
+
+  it('decrements pass_count, floored at 0, when a left-swipe is changed to right', async () => {
+    await env.DB.prepare(`UPDATE artists SET genres = ? WHERE id = 'a1'`).bind(JSON.stringify(genresToObject(['country']))).run();
+    const cookie = await cookieFor('u1');
+
+    await swipe(cookie, 'artist', 'a1', 'left');
+    expect(await passCountFor('u1', 'country')).toBe(1);
+
+    await swipe(cookie, 'artist', 'a1', 'right');
+    expect(await passCountFor('u1', 'country')).toBe(0);
+  });
+
+  it('also counts as a pass when undoing a like (right-swipe changed to left)', async () => {
+    // A right->left change is both "no longer liked" (artist_count/
+    // track_count decrement, tested above) and "now passed" (pass_count
+    // increment) -- the current state is left, regardless of how it got
+    // there.
+    await env.DB.prepare(`UPDATE artists SET genres = ? WHERE id = 'a1'`).bind(JSON.stringify(genresToObject(['country']))).run();
+    const cookie = await cookieFor('u1');
+
+    await swipe(cookie, 'artist', 'a1', 'right');
+    await swipe(cookie, 'artist', 'a1', 'left');
+
+    expect(await passCountFor('u1', 'country')).toBe(1);
+  });
+
+  it('returns crossedGenre exactly when pass_count reaches the threshold, not before or after', async () => {
+    await env.DB.prepare(`UPDATE artists SET genres = ? WHERE id = 'a1'`).bind(JSON.stringify(genresToObject(['country']))).run();
+    const cookie = await cookieFor('u1');
+
+    // 9 prior passes on 9 different artists sharing the 'country' genre --
+    // none of these should trigger the prompt yet.
+    for (let i = 0; i < 9; i++) {
+      await env.DB.prepare(
+        `INSERT INTO artists (id, name, genres, image_url, source, approved, created_at) VALUES (?, ?, ?, 'https://img.example/x.jpg', 'seed', 1, 1000)`
+      )
+        .bind(`prior${i}`, `Prior ${i}`, JSON.stringify(genresToObject(['country'])))
+        .run();
+      const res = await swipe(cookie, 'artist', `prior${i}`, 'left');
+      expect((await res.json<any>()).crossedGenre).toBeNull();
+    }
+    expect(await passCountFor('u1', 'country')).toBe(9);
+
+    const tenthRes = await swipe(cookie, 'artist', 'a1', 'left');
+    expect((await tenthRes.json<any>()).crossedGenre).toBe('country');
+
+    await env.DB.prepare(
+      `INSERT INTO artists (id, name, genres, image_url, source, approved, created_at) VALUES ('a3', 'Artist Three', ?, 'https://img.example/a3.jpg', 'seed', 1, 1000)`
+    )
+      .bind(JSON.stringify(genresToObject(['country'])))
+      .run();
+    const eleventhRes = await swipe(cookie, 'artist', 'a3', 'left');
+    expect((await eleventhRes.json<any>()).crossedGenre).toBeNull(); // already prompted once
+  });
+});
+
 describe('liking a track auto-likes its artist', () => {
   const swipe = (cookie: string, itemType: string, itemId: string, direction: string) =>
     worker.fetch(
@@ -441,6 +573,28 @@ describe('GET /api/swipes/music and PATCH', () => {
     expect(patchRes.status).toBe(200);
     const row = await env.DB.prepare('SELECT direction FROM music_swipes WHERE id = ?').bind('s1').first<any>();
     expect(row.direction).toBe('right');
+  });
+
+  it('tracks genre passes and reports crossedGenre via PATCH too, the same as a fresh POST swipe', async () => {
+    await env.DB.prepare(`UPDATE artists SET genres = '{"country":true}' WHERE id = 'a1'`).run();
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s1', 'u1', 'artist', 'a1', 'right', 1000, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+
+    const patchRes = await worker.fetch(
+      new Request('http://localhost/api/swipes/music/s1', {
+        method: 'PATCH',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ direction: 'left' }),
+      }),
+      env,
+      ctx
+    );
+
+    expect((await patchRes.json<any>()).crossedGenre).toBeNull(); // only the 1st pass, not the 10th
+    const row = await env.DB.prepare('SELECT pass_count FROM user_genres WHERE user_id = ? AND genre = ?').bind('u1', 'country').first<any>();
+    expect(row.pass_count).toBe(1);
   });
 
   it('resolves artist_id for both artist and track history rows, for linking to the artist page', async () => {
