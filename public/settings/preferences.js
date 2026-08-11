@@ -44,6 +44,15 @@ export function createPreferencesApp() {
       return `${this.ageMin} - ${this.ageMax >= MAX_AGE ? '100+' : this.ageMax}`;
     },
 
+    // Gender has no picker on this page (see the lock icon in
+    // preferences.html) -- this only ever reflects whatever was chosen once,
+    // at onboarding.
+    get genderLabel() {
+      if (this.gender === 'male') return 'Male';
+      if (this.gender === 'female') return 'Female';
+      return 'Not set';
+    },
+
     async init() {
       try {
         // A transient failure fetching blocked genres shouldn't take down the
@@ -109,10 +118,6 @@ export function createPreferencesApp() {
     async save() {
       this.error = null;
       this.saved = false;
-      if (!this.gender) {
-        this.error = 'Please select a gender.';
-        return;
-      }
       if (!this.seeking) {
         this.error = "Please select who you're seeking.";
         return;

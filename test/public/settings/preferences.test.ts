@@ -101,17 +101,30 @@ describe('preferences page', () => {
     vi.unstubAllGlobals();
   });
 
-  it('rejects saving without a gender selected', async () => {
+  it('has no gender picker -- gender is locked in at onboarding and read-only here', async () => {
+    stubApi(ONBOARDED_USER);
+    const app = createPreferencesApp();
+    await app.init();
+
+    expect(app.genderLabel).toBe('Male');
+    vi.unstubAllGlobals();
+  });
+
+  it('labels an unset gender distinctly from a real selection', () => {
+    const app = createPreferencesApp();
+
+    expect(app.genderLabel).toBe('Not set');
+  });
+
+  it('still echoes gender back on save even with no picker to change it (server ignores it post-onboarding anyway)', async () => {
     const api = stubApi(ONBOARDED_USER);
     const app = createPreferencesApp();
     await app.init();
-    app.gender = '';
 
     await app.save();
 
-    expect(app.error).toBeTruthy();
-    expect(app.saved).toBe(false);
-    expect(api.calls.some((c) => c.path === '/api/onboarding')).toBe(false);
+    const body = api.onboardBody();
+    expect(body.gender).toBe('male');
     vi.unstubAllGlobals();
   });
 

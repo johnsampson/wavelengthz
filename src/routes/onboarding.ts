@@ -97,10 +97,22 @@ export function registerOnboardingRoutes(router: RouterType) {
       return Response.json({ error: 'invalid_bio' }, { status: 400 });
     }
 
-    if (typeof body.gender !== 'string' || !GENDER_OPTIONS.has(body.gender)) {
+    // Gender is a one-time choice, locked in at initial onboarding and never
+    // writable again -- Preferences (public/settings/preferences.html) shows
+    // it read-only for exactly this reason. Enforced here, not just in the
+    // UI: this endpoint is reused for every later Settings save (see
+    // public/settings/preferences.js's comment on why), so relying on the
+    // client to keep re-sending the unchanged value would make the lock
+    // nothing more than a suggestion -- a hand-crafted request could still
+    // flip it. body.gender is validated (and used) ONLY on the very first,
+    // pre-onboarding call; on every later call it's inert -- not validated,
+    // not written, whatever the request sends -- and user.gender (the
+    // existing value) is what actually gets persisted below.
+    if (user.onboarded_at == null && (typeof body.gender !== 'string' || !GENDER_OPTIONS.has(body.gender))) {
       console.error(`invalid_gender user=${user.id} gender=${JSON.stringify(body.gender)}`);
       return Response.json({ error: 'invalid_gender' }, { status: 400 });
     }
+    const gender = user.onboarded_at == null ? body.gender : user.gender;
 
     if (typeof body.seeking !== 'string' || !SEEKING_OPTIONS.has(body.seeking)) {
       console.error(`invalid_seeking user=${user.id} seeking=${JSON.stringify(body.seeking)}`);
@@ -166,7 +178,7 @@ export function registerOnboardingRoutes(router: RouterType) {
       body.lat,
       body.lng,
       locationUpdatedAt,
-      body.gender,
+      gender,
       body.seeking,
       body.intent,
       body.max_distance_km ?? null,
