@@ -41,8 +41,15 @@
 // /settings/preferences, /settings/notifications, /settings/connections) --
 // without a cache bump, this SW's cache-first fetch handler would keep every
 // already-installed user on the old pre-split /settings and /settings.js
-// forever, since nothing in the fetch handler ever revalidates.
-const CACHE_NAME = 'wavelengthz-shell-v23';
+// forever, since nothing in the fetch handler ever revalidates. v24 covers a
+// batch of 7 PRs merged without bumping this, so every one of them was
+// silently stuck behind the cache-first fetch handler until now: adds a Bio
+// field to /settings/profile.js, locks gender read-only on
+// /settings/preferences.js, adds the email-notifications toggle to
+// /settings/notifications.js, makes /profile's artist chips link out,
+// reorders / rewords the deck (index.html) header/empty-state and adds the
+// skip button, and splits /history.js's Music tab into Artists/Tracks.
+const CACHE_NAME = 'wavelengthz-shell-v24';
 const APP_SHELL = [
   '/',
   '/app.js',
