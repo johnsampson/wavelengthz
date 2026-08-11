@@ -1,6 +1,7 @@
 import type { RouterType } from 'itty-router';
 import { getSessionUser } from '../lib/session';
 import { computeAge } from '../lib/age';
+import { containsBlockedWord } from '../lib/messageFilter';
 
 interface OnboardingBody {
   display_name: string;
@@ -88,7 +89,10 @@ export function registerOnboardingRoutes(router: RouterType) {
       return Response.json({ error: 'invalid_display_name' }, { status: 400 });
     }
 
-    if (body.bio != null && (typeof body.bio !== 'string' || body.bio.length > MAX_BIO_LENGTH)) {
+    if (
+      body.bio != null &&
+      (typeof body.bio !== 'string' || body.bio.length > MAX_BIO_LENGTH || containsBlockedWord(body.bio))
+    ) {
       console.error(`invalid_bio user=${user.id} bioType=${typeof body.bio} bioLength=${typeof body.bio === 'string' ? body.bio.length : 'n/a'}`);
       return Response.json({ error: 'invalid_bio' }, { status: 400 });
     }

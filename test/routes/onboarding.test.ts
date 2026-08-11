@@ -475,6 +475,21 @@ describe('POST /api/onboarding', () => {
     expect(body.error).toBe('invalid_bio');
   });
 
+  it('rejects and writes nothing when bio contains blocked language (issue: profile bio should be filtered like messages)', async () => {
+    const cookie = await sessionCookieFor('u1');
+    const req = new Request('http://localhost/api/onboarding', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_name: 'Jordan', bio: 'this bio has a fucking slur in it', date_of_birth: '1995-01-01', location_label: 'Austin, TX', lat: 30.27, lng: -97.74 }),
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('invalid_bio');
+    const row = await env.DB.prepare('SELECT onboarded_at FROM users WHERE id = ?').bind('u1').first<any>();
+    expect(row.onboarded_at).toBeNull();
+  });
+
   it('accepts a display_name with letters, numbers, dashes, and spaces', async () => {
     const cookie = await sessionCookieFor('u1');
     const req = new Request('http://localhost/api/onboarding', {

@@ -47,6 +47,16 @@ describe('profile page', () => {
     vi.unstubAllGlobals();
   });
 
+  it('loads the existing bio', async () => {
+    stubApi(ONBOARDED_USER);
+    const app = createProfileApp();
+
+    await app.init();
+
+    expect(app.bio).toBe('I like loud guitars');
+    vi.unstubAllGlobals();
+  });
+
   it('loads existing photos on init', async () => {
     stubApi(ONBOARDED_USER, [{ photoId: 'p1', url: '/photos/p1', position: 0 }]);
     const app = createProfileApp();
@@ -109,6 +119,57 @@ describe('profile page', () => {
     expect(body.intent).toBe('something_casual');
     expect(app.displayName).toBe('Jordan Two');
     expect(app.saved).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it('saves an edited, trimmed bio', async () => {
+    const api = stubApi(ONBOARDED_USER);
+    const app = createProfileApp();
+    await app.init();
+    app.bio = '  Loud guitars and quiet mornings  ';
+
+    await app.save();
+
+    const body = api.onboardBody();
+    expect(body.bio).toBe('Loud guitars and quiet mornings');
+    expect(app.bio).toBe('Loud guitars and quiet mornings');
+    expect(app.saved).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it('sends null when the bio is cleared, rather than an empty string', async () => {
+    const api = stubApi(ONBOARDED_USER);
+    const app = createProfileApp();
+    await app.init();
+    app.bio = '   ';
+
+    await app.save();
+
+    const body = api.onboardBody();
+    expect(body.bio).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it('surfaces a specific error when the bio is rejected as too long or containing blocked language', async () => {
+    const fetchMock = vi.fn(async (path: string, options: any = {}) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: ONBOARDED_USER }), { status: 200 });
+      if (path === '/api/photos' && (!options.method || options.method === 'GET')) {
+        return new Response(JSON.stringify({ photos: [] }), { status: 200 });
+      }
+      if (path === '/api/onboarding') {
+        return new Response(JSON.stringify({ error: 'invalid_bio' }), { status: 400 });
+      }
+      throw new Error(`unexpected ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createProfileApp();
+    await app.init();
+    app.bio = 'whatever triggers the filter';
+
+    await app.save();
+
+    expect(app.error).toContain('bio');
+    expect(app.saved).toBe(false);
     vi.unstubAllGlobals();
   });
 
