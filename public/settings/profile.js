@@ -65,7 +65,11 @@ export function createProfileApp() {
         this.displayName = this.displayName.trim();
         this.saved = true;
       } catch (e) {
-        this.error = 'Could not save your settings. Please try again.';
+        if (e.status === 400 && e.body?.error === 'invalid_intent') {
+          this.error = "Please choose what you're interested in under Settings → Preferences first.";
+        } else {
+          this.error = 'Could not save your settings. Please try again.';
+        }
       }
     },
 

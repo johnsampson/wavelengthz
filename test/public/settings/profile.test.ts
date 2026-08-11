@@ -112,6 +112,26 @@ describe('profile page', () => {
     vi.unstubAllGlobals();
   });
 
+  it('surfaces a specific, actionable error when saving fails because the account has a retired intent value', async () => {
+    const fetchMock = vi.fn(async (path: string, options: any = {}) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: ONBOARDED_USER }), { status: 200 });
+      if (path === '/api/onboarding') {
+        return new Response(JSON.stringify({ error: 'invalid_intent' }), { status: 400 });
+      }
+      throw new Error(`unexpected ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createProfileApp();
+    await app.init();
+    app.displayName = 'Jordan Two';
+
+    await app.save();
+
+    expect(app.error).toContain('Preferences');
+    expect(app.saved).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
   it('surfaces an error and stops loading when /api/me fails on init', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
     const app = createProfileApp();
