@@ -1,5 +1,6 @@
 import type { RouterType, IRequest } from 'itty-router';
 import { getSessionUser } from '../lib/session';
+import { checkNudity, type ModerationResult } from '../lib/sightengine';
 
 const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -49,6 +50,27 @@ export function registerPhotoRoutes(router: RouterType) {
       return Response.json({ error: 'too_many_photos' }, { status: 400 });
     }
 
+    // Checked before ever touching R2/D1 -- a blocked photo is rejected
+    // outright, not stored and then hidden (issue #36 §2: "before making the
+    // image visible"). credentialsConfigured, not moderation.score !== null,
+    // is what decides moderationCheckedAt below -- both the no-credentials
+    // no-op and a genuine API failure leave score null, but only the latter
+    // is a real "we tried and something went wrong" attempt worth recording.
+    const credentialsConfigured = !!(env.SIGHTENGINE_API_USER && env.SIGHTENGINE_API_SECRET);
+    let moderation: ModerationResult;
+    try {
+      moderation = await checkNudity(body, contentType, env);
+    } catch (err) {
+      console.error('checkNudity failed', err);
+      // Fail toward review, not toward silently approving unmoderated
+      // content -- a real attempt that errored is not the same as a clean
+      // result, and shouldn't be indistinguishable from one.
+      moderation = { status: 'flagged', score: null };
+    }
+    if (moderation.status === 'blocked') {
+      return Response.json({ error: 'photo_rejected' }, { status: 400 });
+    }
+
     const photoId = crypto.randomUUID();
     const ext = contentType.split('/')[1];
     const r2Key = `users/${user.id}/${photoId}.${ext}`;
@@ -57,8 +79,11 @@ export function registerPhotoRoutes(router: RouterType) {
 
     const now = Date.now();
     await env.DB.prepare(
-      `INSERT INTO user_photos (id, user_id, r2_key, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
-    ).bind(photoId, user.id, r2Key, position, now, now).run();
+      `INSERT INTO user_photos (id, user_id, r2_key, position, moderation_status, moderation_score, moderation_checked_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(photoId, user.id, r2Key, position, moderation.status, moderation.score, credentialsConfigured ? now : null, now, now)
+      .run();
 
     return Response.json({ photoId, url: `/photos/${photoId}` });
   });
@@ -99,10 +124,17 @@ export function registerPhotoRoutes(router: RouterType) {
     const user = await getSessionUser(request, env.DB);
     if (!user) return new Response('Unauthorized', { status: 401 });
 
-    const photo = await env.DB.prepare('SELECT r2_key FROM user_photos WHERE id = ?')
+    const photo = await env.DB.prepare('SELECT r2_key, user_id, moderation_status FROM user_photos WHERE id = ?')
       .bind(request.params.id)
-      .first<{ r2_key: string }>();
+      .first<{ r2_key: string; user_id: string; moderation_status: string }>();
     if (!photo) return new Response('Not found', { status: 404 });
+
+    // A flagged/blocked photo stays visible to its own owner (e.g. on
+    // Settings, while under review) but hidden from everyone else -- issue
+    // #36 §2's "only serve approved images" requirement.
+    if (photo.moderation_status !== 'approved' && photo.user_id !== user.id) {
+      return new Response('Not found', { status: 404 });
+    }
 
     const object = await env.PHOTOS.get(photo.r2_key);
     if (!object) return new Response('Not found', { status: 404 });

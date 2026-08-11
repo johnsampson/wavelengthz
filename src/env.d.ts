@@ -36,6 +36,13 @@ interface Env {
   // shared Basic Auth prompt.
   SITE_BASIC_AUTH_USER?: string;
   SITE_BASIC_AUTH_PASSWORD?: string;
+  // Photo moderation (src/lib/sightengine.ts, issue #36 §2) -- optional like
+  // the pair above: unset means checkNudity no-ops (treats every photo as
+  // approved, today's behavior since no moderation capability exists
+  // without it). Set both via `wrangler secret put` once a Sightengine
+  // account exists.
+  SIGHTENGINE_API_USER?: string;
+  SIGHTENGINE_API_SECRET?: string;
 }
 
 // `cloudflare:test`'s `env` export is typed as `Cloudflare.Env` (a separate
@@ -61,5 +68,7 @@ declare namespace Cloudflare {
     VAPID_SUBJECT: string;
     SITE_BASIC_AUTH_USER?: string;
     SITE_BASIC_AUTH_PASSWORD?: string;
+    SIGHTENGINE_API_USER?: string;
+    SIGHTENGINE_API_SECRET?: string;
   }
 }

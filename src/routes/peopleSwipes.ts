@@ -88,9 +88,14 @@ async function primaryPhotoUrls(db: D1Database, userIds: string[]): Promise<Map<
   const urls = new Map<string, string>();
   if (userIds.length === 0) return urls;
 
+  // moderation_status = 'approved': a flagged/blocked position-0 photo is
+  // hidden from everyone but its owner (GET /photos/:id) -- excluding it
+  // here too avoids handing back a URL that would just 404 for every other
+  // candidate viewer. No fallback to a later photo if position 0 isn't
+  // approved -- same as showing no photo at all, an already-handled case.
   const rows = await db
     .prepare(
-      `SELECT user_id, id FROM user_photos WHERE position = 0 AND user_id IN (${new Array(userIds.length).fill('?').join(', ')})`
+      `SELECT user_id, id FROM user_photos WHERE position = 0 AND moderation_status = 'approved' AND user_id IN (${new Array(userIds.length).fill('?').join(', ')})`
     )
     .bind(...userIds)
     .all<{ user_id: string; id: string }>();
@@ -289,7 +294,12 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
       return new Response('Forbidden', { status: 403 });
     }
 
-    const photoRows = await env.DB.prepare('SELECT id FROM user_photos WHERE user_id = ? ORDER BY position ASC')
+    // Self viewing their own profile sees every photo, including one still
+    // under review -- everyone else only sees approved ones, same rule as
+    // GET /photos/:id and primaryPhotoUrls above (issue #36 §2).
+    const photoRows = await env.DB.prepare(
+      `SELECT id FROM user_photos WHERE user_id = ? ${isSelf ? '' : "AND moderation_status = 'approved'"} ORDER BY position ASC`
+    )
       .bind(targetId)
       .all<{ id: string }>();
 

@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
 import { insertTestUser } from '../helpers/createUser';
@@ -58,11 +58,90 @@ describe('POST /api/photos', () => {
     const row = await env.DB.prepare('SELECT * FROM user_photos WHERE id = ?').bind(body.photoId).first<any>();
     expect(row.user_id).toBe('u1');
     expect(row.position).toBe(0);
+    // No SIGHTENGINE_* configured in the test env -- checkNudity no-ops.
+    expect(row.moderation_status).toBe('approved');
+    expect(row.moderation_checked_at).toBeNull();
 
     const object = await env.PHOTOS.get(row.r2_key);
     expect(object).not.toBeNull();
     expect(new Uint8Array(await object!.arrayBuffer())).toEqual(bytes);
     expect(object!.httpMetadata?.contentType).toBe('image/jpeg');
+  });
+});
+
+describe('POST /api/photos moderation (issue #36 §2)', () => {
+  const moderatedEnv = { ...env, SIGHTENGINE_API_USER: 'user', SIGHTENGINE_API_SECRET: 'secret' };
+
+  function stubSightengine(none: number) {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ nudity: { none } }), { status: 200 })));
+  }
+
+  function postModeratedPhoto(cookie: string) {
+    return worker.fetch(
+      new Request('http://localhost/api/photos', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'image/jpeg' },
+        body: new TextEncoder().encode('fake-jpeg-bytes'),
+      }),
+      moderatedEnv,
+      {} as ExecutionContext
+    );
+  }
+
+  it('rejects the upload outright when Sightengine reports it as blocked -- nothing is stored', async () => {
+    stubSightengine(0.05); // none: 0.05 -> score 0.95, over the block threshold
+    const cookie = await cookieFor('u1');
+
+    const res = await postModeratedPhoto(cookie);
+
+    expect(res.status).toBe(400);
+    const body = await res.json<any>();
+    expect(body.error).toBe('photo_rejected');
+    const rows = await env.DB.prepare('SELECT * FROM user_photos WHERE user_id = ?').bind('u1').all();
+    expect(rows.results).toHaveLength(0);
+    vi.unstubAllGlobals();
+  });
+
+  it('stores a borderline photo as flagged, with its score and a real moderation_checked_at', async () => {
+    stubSightengine(0.3); // none: 0.3 -> score 0.7, in the flag band
+    const cookie = await cookieFor('u1');
+
+    const res = await postModeratedPhoto(cookie);
+
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    const row = await env.DB.prepare('SELECT * FROM user_photos WHERE id = ?').bind(body.photoId).first<any>();
+    expect(row.moderation_status).toBe('flagged');
+    expect(row.moderation_score).toBeCloseTo(0.7, 5);
+    expect(row.moderation_checked_at).not.toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it('stores a clean photo as approved when credentials are configured too, not just when they are absent', async () => {
+    stubSightengine(0.99);
+    const cookie = await cookieFor('u1');
+
+    const res = await postModeratedPhoto(cookie);
+
+    const body = await res.json<any>();
+    const row = await env.DB.prepare('SELECT * FROM user_photos WHERE id = ?').bind(body.photoId).first<any>();
+    expect(row.moderation_status).toBe('approved');
+    expect(row.moderation_checked_at).not.toBeNull(); // a real check happened, unlike the no-credentials case
+    vi.unstubAllGlobals();
+  });
+
+  it('fails toward flagged (not blocked, not approved) when the Sightengine call itself errors', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('service unavailable', { status: 503 })));
+    const cookie = await cookieFor('u1');
+
+    const res = await postModeratedPhoto(cookie);
+
+    expect(res.status).toBe(200); // the upload itself still succeeds
+    const body = await res.json<any>();
+    const row = await env.DB.prepare('SELECT * FROM user_photos WHERE id = ?').bind(body.photoId).first<any>();
+    expect(row.moderation_status).toBe('flagged');
+    expect(row.moderation_score).toBeNull();
+    vi.unstubAllGlobals();
   });
 });
 
@@ -274,6 +353,31 @@ describe('GET /photos/:id', () => {
       {} as ExecutionContext
     );
     expect(res.headers.get('Content-Type')).toBe('application/octet-stream');
+  });
+
+  it('hides a flagged photo from another user (404, not the bytes)', async () => {
+    await insertTestUser(env.DB, { id: 'u2', spotifyId: 'sp2', createdAt: 1000, updatedAt: 1000 });
+    await env.PHOTOS.put('users/u1/flagged.jpg', new Blob(['bytes']), { httpMetadata: { contentType: 'image/jpeg' } });
+    await env.DB.prepare(
+      `INSERT INTO user_photos (id, user_id, r2_key, position, moderation_status, created_at, updated_at) VALUES ('flagged', 'u1', 'users/u1/flagged.jpg', 0, 'flagged', 1000, 1000)`
+    ).run();
+
+    const otherCookie = await cookieFor('u2');
+    const res = await worker.fetch(new Request('http://localhost/photos/flagged', { headers: { Cookie: otherCookie } }), env, {} as ExecutionContext);
+
+    expect(res.status).toBe(404);
+  });
+
+  it('still shows a flagged photo to its own owner', async () => {
+    await env.PHOTOS.put('users/u1/flagged.jpg', new Blob(['bytes']), { httpMetadata: { contentType: 'image/jpeg' } });
+    await env.DB.prepare(
+      `INSERT INTO user_photos (id, user_id, r2_key, position, moderation_status, created_at, updated_at) VALUES ('flagged', 'u1', 'users/u1/flagged.jpg', 0, 'flagged', 1000, 1000)`
+    ).run();
+
+    const ownCookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/photos/flagged', { headers: { Cookie: ownCookie } }), env, {} as ExecutionContext);
+
+    expect(res.status).toBe(200);
   });
 
   it('returns 404 for an unknown photo id', async () => {
