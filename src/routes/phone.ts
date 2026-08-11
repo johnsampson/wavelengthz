@@ -71,8 +71,9 @@ export function registerPhoneRoutes(router: RouterType) {
       .first<{ id: string }>();
     if (existing) return Response.json({ error: 'phone_already_verified' }, { status: 409 });
 
-    await env.DB.prepare('UPDATE users SET phone_number = ?, phone_verified_at = ? WHERE id = ?')
-      .bind(phoneNumber, Date.now(), user.id)
+    const now = Date.now();
+    await env.DB.prepare('UPDATE users SET phone_number = ?, phone_verified_at = ?, updated_at = ? WHERE id = ?')
+      .bind(phoneNumber, now, now, user.id)
       .run();
 
     return Response.json({ ok: true });

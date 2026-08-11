@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
+import { insertTestUser } from '../helpers/createUser';
 import worker from '../../src/index';
 
 beforeAll(async () => {
@@ -15,15 +16,9 @@ beforeEach(async () => {
   const rateLimitKeys = await env.RATE_LIMIT_KV.list({ prefix: 'ratelimit:phone-verify:' });
   await Promise.all(rateLimitKeys.keys.map((k) => env.RATE_LIMIT_KV.delete(k.name)));
 
-  await env.DB.exec('DELETE FROM sessions; DELETE FROM users;');
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES ('u1', 'sp1', 'a', 'r', 9999999999999, 1000, 1000)`
-  ).run();
-  await env.DB.prepare(
-    `INSERT INTO users (id, spotify_id, access_token, refresh_token, token_expires_at, created_at, updated_at)
-     VALUES ('u2', 'sp2', 'a', 'r', 9999999999999, 1000, 1000)`
-  ).run();
+  await env.DB.exec('DELETE FROM sessions; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;');
+  await insertTestUser(env.DB, { id: 'u1', spotifyId: 'sp1', createdAt: 1000, updatedAt: 1000 });
+  await insertTestUser(env.DB, { id: 'u2', spotifyId: 'sp2', createdAt: 1000, updatedAt: 1000 });
 });
 
 async function cookieFor(userId: string) {
@@ -227,9 +222,10 @@ describe('POST /api/phone/verify/check', () => {
       {} as ExecutionContext
     );
     expect(res.status).toBe(200);
-    const row = await env.DB.prepare('SELECT phone_number, phone_verified_at FROM users WHERE id = ?').bind('u1').first<any>();
+    const row = await env.DB.prepare('SELECT phone_number, phone_verified_at, updated_at FROM users WHERE id = ?').bind('u1').first<any>();
     expect(row.phone_number).toBe('+15108675310');
     expect(row.phone_verified_at).not.toBeNull();
+    expect(row.updated_at).not.toBe(1000); // touched, not left at insert-time (CLAUDE.md's schema convention)
     vi.unstubAllGlobals();
   });
 
