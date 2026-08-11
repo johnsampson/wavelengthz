@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { NAV_ITEMS, getActiveTab, getNavItemsWithActive, renderNavHtml, renderHeaderHtml } from '../../public/nav.js';
+import { NAV_ITEMS, getActiveTab, getNavItemsWithActive, renderNavHtml, renderHeaderHtml, pickNewlyUnread } from '../../public/nav.js';
 
 describe('NAV_ITEMS', () => {
   it('has exactly the five top-level destinations', () => {
@@ -75,5 +75,31 @@ describe('renderHeaderHtml', () => {
   it('caps the displayed badge at 9+', () => {
     const html = renderHeaderHtml(15);
     expect(html).toContain('>9+<');
+  });
+});
+
+describe('pickNewlyUnread', () => {
+  it('returns an unread notification not present in the previous set', () => {
+    const previous = new Set(['n1']);
+    const current = [{ id: 'n2', readAt: null }];
+    expect(pickNewlyUnread(previous, current)).toEqual([{ id: 'n2', readAt: null }]);
+  });
+
+  it('excludes a notification already in the previous set, even if still unread', () => {
+    const previous = new Set(['n1']);
+    const current = [{ id: 'n1', readAt: null }];
+    expect(pickNewlyUnread(previous, current)).toEqual([]);
+  });
+
+  it('excludes an already-read notification even if not in the previous set', () => {
+    // e.g. read from a different tab/device between polls -- it was never
+    // "newly unread" from this tab's perspective, nothing to growl.
+    const previous = new Set(['n1']);
+    const current = [{ id: 'n2', readAt: 12345 }];
+    expect(pickNewlyUnread(previous, current)).toEqual([]);
+  });
+
+  it('returns an empty array when nothing is new', () => {
+    expect(pickNewlyUnread(new Set(), [])).toEqual([]);
   });
 });
