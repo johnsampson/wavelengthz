@@ -193,7 +193,7 @@ describe('GET /api/candidates/people', () => {
 
   it('sets primaryPhotoUrl from the position-0 photo, or null with no photos', async () => {
     await env.DB.prepare(
-      `INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES ('p1', 'u2', 'users/u2/p1.jpg', 0, 1000)`
+      `INSERT INTO user_photos (id, user_id, r2_key, position, moderation_status, created_at) VALUES ('p1', 'u2', 'users/u2/p1.jpg', 0, 'approved', 1000)`
     ).run();
     const cookie = await cookieFor('u1');
     const req = new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } });
@@ -266,10 +266,10 @@ describe('GET /api/candidates/people', () => {
     // and primaryPhotoUrl matches strictly on `position = 0` -- so deleting
     // your first photo made you permanently photoless in everyone's deck.
     await env.DB.prepare(
-      `INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES ('p1', 'u2', 'users/u2/p1.jpg', 0, 1000)`
+      `INSERT INTO user_photos (id, user_id, r2_key, position, moderation_status, created_at) VALUES ('p1', 'u2', 'users/u2/p1.jpg', 0, 'approved', 1000)`
     ).run();
     await env.DB.prepare(
-      `INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES ('p2', 'u2', 'users/u2/p2.jpg', 1, 2000)`
+      `INSERT INTO user_photos (id, user_id, r2_key, position, moderation_status, created_at) VALUES ('p2', 'u2', 'users/u2/p2.jpg', 1, 'approved', 2000)`
     ).run();
 
     const u2Cookie = await cookieFor('u2');
@@ -793,10 +793,21 @@ describe('GET /api/swipes/people and PATCH', () => {
 });
 
 describe('GET /api/people/:id/profile', () => {
+  it('excludes a flagged photo from a cross-view but not from the owner\'s own preview (issue #36 §2)', async () => {
+    await env.DB.prepare(`INSERT INTO user_photos (id, user_id, r2_key, position, moderation_status, created_at) VALUES ('p1', 'u2', 'users/u2/p1.jpg', 0, 'approved', 1000)`).run();
+    await env.DB.prepare(`INSERT INTO user_photos (id, user_id, r2_key, position, moderation_status, created_at) VALUES ('p2', 'u2', 'users/u2/p2.jpg', 1, 'flagged', 2000)`).run();
+
+    const crossViewRes = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: await cookieFor('u1') } }), env, {} as ExecutionContext);
+    expect((await crossViewRes.json<any>()).profile.photoUrls).toEqual(['/photos/p1']);
+
+    const selfViewRes = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: await cookieFor('u2') } }), env, {} as ExecutionContext);
+    expect((await selfViewRes.json<any>()).profile.photoUrls).toEqual(['/photos/p1', '/photos/p2']);
+  });
+
   it('returns photos, bio, distance, and overlap for an eligible target', async () => {
     await env.DB.prepare(`UPDATE users SET bio = 'hi there', display_name = 'U Two' WHERE id = 'u2'`).run();
-    await env.DB.prepare(`INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES ('p1', 'u2', 'users/u2/p1.jpg', 0, 1000)`).run();
-    await env.DB.prepare(`INSERT INTO user_photos (id, user_id, r2_key, position, created_at) VALUES ('p2', 'u2', 'users/u2/p2.jpg', 1, 2000)`).run();
+    await env.DB.prepare(`INSERT INTO user_photos (id, user_id, r2_key, position, moderation_status, created_at) VALUES ('p1', 'u2', 'users/u2/p1.jpg', 0, 'approved', 1000)`).run();
+    await env.DB.prepare(`INSERT INTO user_photos (id, user_id, r2_key, position, moderation_status, created_at) VALUES ('p2', 'u2', 'users/u2/p2.jpg', 1, 'approved', 2000)`).run();
     const cookie = await cookieFor('u1');
 
     const res = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
