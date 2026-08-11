@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wavelengthz — Preferences</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/tailwind.css" />
+</head>
+<body class="min-h-screen bg-base text-neutral-50 p-4 pb-24" x-data="preferencesApp()">
+  <div id="wl-header-root"></div>
+  <a href="/settings" class="mx-auto mb-2 block max-w-md text-sm text-neutral-400">&larr; Settings</a>
+  <h1 class="mx-auto mb-4 max-w-md text-2xl font-bold">Preferences</h1>
+
+  <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
+  <p x-show="saved" class="mx-auto mb-4 max-w-md text-brand-400">Saved.</p>
+
+  <form class="card mx-auto flex max-w-md flex-col gap-4 p-5" @submit.prevent="save()">
+    <div class="flex flex-col gap-1">
+      <span class="field-label">Gender</span>
+      <div class="flex gap-2 rounded-full bg-surface2 p-1">
+        <button type="button" class="pill-toggle flex-1" :class="gender === 'male' ? 'pill-toggle-active' : 'pill-toggle-inactive'" :disabled="loading" @click="gender = 'male'">Male</button>
+        <button type="button" class="pill-toggle flex-1" :class="gender === 'female' ? 'pill-toggle-active' : 'pill-toggle-inactive'" :disabled="loading" @click="gender = 'female'">Female</button>
+      </div>
+    </div>
+
+    <div class="flex flex-col gap-1">
+      <span class="field-label">Seeking</span>
+      <div class="flex gap-2 rounded-full bg-surface2 p-1">
+        <button type="button" class="pill-toggle flex-1" :class="seeking === 'male' ? 'pill-toggle-active' : 'pill-toggle-inactive'" :disabled="loading" @click="seeking = 'male'">Male</button>
+        <button type="button" class="pill-toggle flex-1" :class="seeking === 'female' ? 'pill-toggle-active' : 'pill-toggle-inactive'" :disabled="loading" @click="seeking = 'female'">Female</button>
+        <button type="button" class="pill-toggle flex-1" :class="seeking === 'friends' ? 'pill-toggle-active' : 'pill-toggle-inactive'" :disabled="loading" @click="seeking = 'friends'">Friends</button>
+      </div>
+      <p x-show="seeking === 'friends'" class="text-xs text-neutral-400">You'll match with anyone else also seeking friends, regardless of gender.</p>
+    </div>
+
+    <div class="flex flex-col gap-1">
+      <span class="field-label">I'm interested in</span>
+      <div class="flex flex-wrap gap-2">
+        <template x-for="opt in intentOptions" :key="opt.value">
+          <button
+            type="button"
+            class="pill-toggle"
+            :class="intent === opt.value ? 'pill-toggle-active' : 'pill-toggle-inactive'"
+            :disabled="loading"
+            @click="intent = opt.value"
+            x-text="opt.label"
+          ></button>
+        </template>
+      </div>
+    </div>
+
+    <div class="flex flex-col gap-1">
+      <span class="field-label">Location</span>
+      <p class="text-sm text-neutral-400" x-text="locationLabel || 'Not set'"></p>
+      <button
+        type="button"
+        class="btn-secondary"
+        :disabled="loading || locationCooldownRemainingMs > 0"
+        @click="useBrowserLocation()"
+      >
+        📍 Update my current location
+      </button>
+      <p x-show="locationCooldownRemainingMs > 0" class="text-sm text-neutral-500">
+        You can change your location again in <span x-text="locationCooldownRemainingDays"></span> day<span x-show="locationCooldownRemainingDays !== 1">s</span>.
+      </p>
+    </div>
+
+    <label class="flex flex-col gap-1">
+      <span class="field-label">Max distance (km): <span x-text="loading ? '…' : maxDistanceKm" class="text-neutral-200 normal-case"></span></span>
+      <input type="range" min="5" max="200" x-model.number="maxDistanceKm" :disabled="loading" class="accent-brand-500" />
+    </label>
+
+    <div class="flex flex-col gap-1">
+      <span class="field-label">Age range: <span x-text="loading ? '…' : ageRangeLabel" class="text-neutral-200 normal-case"></span></span>
+      <div class="age-range-slider">
+        <span class="age-range-bubble" :style="`left: ${ageMinPct}%`" x-text="ageMin"></span>
+        <span class="age-range-bubble" :style="`left: ${ageMaxPct}%`" x-text="ageMax >= 100 ? '100+' : ageMax"></span>
+        <div class="age-range-track"></div>
+        <div class="age-range-fill" :style="`left: ${ageMinPct}%; right: ${100 - ageMaxPct}%`"></div>
+        <input
+          type="range"
+          min="18"
+          max="100"
+          x-model.number="ageMin"
+          @input="handleAgeMinInput()"
+          :disabled="loading"
+          :style="`z-index: ${activeAgeThumb === 'min' ? 5 : 3}`"
+          class="age-range-input"
+          aria-label="Minimum age"
+        />
+        <input
+          type="range"
+          min="18"
+          max="100"
+          x-model.number="ageMax"
+          @input="handleAgeMaxInput()"
+          :disabled="loading"
+          :style="`z-index: ${activeAgeThumb === 'max' ? 5 : 4}`"
+          class="age-range-input"
+          aria-label="Maximum age"
+        />
+      </div>
+    </div>
+
+    <button type="submit" class="btn-primary" :disabled="loading">Save</button>
+  </form>
+
+  <div x-show="blockedGenres.length > 0" class="card mx-auto mt-4 flex max-w-md flex-col gap-2 p-5">
+    <span class="field-label">Blocked genres</span>
+    <p class="text-sm text-neutral-400">Hidden from your music deck. Tap to show them again.</p>
+    <div class="flex flex-wrap gap-2">
+      <template x-for="genre in blockedGenres" :key="genre">
+        <button type="button" class="pill-toggle pill-toggle-active" @click="unblockGenre(genre)">
+          <span x-text="genre"></span> ✕
+        </button>
+      </template>
+    </div>
+  </div>
+
+  <script type="module">
+    import { createPreferencesApp } from '/settings/preferences.js';
+    import { mountHeader, mountNav } from '/nav.js';
+    mountHeader();
+    mountNav();
+
+    window.preferencesApp = createPreferencesApp;
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <div id="wl-nav-root"></div>
+</body>
+</html>

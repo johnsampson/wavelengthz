@@ -544,7 +544,7 @@ describe('GET /callback', () => {
     });
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     expect(res.status).toBe(302);
-    expect(res.headers.get('Location')).toBe('/settings?spotify_connected=1');
+    expect(res.headers.get('Location')).toBe('/settings/connections?spotify_connected=1');
 
     const identity = await env.DB.prepare(`SELECT user_id FROM auth_identities WHERE provider_id = 'spotify-connect-target'`).first<any>();
     expect(identity.user_id).toBe(googleUserId);
@@ -582,7 +582,7 @@ describe('GET /callback', () => {
     });
     const res = await worker.fetch(req, env, {} as ExecutionContext);
     expect(res.status).toBe(302);
-    expect(res.headers.get('Location')).toBe('/settings?spotify_error=already_linked');
+    expect(res.headers.get('Location')).toBe('/settings/connections?spotify_error=already_linked');
 
     const identity = await env.DB.prepare(`SELECT user_id FROM auth_identities WHERE provider_id = 'spotify-already-claimed'`).first<any>();
     expect(identity.user_id).toBe(userA); // unchanged, still belongs to user A

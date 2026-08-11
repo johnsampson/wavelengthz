@@ -13,197 +13,45 @@
   <div id="wl-header-root"></div>
   <h1 class="mx-auto mb-4 max-w-md text-2xl font-bold">Settings</h1>
 
-  <div x-show="hasSpotify" class="mx-auto mb-4 flex max-w-md items-center gap-3">
-    <img :src="spotifyAvatarUrl" alt="" class="h-12 w-12 rounded-full object-cover ring-1 ring-white/10" />
-    <div class="text-sm">
-      <p class="font-semibold text-neutral-200">Connected via Spotify</p>
-      <p class="text-neutral-500">This photo is never shown to matches -- it's just your account identity.</p>
-    </div>
-  </div>
-  <div x-show="!hasSpotify" class="mx-auto mb-4 max-w-md">
-    <a href="/login/spotify?intent=connect" class="btn-primary block w-full text-center">Connect Spotify</a>
-    <p class="mt-1 text-center text-xs text-neutral-500">Link your Spotify account for music-taste matching.</p>
-  </div>
-  <div x-show="showIosInstallBanner" class="card mx-auto mb-4 max-w-md p-4 text-sm">
-    <p class="font-semibold text-neutral-200">Get notifications on iPhone</p>
-    <p class="mt-1 text-neutral-400">Tap the Share button, then "Add to Home Screen" -- notifications only work once Wavelengthz is installed this way.</p>
-    <button type="button" class="btn-ghost mt-2" @click="dismissIosInstallBanner()">Got it</button>
-  </div>
-
-  <div x-show="pushSupported" class="card mx-auto mb-4 flex max-w-md items-center justify-between p-4">
-    <div class="text-sm">
-      <p class="font-semibold text-neutral-200">Notifications</p>
-      <p class="text-neutral-500" x-show="!pushPermissionDenied">Get notified about new matches and messages.</p>
-      <p class="text-neutral-500" x-show="pushPermissionDenied">Blocked in your browser settings -- notifications can't be re-requested from here.</p>
-    </div>
-    <button type="button" class="btn-secondary" :disabled="pushPermissionDenied" @click="pushEnabled ? disablePush() : enablePush()">
-      <span x-text="pushEnabled ? 'On' : 'Off'"></span>
-    </button>
-  </div>
-
-  <p x-show="info" x-text="info" class="mx-auto mb-4 max-w-md text-brand-400" role="status"></p>
-
   <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
-  <p x-show="saved" class="mx-auto mb-4 max-w-md text-brand-400">Saved.</p>
 
-  <!-- Disabled until init() has loaded the real max_distance_km: saving while
-       the slider still shows its placeholder default would overwrite the
-       user's actual radius. -->
-  <form class="card mx-auto flex max-w-md flex-col gap-4 p-5" @submit.prevent="updateDistance()">
-    <label class="flex flex-col gap-1">
-      <span class="field-label">Display name</span>
-      <input class="field" type="text" x-model="displayName" maxlength="50" pattern="[-A-Za-z0-9 ]+" :disabled="loading" />
-    </label>
-    <div class="flex flex-col gap-1">
-      <span class="field-label">Gender</span>
-      <div class="flex gap-2 rounded-full bg-surface2 p-1">
-        <button type="button" class="pill-toggle flex-1" :class="gender === 'male' ? 'pill-toggle-active' : 'pill-toggle-inactive'" :disabled="loading" @click="gender = 'male'">Male</button>
-        <button type="button" class="pill-toggle flex-1" :class="gender === 'female' ? 'pill-toggle-active' : 'pill-toggle-inactive'" :disabled="loading" @click="gender = 'female'">Female</button>
-      </div>
-    </div>
-
-    <div class="flex flex-col gap-1">
-      <span class="field-label">Seeking</span>
-      <div class="flex gap-2 rounded-full bg-surface2 p-1">
-        <button type="button" class="pill-toggle flex-1" :class="seeking === 'male' ? 'pill-toggle-active' : 'pill-toggle-inactive'" :disabled="loading" @click="seeking = 'male'">Male</button>
-        <button type="button" class="pill-toggle flex-1" :class="seeking === 'female' ? 'pill-toggle-active' : 'pill-toggle-inactive'" :disabled="loading" @click="seeking = 'female'">Female</button>
-        <button type="button" class="pill-toggle flex-1" :class="seeking === 'friends' ? 'pill-toggle-active' : 'pill-toggle-inactive'" :disabled="loading" @click="seeking = 'friends'">Friends</button>
-      </div>
-      <p x-show="seeking === 'friends'" class="text-xs text-neutral-400">You'll match with anyone else also seeking friends, regardless of gender.</p>
-    </div>
-
-    <div class="flex flex-col gap-1">
-      <span class="field-label">I'm interested in</span>
-      <div class="flex flex-wrap gap-2">
-        <template x-for="opt in intentOptions" :key="opt.value">
-          <button
-            type="button"
-            class="pill-toggle"
-            :class="intent === opt.value ? 'pill-toggle-active' : 'pill-toggle-inactive'"
-            :disabled="loading"
-            @click="intent = opt.value"
-            x-text="opt.label"
-          ></button>
-        </template>
-      </div>
-    </div>
-
-    <div class="flex flex-col gap-1">
-      <span class="field-label">Location</span>
-      <p class="text-sm text-neutral-400" x-text="locationLabel || 'Not set'"></p>
-      <button
-        type="button"
-        class="btn-secondary"
-        :disabled="loading || locationCooldownRemainingMs > 0"
-        @click="useBrowserLocation()"
-      >
-        📍 Update my current location
+  <ul class="mx-auto flex max-w-md flex-col gap-2">
+    <li>
+      <a href="/settings/profile" class="card flex items-center justify-between p-4">
+        <span class="font-semibold text-neutral-100">Profile</span>
+        <span class="text-neutral-500">&rarr;</span>
+      </a>
+    </li>
+    <li>
+      <a href="/settings/preferences" class="card flex items-center justify-between p-4">
+        <span class="font-semibold text-neutral-100">Preferences</span>
+        <span class="text-neutral-500">&rarr;</span>
+      </a>
+    </li>
+    <li>
+      <a href="/settings/notifications" class="card flex items-center justify-between p-4">
+        <span class="font-semibold text-neutral-100">Notifications</span>
+        <span class="text-neutral-500">&rarr;</span>
+      </a>
+    </li>
+    <li>
+      <a href="/settings/connections" class="card flex items-center justify-between p-4">
+        <span class="font-semibold text-neutral-100">Account connections</span>
+        <span class="text-neutral-500">&rarr;</span>
+      </a>
+    </li>
+    <li x-show="userId">
+      <a :href="`/profile?id=${userId}`" class="card flex items-center justify-between p-4">
+        <span class="font-semibold text-neutral-100">Preview my profile</span>
+        <span class="text-neutral-500">&rarr;</span>
+      </a>
+    </li>
+    <li>
+      <button type="button" class="card flex w-full items-center justify-between p-4 text-left" @click="logout()">
+        <span class="font-semibold text-neutral-100">Log out</span>
       </button>
-      <p x-show="locationCooldownRemainingMs > 0" class="text-sm text-neutral-500">
-        You can change your location again in <span x-text="locationCooldownRemainingDays"></span> day<span x-show="locationCooldownRemainingDays !== 1">s</span>.
-      </p>
-    </div>
-
-    <label class="flex flex-col gap-1">
-      <span class="field-label">Max distance (km): <span x-text="loading ? '…' : maxDistanceKm" class="text-neutral-200 normal-case"></span></span>
-      <input type="range" min="5" max="200" x-model.number="maxDistanceKm" :disabled="loading" class="accent-brand-500" />
-    </label>
-
-    <div class="flex flex-col gap-1">
-      <span class="field-label">Age range: <span x-text="loading ? '…' : ageRangeLabel" class="text-neutral-200 normal-case"></span></span>
-      <div class="age-range-slider">
-        <span class="age-range-bubble" :style="`left: ${ageMinPct}%`" x-text="ageMin"></span>
-        <span class="age-range-bubble" :style="`left: ${ageMaxPct}%`" x-text="ageMax >= 100 ? '100+' : ageMax"></span>
-        <div class="age-range-track"></div>
-        <div class="age-range-fill" :style="`left: ${ageMinPct}%; right: ${100 - ageMaxPct}%`"></div>
-        <input
-          type="range"
-          min="18"
-          max="100"
-          x-model.number="ageMin"
-          @input="handleAgeMinInput()"
-          :disabled="loading"
-          :style="`z-index: ${activeAgeThumb === 'min' ? 5 : 3}`"
-          class="age-range-input"
-          aria-label="Minimum age"
-        />
-        <input
-          type="range"
-          min="18"
-          max="100"
-          x-model.number="ageMax"
-          @input="handleAgeMaxInput()"
-          :disabled="loading"
-          :style="`z-index: ${activeAgeThumb === 'max' ? 5 : 4}`"
-          class="age-range-input"
-          aria-label="Maximum age"
-        />
-      </div>
-    </div>
-
-    <button type="submit" class="btn-primary" :disabled="loading">Save</button>
-  </form>
-
-  <div class="card mx-auto mt-4 flex max-w-md flex-col gap-2 p-5">
-    <span class="field-label">Photos (<span x-text="photos.length"></span>/<span x-text="maxPhotos"></span>)</span>
-    <label
-      class="btn-secondary inline-flex w-fit cursor-pointer items-center"
-      :class="photos.length >= maxPhotos ? 'pointer-events-none opacity-50' : ''"
-    >
-      Choose file
-      <input
-        type="file"
-        accept="image/jpeg,image/png,image/webp"
-        @change="uploadPhoto($event)"
-        aria-label="Upload a profile photo"
-        class="sr-only"
-        :disabled="photos.length >= maxPhotos"
-      />
-    </label>
-    <p x-show="photoError" x-text="photoError" class="text-sm text-red-400" role="alert"></p>
-    <div class="grid grid-cols-4 gap-2">
-      <template x-for="photo in photos" :key="photo.photoId">
-        <div class="relative">
-          <img :src="photo.url" alt="" class="aspect-square w-full rounded-lg object-cover ring-1 ring-white/10" />
-          <button
-            type="button"
-            class="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-xs text-white"
-            @click="removePhoto(photo.photoId)"
-            aria-label="Remove photo"
-          >✕</button>
-        </div>
-      </template>
-    </div>
-  </div>
-
-  <div x-show="blockedGenres.length > 0" class="card mx-auto mt-4 flex max-w-md flex-col gap-2 p-5">
-    <span class="field-label">Blocked genres</span>
-    <p class="text-sm text-neutral-400">Hidden from your music deck. Tap to show them again.</p>
-    <div class="flex flex-wrap gap-2">
-      <template x-for="genre in blockedGenres" :key="genre">
-        <button type="button" class="pill-toggle pill-toggle-active" @click="unblockGenre(genre)">
-          <span x-text="genre"></span> ✕
-        </button>
-      </template>
-    </div>
-  </div>
-
-  <a :href="`/profile?id=${userId}`" x-show="userId" class="btn-ghost mx-auto mt-6 block text-center">Preview my profile</a>
-
-  <button class="btn-ghost mx-auto mt-2 block" @click="logout()">Log out</button>
-
-  <div class="mx-auto mt-8 max-w-md border-t border-white/10 pt-4">
-    <button class="btn-ghost text-red-400" @click="confirmingDelete = true" x-show="!confirmingDelete">
-      Delete my account
-    </button>
-    <div x-show="confirmingDelete" class="card flex flex-col gap-3 p-4">
-      <p role="alert" class="text-sm text-neutral-200">This deletes your account. Are you sure?</p>
-      <div class="flex gap-2">
-        <button class="btn-danger flex-1" @click="deleteAccount()">Yes, delete</button>
-        <button class="btn-secondary flex-1" @click="confirmingDelete = false">Cancel</button>
-      </div>
-    </div>
-  </div>
+    </li>
+  </ul>
 
   <script type="module">
     import { createSettingsApp } from '/settings.js';

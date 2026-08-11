@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wavelengthz — Account connections</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/tailwind.css" />
+</head>
+<body class="min-h-screen bg-base text-neutral-50 p-4 pb-24" x-data="connectionsApp()">
+  <div id="wl-header-root"></div>
+  <a href="/settings" class="mx-auto mb-2 block max-w-md text-sm text-neutral-400">&larr; Settings</a>
+  <h1 class="mx-auto mb-4 max-w-md text-2xl font-bold">Account connections</h1>
+
+  <p x-show="info" x-text="info" class="mx-auto mb-4 max-w-md text-brand-400" role="status"></p>
+  <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
+
+  <div x-show="!loading && hasSpotify" class="mx-auto mb-4 flex max-w-md items-center gap-3">
+    <img :src="spotifyAvatarUrl" alt="" class="h-12 w-12 rounded-full object-cover ring-1 ring-white/10" />
+    <div class="text-sm">
+      <p class="font-semibold text-neutral-200">Connected via Spotify</p>
+      <p class="text-neutral-500">This photo is never shown to matches -- it's just your account identity.</p>
+    </div>
+  </div>
+  <div x-show="!loading && !hasSpotify" class="mx-auto mb-4 max-w-md">
+    <a href="/login/spotify?intent=connect" class="btn-primary block w-full text-center">Connect Spotify</a>
+    <p class="mt-1 text-center text-xs text-neutral-500">Link your Spotify account for music-taste matching.</p>
+  </div>
+
+  <script type="module">
+    import { createConnectionsApp } from '/settings/connections.js';
+    import { mountHeader, mountNav } from '/nav.js';
+    mountHeader();
+    mountNav();
+
+    window.connectionsApp = createConnectionsApp;
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <div id="wl-nav-root"></div>
+</body>
+</html>

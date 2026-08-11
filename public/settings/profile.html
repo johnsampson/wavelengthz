@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wavelengthz — Profile</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/tailwind.css" />
+</head>
+<body class="min-h-screen bg-base text-neutral-50 p-4 pb-24" x-data="profileApp()">
+  <div id="wl-header-root"></div>
+  <a href="/settings" class="mx-auto mb-2 block max-w-md text-sm text-neutral-400">&larr; Settings</a>
+  <h1 class="mx-auto mb-4 max-w-md text-2xl font-bold">Profile</h1>
+
+  <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
+  <p x-show="saved" class="mx-auto mb-4 max-w-md text-brand-400">Saved.</p>
+
+  <form class="card mx-auto flex max-w-md flex-col gap-4 p-5" @submit.prevent="save()">
+    <label class="flex flex-col gap-1">
+      <span class="field-label">Display name</span>
+      <input class="field" type="text" x-model="displayName" maxlength="50" pattern="[-A-Za-z0-9 ]+" :disabled="loading" />
+    </label>
+    <button type="submit" class="btn-primary" :disabled="loading">Save</button>
+  </form>
+
+  <div class="card mx-auto mt-4 flex max-w-md flex-col gap-2 p-5">
+    <span class="field-label">Photos (<span x-text="photos.length"></span>/<span x-text="maxPhotos"></span>)</span>
+    <label
+      class="btn-secondary inline-flex w-fit cursor-pointer items-center"
+      :class="photos.length >= maxPhotos ? 'pointer-events-none opacity-50' : ''"
+    >
+      Choose file
+      <input
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        @change="uploadPhoto($event)"
+        aria-label="Upload a profile photo"
+        class="sr-only"
+        :disabled="photos.length >= maxPhotos"
+      />
+    </label>
+    <p x-show="photoError" x-text="photoError" class="text-sm text-red-400" role="alert"></p>
+    <div class="grid grid-cols-4 gap-2">
+      <template x-for="photo in photos" :key="photo.photoId">
+        <div class="relative">
+          <img :src="photo.url" alt="" class="aspect-square w-full rounded-lg object-cover ring-1 ring-white/10" />
+          <button
+            type="button"
+            class="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-xs text-white"
+            @click="removePhoto(photo.photoId)"
+            aria-label="Remove photo"
+          >✕</button>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <div class="mx-auto mt-8 max-w-md border-t border-white/10 pt-4">
+    <button class="btn-ghost text-red-400" @click="confirmingDelete = true" x-show="!confirmingDelete">
+      Delete my account
+    </button>
+    <div x-show="confirmingDelete" class="card flex flex-col gap-3 p-4">
+      <p role="alert" class="text-sm text-neutral-200">This deletes your account. Are you sure?</p>
+      <div class="flex gap-2">
+        <button class="btn-danger flex-1" @click="deleteAccount()">Yes, delete</button>
+        <button class="btn-secondary flex-1" @click="confirmingDelete = false">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { createProfileApp } from '/settings/profile.js';
+    import { mountHeader, mountNav } from '/nav.js';
+    mountHeader();
+    mountNav();
+
+    window.profileApp = createProfileApp;
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <div id="wl-nav-root"></div>
+</body>
+</html>

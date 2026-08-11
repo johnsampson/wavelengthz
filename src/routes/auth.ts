@@ -224,7 +224,7 @@ export function registerAuthRoutes(router: RouterType) {
         ).bind(profile.id).first<{ user_id: string }>();
 
         if (claimedBy && claimedBy.user_id !== currentUser.id) {
-          const headers = new Headers({ Location: '/settings?spotify_error=already_linked' });
+          const headers = new Headers({ Location: '/settings/connections?spotify_error=already_linked' });
           headers.append('Set-Cookie', clearIntentCookie);
           return new Response(null, { status: 302, headers });
         }
@@ -238,7 +238,7 @@ export function registerAuthRoutes(router: RouterType) {
           tokenStatement(currentUser.id),
         ]);
 
-        const headers = new Headers({ Location: '/settings?spotify_connected=1' });
+        const headers = new Headers({ Location: '/settings/connections?spotify_connected=1' });
         headers.append('Set-Cookie', clearIntentCookie);
         return new Response(null, { status: 302, headers });
       }

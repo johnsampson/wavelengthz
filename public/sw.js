@@ -37,7 +37,12 @@
 // treated any open /messages tab as "the same" conversation regardless of
 // which match it was actually showing. v22 points push notifications' icon
 // at the hosted app logo instead of the local placeholder /icons/icon-192.png.
-const CACHE_NAME = 'wavelengthz-shell-v22';
+// v23 splits /settings into four sub-pages (/settings/profile,
+// /settings/preferences, /settings/notifications, /settings/connections) --
+// without a cache bump, this SW's cache-first fetch handler would keep every
+// already-installed user on the old pre-split /settings and /settings.js
+// forever, since nothing in the fetch handler ever revalidates.
+const CACHE_NAME = 'wavelengthz-shell-v23';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -58,6 +63,14 @@ const APP_SHELL = [
   '/profile',
   '/messages',
   '/settings',
+  '/settings/profile',
+  '/settings/preferences',
+  '/settings/notifications',
+  '/settings/connections',
+  '/settings/profile.js',
+  '/settings/preferences.js',
+  '/settings/notifications.js',
+  '/settings/connections.js',
   '/notifications',
   '/groups',
   '/group',
