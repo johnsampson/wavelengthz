@@ -110,4 +110,27 @@ export function registerMeRoutes(router: RouterType) {
 
     return Response.json({ ok: true });
   });
+
+  // Independent of push (POST /api/push/subscribe|unsubscribe) -- a user can
+  // run both channels, either, or neither. Its own tiny endpoint for the same
+  // reason as POST /api/me/anthem above: folding this into POST /api/onboarding
+  // would mean Settings → Notifications (which tracks nothing else about the
+  // user) has to fetch and echo back every onboarding field just to flip one
+  // flag. src/lib/notifications.ts's notifyMatch/notifyMessage read this
+  // column directly; there's no other gate on it.
+  router.post('/api/me/email-notifications', async (request: Request, env: Env) => {
+    const user = await getSessionUser(request, env.DB);
+    if (!user) return new Response('Unauthorized', { status: 401 });
+
+    const { enabled } = await request.json<{ enabled: boolean }>();
+    if (typeof enabled !== 'boolean') {
+      return Response.json({ error: 'invalid_enabled' }, { status: 400 });
+    }
+
+    await env.DB.prepare('UPDATE users SET email_notifications_enabled = ?, updated_at = ? WHERE id = ?')
+      .bind(enabled ? 1 : 0, Date.now(), user.id)
+      .run();
+
+    return Response.json({ ok: true });
+  });
 }

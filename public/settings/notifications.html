@@ -24,7 +24,7 @@
 
   <div x-show="pushSupported" class="card mx-auto mb-4 flex max-w-md items-center justify-between p-4">
     <div class="text-sm">
-      <p class="font-semibold text-neutral-200">Notifications</p>
+      <p class="font-semibold text-neutral-200">Push notifications</p>
       <p class="text-neutral-500" x-show="!pushPermissionDenied">Get notified about new matches and messages.</p>
       <p class="text-neutral-500" x-show="pushPermissionDenied">Blocked in your browser settings -- notifications can't be re-requested from here.</p>
     </div>
@@ -33,9 +33,19 @@
     </button>
   </div>
 
-  <p x-show="!loading && !pushSupported" class="mx-auto max-w-md text-center text-sm text-neutral-500">
-    Notifications aren't supported in this browser.
+  <p x-show="!loading && !pushSupported" class="mx-auto mb-4 max-w-md text-center text-sm text-neutral-500">
+    Push notifications aren't supported in this browser.
   </p>
+
+  <div x-show="!loading" class="card mx-auto mb-4 flex max-w-md items-center justify-between p-4">
+    <div class="text-sm">
+      <p class="font-semibold text-neutral-200">Email notifications</p>
+      <p class="text-neutral-500">Get emailed about new matches and messages when push isn't available.</p>
+    </div>
+    <button type="button" class="btn-secondary" @click="emailEnabled ? disableEmail() : enableEmail()">
+      <span x-text="emailEnabled ? 'On' : 'Off'"></span>
+    </button>
+  </div>
 
   <script type="module">
     import { createNotificationsApp } from '/settings/notifications.js';

@@ -46,6 +46,20 @@ describe('notifyMatch', () => {
     vi.unstubAllGlobals();
   });
 
+  it('does not email a recipient who has opted out of email notifications, but still marks the notification processed', async () => {
+    await env.DB.prepare('UPDATE users SET email_notifications_enabled = 0 WHERE id = ?').bind('u1').run();
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await notifyMatch(env.DB, { RESEND_API_KEY: 'k', RESEND_FROM_ADDRESS: 'f@x.com' } as any, 'm1');
+
+    expect(fetchMock).not.toHaveBeenCalledWith('https://api.resend.com/emails', expect.anything());
+    const n1 = await env.DB.prepare('SELECT email_sent_at FROM notifications WHERE id = ?').bind('n1').first<any>();
+    expect(n1.email_sent_at).not.toBeNull(); // still marked processed -- opted out is a decision, not a failure
+
+    vi.unstubAllGlobals();
+  });
+
   it('never emails a soft-deleted recipient during the grace period', async () => {
     await env.DB.prepare('UPDATE users SET deleted_at = ? WHERE id = ?').bind(2000, 'u1').run();
     const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
@@ -198,6 +212,24 @@ describe('notifyMessage', () => {
 
     const n3 = await env.DB.prepare('SELECT email_sent_at FROM notifications WHERE id = ?').bind('n3').first<any>();
     expect(n3.email_sent_at).not.toBeNull();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('does not email a recipient who has opted out of email notifications, but still marks the notification processed', async () => {
+    await env.DB.prepare(`INSERT INTO messages (id, match_id, sender_id, body, created_at) VALUES ('msg1', 'm1', 'u2', 'hi', 1000)`).run();
+    await env.DB.prepare(
+      `INSERT INTO notifications (id, user_id, type, related_id, created_at) VALUES ('n3', 'u1', 'message', 'msg1', 1000)`
+    ).run();
+    await env.DB.prepare('UPDATE users SET email_notifications_enabled = 0 WHERE id = ?').bind('u1').run();
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await notifyMessage(env.DB, { RESEND_API_KEY: 'k', RESEND_FROM_ADDRESS: 'f@x.com' } as any, 'msg1', 'u1');
+
+    expect(fetchMock).not.toHaveBeenCalledWith('https://api.resend.com/emails', expect.anything());
+    const n3 = await env.DB.prepare('SELECT email_sent_at FROM notifications WHERE id = ?').bind('n3').first<any>();
+    expect(n3.email_sent_at).not.toBeNull(); // still marked processed -- opted out is a decision, not a failure
 
     vi.unstubAllGlobals();
   });
