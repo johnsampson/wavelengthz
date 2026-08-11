@@ -47,6 +47,7 @@ export function createSettingsApp() {
     photos: [],
     maxPhotos: MAX_PHOTOS,
     photoError: null,
+    blockedGenres: [],
     confirmingDelete: false,
     error: null,
     saved: false,
@@ -79,7 +80,7 @@ export function createSettingsApp() {
 
     async init() {
       try {
-        const [me, photosRes] = await Promise.all([api.me(), api.myPhotos()]);
+        const [me, photosRes, blockedGenresRes] = await Promise.all([api.me(), api.myPhotos(), api.blockedGenres()]);
         // Never leave the slider on a hardcoded default: saving would then
         // silently overwrite the user's real radius with 80.
         if (me.user.max_distance_km != null) this.maxDistanceKm = me.user.max_distance_km;
@@ -122,6 +123,7 @@ export function createSettingsApp() {
         this.locationLabel = me.user.location_label;
         this.locationUpdatedAt = me.user.location_updated_at;
         this.photos = photosRes.photos;
+        this.blockedGenres = blockedGenresRes.genres ?? [];
 
         if (typeof window !== 'undefined') {
           this.pushSupported = typeof navigator !== 'undefined' && 'serviceWorker' in navigator && typeof Notification !== 'undefined';
@@ -280,6 +282,16 @@ export function createSettingsApp() {
         this.photos = this.photos.filter((p) => p.photoId !== photoId);
       } catch (e) {
         this.photoError = 'Could not remove that photo. Please try again.';
+      }
+    },
+
+    async unblockGenre(genre) {
+      this.error = null;
+      try {
+        await api.unblockGenre(genre);
+        this.blockedGenres = this.blockedGenres.filter((g) => g !== genre);
+      } catch (e) {
+        this.error = 'Could not unblock that genre. Please try again.';
       }
     },
 
