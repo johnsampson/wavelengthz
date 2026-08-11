@@ -148,12 +148,12 @@
       <button
         x-show="mode === 'music'"
         class="btn-secondary h-14 w-14 rounded-full"
-        @click="openSearch()"
-        aria-label="Search for an artist"
+        @click="decide('skip')"
+        aria-label="Skip -- I don't know this artist, ask me again later"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto h-6 w-6">
-          <circle cx="11" cy="11" r="7" />
-          <path d="m21 21-4.35-4.35" />
+          <path d="M5 4l10 8-10 8V4z" />
+          <path d="M19 5v14" />
         </svg>
       </button>
       <button
@@ -178,6 +178,20 @@
         </svg>
       </button>
     </div>
+
+    <button
+      type="button"
+      x-show="authed === true && current && !matchModal && mode === 'music'"
+      class="btn-ghost flex items-center gap-1.5 text-sm"
+      @click="openSearch()"
+      aria-label="Search for an artist"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+        <circle cx="11" cy="11" r="7" />
+        <path d="m21 21-4.35-4.35" />
+      </svg>
+      Search
+    </button>
   </main>
 
   <div
