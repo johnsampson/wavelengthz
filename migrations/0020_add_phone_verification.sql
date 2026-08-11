@@ -1,7 +1,9 @@
--- Migration number: 0016 	 2026-08-05T17:48:07.607Z
--- Renumbered from 0004 during a rebase onto main -- that number was already
--- claimed by migrations/0004_add_age_range.sql by the time this branch
--- caught up. Original authoring date kept above for history.
+-- Migration number: 0020 	 2026-08-05T17:48:07.607Z
+-- Renumbered twice during rebases onto main: originally 0004, then 0016
+-- (both already claimed -- by migrations/0004_add_age_range.sql, then by
+-- migrations/0016_add_genre_pass_tracking_and_blocking.sql -- by the time
+-- this long-lived branch caught up each time). Original authoring date
+-- kept above for history.
 
 -- Backend-only Twilio Verify integration (src/lib/twilio.ts,
 -- src/routes/phone.ts). phone_number is only ever written on a successful
