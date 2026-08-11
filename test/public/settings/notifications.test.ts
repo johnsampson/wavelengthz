@@ -5,6 +5,7 @@ function stubApi() {
   const calls: Array<{ path: string; options: any }> = [];
   const fetchMock = vi.fn(async (path: string, options: any = {}) => {
     calls.push({ path, options });
+    if (path === '/api/me') return new Response(JSON.stringify({ user: {} }), { status: 200 });
     if (path === '/api/push/vapid-public-key') {
       return new Response(JSON.stringify({ publicKey: 'BC-IIfT4yho1Lp9x06rIRv0bo-Ns2hq77fpxI61ELRF2DQm0TxTLnyzHcWd2QRB6vJyJIN1gGG8In355vJGGF5E' }), { status: 200 });
     }
@@ -127,6 +128,20 @@ describe('notifications page', () => {
     await app2.init();
     expect(app2.showIosInstallBanner).toBe(false);
 
+    vi.unstubAllGlobals();
+  });
+
+  it('redirects to /login instead of showing an error when /api/me is unauthorized', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 401 })));
+    const fakeWindow = { location: { href: '' }, matchMedia: () => ({ matches: false }) };
+    vi.stubGlobal('window', fakeWindow);
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows)' });
+
+    const app = createNotificationsApp();
+    await app.init();
+
+    expect(fakeWindow.location.href).toBe('/login');
+    expect(app.error).toBeNull();
     vi.unstubAllGlobals();
   });
 

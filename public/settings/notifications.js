@@ -20,6 +20,10 @@ export function createNotificationsApp() {
 
     async init() {
       try {
+        // This page has no use for the user object itself -- it only needs
+        // the session-liveness check, so every other Settings page's
+        // "redirect to /login on 401" behavior applies here too.
+        await api.me();
         if (typeof window !== 'undefined') {
           const isIos = /iP(hone|ad|od)/.test(navigator.userAgent);
           const isStandalone = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator?.standalone === true;
@@ -59,6 +63,10 @@ export function createNotificationsApp() {
           }
         }
       } catch (e) {
+        if (e.status === 401) {
+          window.location.href = '/login';
+          return;
+        }
         this.error = 'Could not load notification settings. Please reload the page.';
       } finally {
         this.loading = false;
