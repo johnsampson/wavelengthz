@@ -16,12 +16,22 @@ async function makeUser(id: string, email: string | null, displayName: string | 
     spotifyId: `sp-${id}`,
     email,
     displayName,
+    // Message-eligible by default (issue #36's profile-completeness gate,
+    // src/lib/messagingGate.ts) -- this file's tests are about message
+    // content/read-status/etc., not about the gate itself, so the ambient
+    // users shouldn't need every test to separately clear that precondition.
+    bio: 'A bio long enough to pass the profile-completeness gate.',
     accessToken: 'a',
     refreshToken: 'r',
     tokenExpiresAt: 9999999999999,
     createdAt: 1000,
     updatedAt: 1000,
   });
+  await env.DB.prepare(
+    `INSERT INTO user_photos (id, user_id, r2_key, position, created_at, updated_at) VALUES (?, ?, ?, 0, 1000, 1000)`
+  )
+    .bind(`photo-${id}`, id, `users/${id}/photo.jpg`)
+    .run();
 }
 
 async function cookieFor(userId: string) {
@@ -34,7 +44,7 @@ beforeEach(async () => {
   // messages -> matches, users; notifications -> users; matches -> users; sessions -> users.
   await env.DB.exec(
     'DELETE FROM messages; DELETE FROM notifications; DELETE FROM sessions; DELETE FROM matches; ' +
-      'DELETE FROM music_swipes; DELETE FROM user_genres; DELETE FROM tracks; DELETE FROM artists; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;'
+      'DELETE FROM user_photos; DELETE FROM music_swipes; DELETE FROM user_genres; DELETE FROM tracks; DELETE FROM artists; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;'
   );
   await makeUser('u1', 'u1@example.com', 'User One');
   await makeUser('u2', 'u2@example.com', 'User Two');
@@ -218,6 +228,28 @@ describe('messages', () => {
       {} as ExecutionContext
     );
     expect(res.status).toBe(403);
+  });
+
+  it('rejects sending with an incomplete profile (issue #36\'s messaging gate)', async () => {
+    await env.DB.prepare(`UPDATE users SET bio = NULL WHERE id = 'u1'`).run();
+    await env.DB.prepare(`DELETE FROM user_photos WHERE user_id = 'u1'`).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: 'hi' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+
+    expect(res.status).toBe(403);
+    const body = await res.json<any>();
+    expect(body.error).toBe('profile_incomplete');
+    const messages = await env.DB.prepare('SELECT * FROM messages WHERE match_id = ?').bind('m1').all<any>();
+    expect(messages.results.length).toBe(0);
   });
 
   it('sends a message, notifies, and emails the recipient', async () => {
