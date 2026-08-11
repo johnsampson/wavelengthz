@@ -34,10 +34,30 @@ describe('api client', () => {
   it('api.swipeHistory appends &direction= only when a direction is given', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ swipes: [] }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
-    await api.swipeHistory('music', 20, 0);
-    expect(fetchMock).toHaveBeenCalledWith('/api/swipes/music?limit=20&offset=0', expect.anything());
-    await api.swipeHistory('music', 20, 0, 'right');
-    expect(fetchMock).toHaveBeenCalledWith('/api/swipes/music?limit=20&offset=0&direction=right', expect.anything());
+    await api.swipeHistory('people', 20, 0);
+    expect(fetchMock).toHaveBeenCalledWith('/api/swipes/people?limit=20&offset=0', expect.anything());
+    await api.swipeHistory('people', 20, 0, 'right');
+    expect(fetchMock).toHaveBeenCalledWith('/api/swipes/people?limit=20&offset=0&direction=right', expect.anything());
+    vi.unstubAllGlobals();
+  });
+
+  it('api.swipeHistory routes "artist"/"track" to /api/swipes/music with an item_type param -- there is no /api/swipes/artist or /api/swipes/track route', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ swipes: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.swipeHistory('artist', 20, 0);
+    expect(fetchMock).toHaveBeenCalledWith('/api/swipes/music?limit=20&offset=0&item_type=artist', expect.anything());
+    await api.swipeHistory('track', 20, 0, 'right');
+    expect(fetchMock).toHaveBeenCalledWith('/api/swipes/music?limit=20&offset=0&direction=right&item_type=track', expect.anything());
+    vi.unstubAllGlobals();
+  });
+
+  it('api.updateSwipe routes "artist"/"track" to the /api/swipes/music/:id PATCH endpoint', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.updateSwipe('artist', 'sw1', 'right');
+    expect(fetchMock).toHaveBeenCalledWith('/api/swipes/music/sw1', expect.objectContaining({ method: 'PATCH' }));
+    await api.updateSwipe('people', 'sw2', 'left');
+    expect(fetchMock).toHaveBeenCalledWith('/api/swipes/people/sw2', expect.objectContaining({ method: 'PATCH' }));
     vi.unstubAllGlobals();
   });
 

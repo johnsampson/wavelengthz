@@ -615,6 +615,56 @@ describe('GET /api/swipes/music and PATCH', () => {
     expect(body.swipes.find((s: any) => s.id === 's2').artist_id).toBe('a2');
   });
 
+  it('filters by item_type -- History splits Artists and Tracks into separate tabs', async () => {
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, source, approved, created_at) VALUES ('t1', 'Track One', 'a2', 'seed', 1, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s1', 'u1', 'artist', 'a1', 'right', 1000, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s2', 'u1', 'track', 't1', 'right', 1000, 1000)`
+    ).run();
+
+    const artistsRes = await worker.fetch(new Request('http://localhost/api/swipes/music?item_type=artist', { headers: { Cookie: cookie } }), env, ctx);
+    const artistsBody = await artistsRes.json<any>();
+    expect(artistsBody.swipes.map((s: any) => s.id)).toEqual(['s1']);
+
+    const tracksRes = await worker.fetch(new Request('http://localhost/api/swipes/music?item_type=track', { headers: { Cookie: cookie } }), env, ctx);
+    const tracksBody = await tracksRes.json<any>();
+    expect(tracksBody.swipes.map((s: any) => s.id)).toEqual(['s2']);
+
+    // No item_type -- both together, unchanged pre-split behavior.
+    const bothRes = await worker.fetch(new Request('http://localhost/api/swipes/music', { headers: { Cookie: cookie } }), env, ctx);
+    const bothBody = await bothRes.json<any>();
+    expect(bothBody.swipes).toHaveLength(2);
+  });
+
+  it('combines item_type and direction filters', async () => {
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, source, approved, created_at) VALUES ('t1', 'Track One', 'a2', 'seed', 1, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s1', 'u1', 'artist', 'a1', 'right', 1000, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s2', 'u1', 'artist', 'a2', 'left', 1000, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s3', 'u1', 'track', 't1', 'right', 1000, 1000)`
+    ).run();
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/swipes/music?item_type=artist&direction=right', { headers: { Cookie: cookie } }),
+      env,
+      ctx
+    );
+    const body = await res.json<any>();
+    expect(body.swipes.map((s: any) => s.id)).toEqual(['s1']);
+  });
+
   it('updates genre affinity when changing a past decision to right', async () => {
     // Same bug class as the people-swipe match-on-toggle regression: genre
     // affinity was only ever applied from the fresh-swipe POST handler, so

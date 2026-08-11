@@ -8,7 +8,11 @@ function stubSwipeHistoryPages(pages: Record<string, any[]>) {
     vi.fn(async (path: string) => {
       calls.push(path);
       const url = new URL(path, 'http://localhost');
-      const mode = url.pathname.split('/').pop()!;
+      const lastSegment = url.pathname.split('/').pop()!;
+      // 'artist'/'track' history both hit /api/swipes/music, distinguished
+      // by item_type (see app.js's swipeHistory) -- resolve the test's mode
+      // key from that query param, not the URL path, when it's present.
+      const mode = url.searchParams.get('item_type') ?? lastSegment;
       const offset = Number(url.searchParams.get('offset') ?? '0');
       const direction = url.searchParams.get('direction') ?? 'all';
       const swipes = pages[`${mode}:${offset}:${direction}`] ?? pages[`${mode}:${offset}`] ?? [];
@@ -112,17 +116,27 @@ describe('history page pagination', () => {
     stubSwipeHistoryPages({
       'people:0': page(PAGE_SIZE, 0),
       [`people:${PAGE_SIZE}`]: page(PAGE_SIZE, PAGE_SIZE),
-      'music:0': page(2, 0),
+      'artist:0': page(2, 0),
     });
     const app = createHistoryApp();
     await app.load();
     await app.next();
     expect(app.offset).toBe(PAGE_SIZE);
 
-    await app.setMode('music');
+    await app.setMode('artist');
 
-    expect(app.mode).toBe('music');
+    expect(app.mode).toBe('artist');
     expect(app.offset).toBe(0);
+  });
+
+  it('requests item_type=track (not a literal /api/swipes/track route) for the Tracks tab', async () => {
+    const calls = stubSwipeHistoryPages({ 'track:0': page(2, 0) });
+    const app = createHistoryApp();
+
+    await app.setMode('track');
+
+    expect(app.swipes).toHaveLength(2);
+    expect(calls.some((c) => c.startsWith('/api/swipes/music?') && c.includes('item_type=track'))).toBe(true);
   });
 });
 
@@ -228,7 +242,7 @@ describe('history page blocked view', () => {
     expect(app.swipes).toHaveLength(1);
   });
 
-  it('resets the blocked filter back to null when switching to music mode', async () => {
+  it('resets the blocked filter back to null when switching to the Artists tab', async () => {
     stubBlocks([{ userId: 'u2', displayName: 'Blocked User' }]);
     const app = createHistoryApp();
     await app.setDirectionFilter('blocked');
@@ -237,7 +251,7 @@ describe('history page blocked view', () => {
       'fetch',
       vi.fn(async (path: string) => new Response(JSON.stringify({ swipes: [] }), { status: 200 }))
     );
-    await app.setMode('music');
+    await app.setMode('artist');
 
     expect(app.directionFilter).toBeNull();
   });

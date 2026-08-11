@@ -236,6 +236,12 @@ export function registerMusicSwipeRoutes(router: RouterType) {
     const offset = Number(url.searchParams.get('offset') ?? '0');
     const direction = url.searchParams.get('direction');
     const directionFilter = direction === 'left' || direction === 'right' ? 'AND ms.direction = ?' : '';
+    // Optional: History (public/history.js) always passes this now, splitting
+    // what used to be one combined "Music" tab into separate Artists/Tracks
+    // tabs. Left optional (not required) so an old cached client, or any
+    // future caller that genuinely wants both types together, still works.
+    const itemType = url.searchParams.get('item_type');
+    const itemTypeFilter = itemType === 'artist' || itemType === 'track' ? 'AND ms.item_type = ?' : '';
 
     const rows = await env.DB.prepare(
       `SELECT ms.id, ms.item_type, ms.item_id, ms.direction, ms.created_at,
@@ -244,10 +250,12 @@ export function registerMusicSwipeRoutes(router: RouterType) {
        FROM music_swipes ms
        LEFT JOIN artists a ON ms.item_type = 'artist' AND a.id = ms.item_id
        LEFT JOIN tracks t ON ms.item_type = 'track' AND t.id = ms.item_id
-       WHERE ms.user_id = ? ${directionFilter}
+       WHERE ms.user_id = ? ${directionFilter} ${itemTypeFilter}
        ORDER BY ms.created_at DESC
        LIMIT ? OFFSET ?`
-    ).bind(...[user.id, ...(directionFilter ? [direction] : []), limit, offset]).all<any>();
+    )
+      .bind(...[user.id, ...(directionFilter ? [direction] : []), ...(itemTypeFilter ? [itemType] : []), limit, offset])
+      .all<any>();
 
     return Response.json({ swipes: rows.results });
   });
