@@ -17,6 +17,8 @@ export interface UserRow {
   intent: string | null;
   email: string | null;
   email_notifications_enabled: number;
+  phone_number: string | null;
+  phone_verified_at: number | null;
   anthem_track_id: string | null;
   onboarded_at: number | null;
   deleted_at: number | null;

@@ -4,6 +4,7 @@ import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
 import { insertTestUser } from '../helpers/createUser';
 import { getMatchNotificationDelayMs } from '../../src/lib/notifications';
+import { MIN_PHOTOS, MIN_LIKED_SONGS } from '../../src/lib/messagingGate';
 import worker from '../../src/index';
 
 beforeAll(async () => {
@@ -21,17 +22,29 @@ async function makeUser(id: string, email: string | null, displayName: string | 
     // content/read-status/etc., not about the gate itself, so the ambient
     // users shouldn't need every test to separately clear that precondition.
     bio: 'A bio long enough to pass the profile-completeness gate.',
+    phoneVerifiedAt: 1000,
     accessToken: 'a',
     refreshToken: 'r',
     tokenExpiresAt: 9999999999999,
     createdAt: 1000,
     updatedAt: 1000,
   });
-  await env.DB.prepare(
-    `INSERT INTO user_photos (id, user_id, r2_key, position, created_at, updated_at) VALUES (?, ?, ?, 0, 1000, 1000)`
-  )
-    .bind(`photo-${id}`, id, `users/${id}/photo.jpg`)
-    .run();
+  for (let i = 0; i < MIN_PHOTOS; i++) {
+    await env.DB.prepare(
+      `INSERT INTO user_photos (id, user_id, r2_key, position, created_at, updated_at) VALUES (?, ?, ?, ?, 1000, 1000)`
+    )
+      .bind(`photo-${id}-${i}`, id, `users/${id}/photo${i}.jpg`, i)
+      .run();
+  }
+  // item_id carries no FK to tracks (see messagingGate.test.ts's identical
+  // comment) -- fabricated ids are fine, this is a plain COUNT query.
+  for (let i = 0; i < MIN_LIKED_SONGS; i++) {
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES (?, ?, 'track', ?, 'right', 1000, 1000)`
+    )
+      .bind(`liked-${id}-${i}`, id, `track-${id}-${i}`)
+      .run();
+  }
 }
 
 async function cookieFor(userId: string) {
@@ -250,6 +263,44 @@ describe('messages', () => {
     expect(body.error).toBe('profile_incomplete');
     const messages = await env.DB.prepare('SELECT * FROM messages WHERE match_id = ?').bind('m1').all<any>();
     expect(messages.results.length).toBe(0);
+  });
+
+  it('rejects sending with fewer than MIN_LIKED_SONGS liked tracks, even with bio/photos/phone all satisfied', async () => {
+    await env.DB.prepare(`DELETE FROM music_swipes WHERE user_id = 'u1'`).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: 'hi' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+
+    expect(res.status).toBe(403);
+    const body = await res.json<any>();
+    expect(body.error).toBe('profile_incomplete');
+  });
+
+  it('rejects sending with no verified phone number, even with bio/photos/liked songs all satisfied', async () => {
+    await env.DB.prepare(`UPDATE users SET phone_verified_at = NULL WHERE id = 'u1'`).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: 'hi' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+
+    expect(res.status).toBe(403);
+    const body = await res.json<any>();
+    expect(body.error).toBe('profile_incomplete');
   });
 
   it('sends a message, notifies, and emails the recipient', async () => {

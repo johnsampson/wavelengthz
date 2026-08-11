@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wavelengthz — Messaging</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/tailwind.css" />
+</head>
+<body class="min-h-screen bg-base text-neutral-50 p-4 pb-24" x-data="messagingApp()">
+  <div id="wl-header-root"></div>
+  <a href="/settings" class="mx-auto mb-2 block max-w-md text-sm text-neutral-400">&larr; Settings</a>
+  <h1 class="mx-auto mb-1 max-w-md text-2xl font-bold">Messaging</h1>
+  <p class="mx-auto mb-4 max-w-md text-sm text-neutral-400">
+    Complete these to unlock sending messages -- both 1:1 and in groups.
+  </p>
+
+  <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
+
+  <div x-show="!loading && ready" class="card mx-auto mb-4 max-w-md p-4 text-center">
+    <p class="font-semibold text-brand-400">✓ You can send messages</p>
+  </div>
+
+  <div x-show="!loading" class="mx-auto flex max-w-md flex-col gap-3">
+    <div class="card flex items-center justify-between p-4">
+      <div>
+        <p class="font-semibold" :class="bio.met ? 'text-neutral-100' : 'text-neutral-300'">
+          <span x-text="bio.met ? '✓' : '○'"></span> Write a bio
+        </p>
+        <p class="text-sm text-neutral-500" x-text="`${bio.length} / ${bio.required} characters`"></p>
+      </div>
+      <a href="/settings/profile" class="btn-ghost text-sm" x-show="!bio.met">Add bio</a>
+    </div>
+
+    <div class="card flex items-center justify-between p-4">
+      <div>
+        <p class="font-semibold" :class="photos.met ? 'text-neutral-100' : 'text-neutral-300'">
+          <span x-text="photos.met ? '✓' : '○'"></span> Add photos
+        </p>
+        <p class="text-sm text-neutral-500" x-text="`${photos.count} / ${photos.required} photos`"></p>
+      </div>
+      <a href="/settings/profile" class="btn-ghost text-sm" x-show="!photos.met">Add photos</a>
+    </div>
+
+    <div class="card flex items-center justify-between p-4">
+      <div>
+        <p class="font-semibold" :class="likedSongs.met ? 'text-neutral-100' : 'text-neutral-300'">
+          <span x-text="likedSongs.met ? '✓' : '○'"></span> Like songs
+        </p>
+        <p class="text-sm text-neutral-500" x-text="`${likedSongs.count} / ${likedSongs.required} liked songs`"></p>
+      </div>
+      <a href="/" class="btn-ghost text-sm" x-show="!likedSongs.met">Switch to Music mode</a>
+    </div>
+
+    <div class="card p-4">
+      <p class="mb-1 font-semibold" :class="phone.met ? 'text-neutral-100' : 'text-neutral-300'">
+        <span x-text="phone.met ? '✓' : '○'"></span> Verify your phone number
+      </p>
+
+      <p x-show="phone.met" class="text-sm text-neutral-500" x-text="phone.phoneNumber"></p>
+
+      <template x-if="!phone.met">
+        <div class="mt-2 flex flex-col gap-3">
+          <p x-show="phoneError" x-text="phoneError" class="text-sm text-red-400" role="alert"></p>
+          <p x-show="phoneInfo" x-text="phoneInfo" class="text-sm text-brand-400"></p>
+
+          <form x-show="phoneStep === 'entry'" class="flex flex-col gap-2" @submit.prevent="sendCode()">
+            <label class="flex flex-col gap-1">
+              <span class="field-label">Phone number</span>
+              <input
+                class="field"
+                type="tel"
+                inputmode="tel"
+                autocomplete="tel"
+                placeholder="(555) 123-4567"
+                x-model="phoneInput"
+                :disabled="sendingCode"
+              />
+            </label>
+            <button type="submit" class="btn-primary" :disabled="sendingCode">
+              <span x-text="sendingCode ? 'Sending…' : 'Send code'"></span>
+            </button>
+          </form>
+
+          <form x-show="phoneStep === 'code'" class="flex flex-col gap-2" @submit.prevent="verifyCode()">
+            <label class="flex flex-col gap-1">
+              <span class="field-label">Verification code</span>
+              <input
+                class="field"
+                type="text"
+                inputmode="numeric"
+                autocomplete="one-time-code"
+                placeholder="123456"
+                x-model="codeInput"
+                :disabled="verifyingCode"
+              />
+            </label>
+            <button type="submit" class="btn-primary" :disabled="verifyingCode">
+              <span x-text="verifyingCode ? 'Verifying…' : 'Verify'"></span>
+            </button>
+            <button type="button" class="btn-ghost text-sm" @click="editPhoneNumber()" :disabled="verifyingCode">
+              Use a different number
+            </button>
+          </form>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <script type="module">
+    import { createMessagingApp } from '/settings/messaging.js';
+    import { mountHeader, mountNav } from '/nav.js';
+    mountHeader();
+    mountNav();
+
+    window.messagingApp = createMessagingApp;
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <div id="wl-nav-root"></div>
+</body>
+</html>

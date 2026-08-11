@@ -3,6 +3,7 @@ import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
 import { insertTestUser } from '../helpers/createUser';
+import { MIN_PHOTOS, MIN_LIKED_SONGS } from '../../src/lib/messagingGate';
 import worker from '../../src/index';
 
 beforeAll(async () => {
@@ -21,17 +22,27 @@ async function makeUser(id: string, lat = 30.27, lng = -97.74, maxDistanceKm = 8
     // src/lib/messagingGate.ts) -- this file's tests are about group
     // membership/messages, not about the gate itself.
     bio: 'A bio long enough to pass the profile-completeness gate.',
+    phoneVerifiedAt: 1000,
     accessToken: 'a',
     refreshToken: 'r',
     tokenExpiresAt: 9999999999999,
     createdAt: 1000,
     updatedAt: 1000,
   });
-  await env.DB.prepare(
-    `INSERT INTO user_photos (id, user_id, r2_key, position, created_at, updated_at) VALUES (?, ?, ?, 0, 1000, 1000)`
-  )
-    .bind(`photo-${id}`, id, `users/${id}/photo.jpg`)
-    .run();
+  for (let i = 0; i < MIN_PHOTOS; i++) {
+    await env.DB.prepare(
+      `INSERT INTO user_photos (id, user_id, r2_key, position, created_at, updated_at) VALUES (?, ?, ?, ?, 1000, 1000)`
+    )
+      .bind(`photo-${id}-${i}`, id, `users/${id}/photo${i}.jpg`, i)
+      .run();
+  }
+  for (let i = 0; i < MIN_LIKED_SONGS; i++) {
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES (?, ?, 'track', ?, 'right', 1000, 1000)`
+    )
+      .bind(`liked-${id}-${i}`, id, `track-${id}-${i}`)
+      .run();
+  }
 }
 
 async function cookieFor(userId: string) {
@@ -42,7 +53,7 @@ async function cookieFor(userId: string) {
 beforeEach(async () => {
   // Children before parents -- D1 enforces FK constraints.
   await env.DB.exec(
-    'DELETE FROM group_messages; DELETE FROM group_members; DELETE FROM groups; DELETE FROM blocks; DELETE FROM user_photos; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM sessions; DELETE FROM users;'
+    'DELETE FROM group_messages; DELETE FROM group_members; DELETE FROM groups; DELETE FROM blocks; DELETE FROM user_photos; DELETE FROM music_swipes; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM sessions; DELETE FROM users;'
   );
   await makeUser('u1');
 });
@@ -399,6 +410,46 @@ describe('group messages', () => {
     const groupId = await createGroup(cookie);
     await env.DB.prepare(`UPDATE users SET bio = NULL WHERE id = 'u1'`).run();
     await env.DB.prepare(`DELETE FROM user_photos WHERE user_id = 'u1'`).run();
+
+    const res = await worker.fetch(
+      new Request(`http://localhost/api/groups/${groupId}/messages`, {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: 'hi' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+
+    expect(res.status).toBe(403);
+    const body = await res.json<any>();
+    expect(body.error).toBe('profile_incomplete');
+  });
+
+  it('rejects sending with fewer than MIN_LIKED_SONGS liked tracks, even with bio/photos/phone all satisfied', async () => {
+    const cookie = await cookieFor('u1');
+    const groupId = await createGroup(cookie);
+    await env.DB.prepare(`DELETE FROM music_swipes WHERE user_id = 'u1'`).run();
+
+    const res = await worker.fetch(
+      new Request(`http://localhost/api/groups/${groupId}/messages`, {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: 'hi' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+
+    expect(res.status).toBe(403);
+    const body = await res.json<any>();
+    expect(body.error).toBe('profile_incomplete');
+  });
+
+  it('rejects sending with no verified phone number, even with bio/photos/liked songs all satisfied', async () => {
+    const cookie = await cookieFor('u1');
+    const groupId = await createGroup(cookie);
+    await env.DB.prepare(`UPDATE users SET phone_verified_at = NULL WHERE id = 'u1'`).run();
 
     const res = await worker.fetch(
       new Request(`http://localhost/api/groups/${groupId}/messages`, {

@@ -49,7 +49,12 @@
 // /settings/notifications.js, makes /profile's artist chips link out,
 // reorders / rewords the deck (index.html) header/empty-state and adds the
 // skip button, and splits /history.js's Music tab into Artists/Tracks.
-const CACHE_NAME = 'wavelengthz-shell-v24';
+// v25 adds the new /settings/messaging sub-page (bio/photos/liked-songs/
+// phone-verification checklist for unlocking messaging, issue #36 item 1
+// expanded) -- a brand new precached route + its script, not just an edit
+// to an existing one, so it has to be in APP_SHELL from the start or a
+// first-time offline visit to it 404s.
+const CACHE_NAME = 'wavelengthz-shell-v25';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -71,10 +76,12 @@ const APP_SHELL = [
   '/messages',
   '/settings',
   '/settings/profile',
+  '/settings/messaging',
   '/settings/preferences',
   '/settings/notifications',
   '/settings/connections',
   '/settings/profile.js',
+  '/settings/messaging.js',
   '/settings/preferences.js',
   '/settings/notifications.js',
   '/settings/connections.js',

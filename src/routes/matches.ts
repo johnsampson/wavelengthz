@@ -4,7 +4,7 @@ import { notifyMessage, getMatchNotificationDelayMs } from '../lib/notifications
 import { canRecall } from '../lib/messageRecall';
 import { computeMusicOverlap } from '../lib/musicOverlap';
 import { isValidMessageBody } from '../lib/messageFilter';
-import { hasCompleteProfile, photoCountFor } from '../lib/messagingGate';
+import { hasCompleteProfile, photoCountFor, likedSongCountFor } from '../lib/messagingGate';
 
 // A soft-deleted account must disappear from matches and messaging
 // immediately (docs/PLAN.md §9), not linger until the 7-day grace period
@@ -168,7 +168,7 @@ export function registerMatchRoutes(router: RouterType) {
     const match = await loadActiveMatchForParticipant(env.DB, request.params.id, user.id);
     if (!match) return new Response('Forbidden', { status: 403 });
 
-    if (!hasCompleteProfile(user, await photoCountFor(env.DB, user.id))) {
+    if (!hasCompleteProfile(user, await photoCountFor(env.DB, user.id), await likedSongCountFor(env.DB, user.id))) {
       return Response.json({ error: 'profile_incomplete' }, { status: 403 });
     }
 
