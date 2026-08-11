@@ -4,6 +4,7 @@ import { isBlockedEitherDirection } from '../lib/blocks';
 import { haversineKm } from '../lib/scoring';
 import { isValidMessageBody } from '../lib/messageFilter';
 import { canRecall } from '../lib/messageRecall';
+import { hasCompleteProfile, photoCountFor } from '../lib/messagingGate';
 
 const MAX_GROUP_NAME_LENGTH = 60;
 const MAX_TOPIC_LENGTH = 100;
@@ -227,6 +228,10 @@ export function registerGroupRoutes(router: RouterType) {
       .bind(groupId, user.id)
       .first();
     if (!membership) return new Response('Forbidden', { status: 403 });
+
+    if (!hasCompleteProfile(user, await photoCountFor(env.DB, user.id))) {
+      return Response.json({ error: 'profile_incomplete' }, { status: 403 });
+    }
 
     const { body } = await request.json<{ body: string }>();
     if (!isValidMessageBody(body)) {
