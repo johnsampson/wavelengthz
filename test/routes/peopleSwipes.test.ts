@@ -222,6 +222,45 @@ describe('GET /api/candidates/people', () => {
     expect(u3.anthemTrack).toBeNull();
   });
 
+  it('includes a candidate\'s topGenres, capped at 10', async () => {
+    const genres = JSON.stringify(Array.from({ length: 15 }, (_, i) => `genre${i}`));
+    await env.DB.prepare(
+      `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at) VALUES ('mp10', 'u2', '[]', '[]', ?, 'medium_term', 1000, 1000, 1000)`
+    ).bind(genres).run();
+
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    const u2 = body.candidates.find((c: any) => c.id === 'u2');
+
+    expect(u2.topGenres).toHaveLength(10);
+    expect(u2.topGenres[0]).toBe('genre0');
+  });
+
+  it('includes topGenres for a candidate who already liked me too, not just scored candidates', async () => {
+    // Regression: like-priority candidates skip the scoring pass entirely
+    // (see peopleSwipes.ts), which is also where profiles used to get
+    // batched -- their profile wasn't being fetched at all, so this field
+    // would silently come back empty for exactly the candidates a user
+    // most wants to see genre overlap for.
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, match_score, created_at, updated_at) VALUES ('s1', 'u2', 'u1', 'right', 0.9, 1000, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at) VALUES ('mp11', 'u2', '[]', '[]', '["indie","pop"]', 'medium_term', 1000, 1000, 1000)`
+    ).run();
+
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.candidates[0].id).toBe('u2');
+    expect(body.candidates[0].likedYou).toBe(true);
+    expect(body.candidates[0].topGenres).toEqual(['indie', 'pop']);
+  });
+
   it('still shows a primaryPhotoUrl after the candidate deletes their position-0 photo', async () => {
     // Regression: DELETE /api/photos/:id used to leave a hole at position 0,
     // and primaryPhotoUrl matches strictly on `position = 0` -- so deleting
