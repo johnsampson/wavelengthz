@@ -53,8 +53,12 @@
 // phone-verification checklist for unlocking messaging, issue #36 item 1
 // expanded) -- a brand new precached route + its script, not just an edit
 // to an existing one, so it has to be in APP_SHELL from the start or a
-// first-time offline visit to it 404s.
-const CACHE_NAME = 'wavelengthz-shell-v25';
+// first-time offline visit to it 404s. v26 fixes /artist showing the same
+// opaque "Could not load this artist" for a Spotify-rate-limit failure as
+// every other error -- it now shows a specific "Spotify's a little busy"
+// message for that case (src/index.ts's new SpotifyRateLimitError -> 503
+// translation).
+const CACHE_NAME = 'wavelengthz-shell-v26';
 const APP_SHELL = [
   '/',
   '/app.js',

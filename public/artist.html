@@ -174,7 +174,16 @@
             this.tracks = res.tracks;
             this.hasMoreTracks = res.hasMore;
           } catch (e) {
-            this.error = 'Could not load this artist. Please try again.';
+            // Spotify's own rate limit (src/lib/spotify.ts's spotifyFetch),
+            // not this app's -- distinguished so this doesn't read as the
+            // same opaque failure as everything else. This artist likely has
+            // a large catalog (loading one can fan out to dozens of Spotify
+            // calls); it's worth telling the user that's specifically why,
+            // rather than leaving them to guess whether retrying is pointless.
+            this.error =
+              e.body?.error === 'spotify_rate_limited'
+                ? "Spotify's a little busy right now. Please try again in a moment."
+                : 'Could not load this artist. Please try again.';
           }
 
           const availability = await checkPlayerAvailability();

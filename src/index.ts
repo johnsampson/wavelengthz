@@ -23,6 +23,7 @@ import { runHourlyGenreEnrichment, processGenreEnrichmentQueueBatch, type GenreE
 import { checkRateLimit } from './lib/rateLimit';
 import { reportError } from './lib/sentry';
 import { constantTimeEqual } from './lib/crypto';
+import { SpotifyRateLimitError } from './lib/spotify';
 
 export const router = Router();
 
@@ -246,6 +247,17 @@ export default {
       } else {
         await reportError(env, error, { path: url.pathname });
       }
+
+      // Spotify's own rate limit, not this app's (see spotifyFetch's own
+      // comment in src/lib/spotify.ts) -- surfaced as its own distinct
+      // status/body rather than folded into the generic 500 below, so the
+      // frontend (public/artist.html) can tell "try again in a moment,
+      // Spotify is busy" apart from every other failure mode, instead of
+      // both landing on the exact same opaque message.
+      if (error instanceof SpotifyRateLimitError) {
+        return withSecurityHeaders(Response.json({ error: 'spotify_rate_limited' }, { status: 503 }));
+      }
+
       return withSecurityHeaders(new Response('Internal Server Error', { status: 500 }));
     }
   },

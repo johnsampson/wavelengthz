@@ -10,6 +10,79 @@ export interface SpotifyTokenResponse {
   scope?: string;
 }
 
+// Thrown by spotifyFetch specifically when Spotify is still 429ing after a
+// retry -- distinct from the generic Error every other failure mode throws,
+// so src/index.ts's global handler can tell "Spotify is rate-limiting us"
+// apart from "something is actually broken" and return an honest, distinct
+// status instead of folding it into a blanket 500 with no indication rate
+// limiting was ever involved.
+export class SpotifyRateLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SpotifyRateLimitError';
+  }
+}
+
+// Spotify enforces its own app-wide rate limit, entirely independent of
+// anything this app's own limiter (src/index.ts) does. GET /api/artists/:id
+// in particular fans out to dozens of parallel Spotify calls for a single
+// page load -- one albums-list call, one call per album (up to 10), one call
+// per track (up to ARTIST_PROFILE_TRACK_MAX_LIMIT, since Spotify's batch
+// tracks endpoint 403s for this app -- see fetchTracksByIds below) -- which
+// is exactly the kind of burst that trips it. GET /api/artists/search, by
+// contrast, makes exactly one Spotify call, which is why "search works but
+// loading an artist doesn't" was the reported symptom rather than a general
+// outage.
+//
+// Every Spotify call in this file goes through this instead of a raw
+// fetch(): a 429 gets one short, bounded retry, honoring Spotify's own
+// Retry-After header when present. Still 429 after that retry throws
+// SpotifyRateLimitError specifically (see above) rather than the generic
+// "... fetch failed: 429 ..." Error every other failure throws.
+const SPOTIFY_RETRY_MAX_DELAY_MS = 2000;
+const SPOTIFY_RETRY_DEFAULT_DELAY_MS = 1000;
+
+async function spotifyFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const res = await fetch(url, options);
+  if (res.status !== 429) return res;
+
+  const retryAfterHeader = res.headers.get('Retry-After');
+  const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : NaN;
+  const delayMs = Math.min(
+    Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : SPOTIFY_RETRY_DEFAULT_DELAY_MS,
+    SPOTIFY_RETRY_MAX_DELAY_MS
+  );
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+
+  const retried = await fetch(url, options);
+  if (retried.status === 429) {
+    throw new SpotifyRateLimitError(`Spotify rate-limited this request even after a retry: ${url}`);
+  }
+  return retried;
+}
+
+// Caps how many individual GET /v1/tracks/{id} calls (fetchTracksByIds,
+// below) are ever in flight at once. Firing all of them -- up to
+// ARTIST_PROFILE_TRACK_MAX_LIMIT (90, src/routes/catalog.ts) -- as one
+// simultaneous Promise.all was the single biggest contributor to tripping
+// Spotify's own rate limit: a burst far beyond anything a normal page load
+// should need to send at once. Batching keeps the peak burst size bounded
+// without falling back to a fully sequential (much slower) loop.
+const TRACK_FETCH_CONCURRENCY = 5;
+
+async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < items.length) {
+      const i = nextIndex++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  return results;
+}
+
 // streaming/user-read-playback-state/user-modify-playback-state back the
 // Wavelengthz Player (public/wavelengthzPlayer.js, src/routes/player.ts) --
 // the Spotify Web Playback SDK, which plays a full track in-page via a
@@ -55,7 +128,7 @@ export async function exchangeCodeForToken(
     code,
     redirect_uri: redirectUri,
   });
-  const res = await fetch('https://accounts.spotify.com/api/token', {
+  const res = await spotifyFetch('https://accounts.spotify.com/api/token', {
     method: 'POST',
     headers: {
       Authorization: basicAuthHeader(env),
@@ -75,7 +148,7 @@ export async function refreshAccessToken(
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
   });
-  const res = await fetch('https://accounts.spotify.com/api/token', {
+  const res = await spotifyFetch('https://accounts.spotify.com/api/token', {
     method: 'POST',
     headers: {
       Authorization: basicAuthHeader(env),
@@ -91,7 +164,7 @@ export async function refreshAccessToken(
 export async function fetchSpotifyProfile(
   accessToken: string
 ): Promise<{ id: string; email?: string; images?: Array<{ url: string }>; product?: string }> {
-  const res = await fetch('https://api.spotify.com/v1/me', {
+  const res = await spotifyFetch('https://api.spotify.com/v1/me', {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) throw new Error(`Spotify profile fetch failed: ${res.status} ${await res.text()}`);
@@ -106,7 +179,7 @@ export async function fetchTopArtists(
   accessToken: string,
   timeRange: string
 ): Promise<Array<{ id: string; name: string; genres: string[]; imageUrl: string | null; rank: number }>> {
-  const res = await fetch(
+  const res = await spotifyFetch(
     `https://api.spotify.com/v1/me/top/artists?time_range=${timeRange}&limit=50`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
@@ -128,7 +201,7 @@ export async function fetchTopTracks(
   accessToken: string,
   timeRange: string
 ): Promise<Array<{ id: string; name: string; imageUrl: string | null; rank: number }>> {
-  const res = await fetch(
+  const res = await spotifyFetch(
     `https://api.spotify.com/v1/me/top/tracks?time_range=${timeRange}&limit=50`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
@@ -143,7 +216,7 @@ export async function fetchTopTracks(
 }
 
 export async function getClientCredentialsToken(env: Env): Promise<string> {
-  const res = await fetch('https://accounts.spotify.com/api/token', {
+  const res = await spotifyFetch('https://accounts.spotify.com/api/token', {
     method: 'POST',
     headers: {
       Authorization: 'Basic ' + btoa(`${env.SPOTIFY_CLIENT_ID}:${env.SPOTIFY_CLIENT_SECRET}`),
@@ -157,7 +230,7 @@ export async function getClientCredentialsToken(env: Env): Promise<string> {
 }
 
 export async function searchArtistsByGenre(token: string, genre: string, limit: number, offset = 0) {
-  const res = await fetch(
+  const res = await spotifyFetch(
     `https://api.spotify.com/v1/search?type=artist&limit=${limit}&offset=${offset}&q=${encodeURIComponent(`genre:"${genre}"`)}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -202,7 +275,7 @@ const ARTIST_ALBUMS_PAGE_SIZE = 10;
 const ALBUM_TRACKS_PAGE_SIZE = 50;
 
 async function fetchArtistAlbumIds(token: string, artistId: string, limit: number): Promise<string[]> {
-  const res = await fetch(
+  const res = await spotifyFetch(
     // include_groups excludes "compilation" and "appears_on" -- releases
     // where this artist isn't the actual album artist, which is exactly the
     // ambiguity this replaces the name-search fallback to avoid.
@@ -215,7 +288,7 @@ async function fetchArtistAlbumIds(token: string, artistId: string, limit: numbe
 }
 
 async function fetchAlbumTrackIds(token: string, albumId: string, limit: number): Promise<string[]> {
-  const res = await fetch(`https://api.spotify.com/v1/albums/${albumId}/tracks?limit=${Math.min(limit, ALBUM_TRACKS_PAGE_SIZE)}`, {
+  const res = await spotifyFetch(`https://api.spotify.com/v1/albums/${albumId}/tracks?limit=${Math.min(limit, ALBUM_TRACKS_PAGE_SIZE)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`Spotify album tracks fetch failed: ${res.status} ${await res.text()}`);
@@ -229,14 +302,15 @@ async function fetchTracksByIds(token: string, trackIds: string[]) {
   // instead. The batch form of this lookup (GET /v1/tracks?ids=, plural)
   // also 403s in Development Mode -- confirmed live, even with a single id
   // -- while the singular GET /v1/tracks/{id} used here works fine, so this
-  // is one request per track rather than one batch request. Fetched in
-  // parallel (not a sequential loop) -- with no batch endpoint available,
-  // sequential per-track fetches would make a larger track count directly
-  // slow down the artist-profile page load, one Spotify round trip at a
-  // time. One id failing (removed/region-locked track) shouldn't drop the
-  // rest of the artist's tracks, so each fetch is isolated via .catch
-  // rather than one throw wiping out the whole batch.
-  const results = await Promise.all(trackIds.map((id) => fetchTrackById(token, id).catch(() => null)));
+  // is one request per track rather than one batch request. Bounded by
+  // TRACK_FETCH_CONCURRENCY (see its own comment) rather than one giant
+  // Promise.all -- with no batch endpoint available, a large track count
+  // (up to ARTIST_PROFILE_TRACK_MAX_LIMIT) firing every request at once was
+  // the single biggest contributor to tripping Spotify's own rate limit.
+  // One id failing (removed/region-locked track) shouldn't drop the rest of
+  // the artist's tracks, so each fetch is isolated via .catch rather than
+  // one throw wiping out the whole batch.
+  const results = await mapWithConcurrency(trackIds, TRACK_FETCH_CONCURRENCY, (id) => fetchTrackById(token, id).catch(() => null));
   return results.filter((track): track is NonNullable<typeof track> => track != null);
 }
 
@@ -262,7 +336,7 @@ export async function fetchArtistTracks(token: string, artistId: string, limit: 
 }
 
 export async function searchArtistsByName(token: string, query: string, limit: number) {
-  const res = await fetch(
+  const res = await spotifyFetch(
     `https://api.spotify.com/v1/search?type=artist&limit=${limit}&q=${encodeURIComponent(query)}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -272,7 +346,7 @@ export async function searchArtistsByName(token: string, query: string, limit: n
 }
 
 export async function fetchArtistById(token: string, artistId: string) {
-  const res = await fetch(`https://api.spotify.com/v1/artists/${artistId}`, {
+  const res = await spotifyFetch(`https://api.spotify.com/v1/artists/${artistId}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`Spotify artist fetch failed: ${res.status} ${await res.text()}`);
@@ -281,7 +355,7 @@ export async function fetchArtistById(token: string, artistId: string) {
 
 export async function searchTracksByArtist(token: string, artistName: string, trackQuery: string, limit: number) {
   const q = `artist:${artistName} track:${trackQuery}`;
-  const res = await fetch(
+  const res = await spotifyFetch(
     `https://api.spotify.com/v1/search?type=track&limit=${limit}&q=${encodeURIComponent(q)}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -291,7 +365,7 @@ export async function searchTracksByArtist(token: string, artistName: string, tr
 }
 
 export async function fetchTrackById(token: string, trackId: string) {
-  const res = await fetch(`https://api.spotify.com/v1/tracks/${trackId}`, {
+  const res = await spotifyFetch(`https://api.spotify.com/v1/tracks/${trackId}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`Spotify track fetch failed: ${res.status} ${await res.text()}`);

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { buildAuthUrl, fetchSpotifyProfile, fetchArtistTracks } from '../../src/lib/spotify';
+import { buildAuthUrl, fetchSpotifyProfile, fetchArtistTracks, fetchArtistById, SpotifyRateLimitError } from '../../src/lib/spotify';
 
 const env = {
   SPOTIFY_CLIENT_ID: 'client123',
@@ -169,6 +169,45 @@ describe('fetchArtistTracks', () => {
     vi.unstubAllGlobals();
   });
 
+  it('bounds individual track-detail fetches to TRACK_FETCH_CONCURRENCY instead of firing them all at once', async () => {
+    // Regression: this was the single biggest contributor to tripping
+    // Spotify's own app-wide rate limit -- a full artist load (up to
+    // ARTIST_PROFILE_TRACK_MAX_LIMIT tracks) used to fire every individual
+    // GET /v1/tracks/{id} call in one simultaneous Promise.all. 8 tracks
+    // here (more than TRACK_FETCH_CONCURRENCY's 5) is enough to prove the
+    // cap is real without a slow test.
+    const trackIds = Array.from({ length: 8 }, (_, i) => `t${i}`);
+    let inFlight = 0;
+    let maxConcurrent = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+        }
+        if (url.includes('/albums/album-1/tracks')) {
+          return new Response(JSON.stringify({ items: trackIds.map((id) => ({ id })) }), { status: 200 });
+        }
+        if (url.includes('/v1/tracks/')) {
+          inFlight += 1;
+          maxConcurrent = Math.max(maxConcurrent, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          inFlight -= 1;
+          const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
+          return new Response(JSON.stringify({ id, name: id, artists: [{ id: 'artist-1' }] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+
+    const tracks = await fetchArtistTracks('token', 'artist-1', 8);
+
+    expect(tracks).toHaveLength(8);
+    expect(maxConcurrent).toBe(5);
+    vi.unstubAllGlobals();
+  });
+
   it('excludes any track that does not actually credit the requested artist id', async () => {
     stubSpotify({
       albums: [{ id: 'album-1' }],
@@ -227,6 +266,77 @@ describe('fetchArtistTracks', () => {
     const tracks = await fetchArtistTracks('token', 'artist-1', 10);
 
     expect(tracks).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+});
+
+// Exercised via fetchArtistById (a single, simple call) rather than testing
+// the unexported spotifyFetch directly -- every Spotify call in this module
+// goes through it, so any of them would do.
+describe('spotifyFetch (retry-on-429, via fetchArtistById)', () => {
+  it('retries once on a 429, honoring a fractional Retry-After, and returns the retried response', async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) {
+          // A tiny fractional value keeps this test fast -- real Spotify
+          // only ever sends whole seconds, but the parsing logic doesn't
+          // care, and this proves the header is actually being read (a
+          // bug that ignored it and always used the 1s default would still
+          // pass a test using a header value >= 1).
+          return new Response('rate limited', { status: 429, headers: { 'Retry-After': '0.001' } });
+        }
+        return new Response(JSON.stringify({ id: 'artist-1', name: 'Real Artist' }), { status: 200 });
+      })
+    );
+
+    const artist = await fetchArtistById('token', 'artist-1');
+
+    expect(artist.name).toBe('Real Artist');
+    expect(calls).toBe(2);
+    vi.unstubAllGlobals();
+  });
+
+  it('falls back to a default delay when Retry-After is absent, still succeeding on the retry', async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) return new Response('rate limited', { status: 429 });
+        return new Response(JSON.stringify({ id: 'artist-1', name: 'Real Artist' }), { status: 200 });
+      })
+    );
+
+    const artist = await fetchArtistById('token', 'artist-1');
+
+    expect(artist.name).toBe('Real Artist');
+    expect(calls).toBe(2);
+    vi.unstubAllGlobals();
+  }, 10000);
+
+  it('throws SpotifyRateLimitError, not the generic fetch-failed Error, when still 429 after the retry', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('rate limited', { status: 429, headers: { 'Retry-After': '0.001' } })));
+
+    await expect(fetchArtistById('token', 'artist-1')).rejects.toThrow(SpotifyRateLimitError);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('does not retry on a non-429 error status', async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        return new Response('not found', { status: 404 });
+      })
+    );
+
+    await expect(fetchArtistById('token', 'artist-1')).rejects.toThrow(/Spotify artist fetch failed: 404/);
+    expect(calls).toBe(1);
     vi.unstubAllGlobals();
   });
 });
