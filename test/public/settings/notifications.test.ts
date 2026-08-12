@@ -1,5 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createNotificationsApp } from '../../../public/settings/notifications.js';
+import { showErrorToast } from '../../../public/toast.js';
+
+vi.mock('../../../public/toast.js', () => ({ showErrorToast: vi.fn() }));
+
+beforeEach(() => {
+  vi.mocked(showErrorToast).mockClear();
+});
 
 function stubApi(user: Record<string, unknown> = {}) {
   const calls: Array<{ path: string; options: any }> = [];
@@ -212,7 +219,7 @@ describe('notifications page', () => {
     vi.unstubAllGlobals();
   });
 
-  it('reverts the optimistic flip and shows an error when disableEmail() fails', async () => {
+  it('reverts the optimistic flip and growls an error toast when disableEmail() fails', async () => {
     const fetchMock = vi.fn(async (path: string) => {
       if (path === '/api/me') return new Response(JSON.stringify({ user: { email_notifications_enabled: 1 } }), { status: 200 });
       if (path === '/api/me/email-notifications') return new Response('nope', { status: 500 });
@@ -227,7 +234,7 @@ describe('notifications page', () => {
     await app.disableEmail();
 
     expect(app.emailEnabled).toBe(true);
-    expect(app.error).toBeTruthy();
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('disable email'));
     vi.unstubAllGlobals();
   });
 });

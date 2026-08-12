@@ -1,4 +1,5 @@
 import { api } from './app.js';
+import { showErrorToast } from './toast.js';
 
 export function createSettingsApp() {
   return {
@@ -22,7 +23,6 @@ export function createSettingsApp() {
     },
 
     async logout() {
-      this.error = null;
       try {
         const res = await fetch('/logout', { method: 'POST', credentials: 'include' });
         if (!res.ok) throw new Error(`Logout failed: ${res.status} ${await res.text()}`);
@@ -33,7 +33,7 @@ export function createSettingsApp() {
         window.location.href = '/';
       } catch (e) {
         console.error('Logout failed:', e);
-        this.error = 'Could not log out. Please try again.';
+        showErrorToast('Could not log out. Please try again.');
       }
     },
   };

@@ -1,4 +1,5 @@
 import { api } from '../app.js';
+import { showErrorToast } from '../toast.js';
 
 // Converts the VAPID public key (base64url, from GET /api/push/vapid-public-key)
 // into the Uint8Array pushManager.subscribe()'s applicationServerKey expects.
@@ -76,7 +77,6 @@ export function createNotificationsApp() {
     },
 
     async enablePush() {
-      this.error = null;
       try {
         const permission = await Notification.requestPermission();
         this.pushPermissionDenied = permission === 'denied';
@@ -92,12 +92,11 @@ export function createNotificationsApp() {
         this.pushEnabled = true;
       } catch (e) {
         console.error('Enable notifications failed:', e);
-        this.error = 'Could not enable notifications. Please try again.';
+        showErrorToast('Could not enable notifications. Please try again.');
       }
     },
 
     async disablePush() {
-      this.error = null;
       try {
         const registration = await navigator.serviceWorker.ready;
         const subscription = await registration.pushManager.getSubscription();
@@ -108,7 +107,7 @@ export function createNotificationsApp() {
         this.pushEnabled = false;
       } catch (e) {
         console.error('Disable notifications failed:', e);
-        this.error = 'Could not disable notifications. Please try again.';
+        showErrorToast('Could not disable notifications. Please try again.');
       }
     },
 
@@ -118,26 +117,24 @@ export function createNotificationsApp() {
     },
 
     async enableEmail() {
-      this.error = null;
       const previous = this.emailEnabled;
       this.emailEnabled = true; // optimistic -- reverted below on failure
       try {
         await api.setEmailNotificationsEnabled(true);
       } catch (e) {
         this.emailEnabled = previous;
-        this.error = 'Could not enable email notifications. Please try again.';
+        showErrorToast('Could not enable email notifications. Please try again.');
       }
     },
 
     async disableEmail() {
-      this.error = null;
       const previous = this.emailEnabled;
       this.emailEnabled = false;
       try {
         await api.setEmailNotificationsEnabled(false);
       } catch (e) {
         this.emailEnabled = previous;
-        this.error = 'Could not disable email notifications. Please try again.';
+        showErrorToast('Could not disable email notifications. Please try again.');
       }
     },
   };

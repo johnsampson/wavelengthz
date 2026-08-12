@@ -1,5 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createPreferencesApp } from '../../../public/settings/preferences.js';
+import { showErrorToast } from '../../../public/toast.js';
+
+vi.mock('../../../public/toast.js', () => ({ showErrorToast: vi.fn() }));
+
+beforeEach(() => {
+  vi.mocked(showErrorToast).mockClear();
+});
 
 function stubApi(user: Record<string, unknown>, blockedGenres: string[] = []) {
   const calls: Array<{ path: string; options: any }> = [];
@@ -136,7 +143,7 @@ describe('preferences page', () => {
 
     await app.save();
 
-    expect(app.error).toBeTruthy();
+    expect(showErrorToast).toHaveBeenCalled();
     expect(api.calls.some((c) => c.path === '/api/onboarding')).toBe(false);
     vi.unstubAllGlobals();
   });
@@ -149,7 +156,7 @@ describe('preferences page', () => {
 
     await app.save();
 
-    expect(app.error).toBeTruthy();
+    expect(showErrorToast).toHaveBeenCalled();
     expect(api.calls.some((c) => c.path === '/api/onboarding')).toBe(false);
     vi.unstubAllGlobals();
   });
@@ -227,9 +234,23 @@ describe('preferences page', () => {
 
     await app.save();
 
-    expect(app.error).toContain('7 days');
-    expect(app.error).toContain('2 days');
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('7 days'));
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('2 days'));
     expect(app.saved).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it('useBrowserLocation() growls an error toast when geolocation permission is denied', async () => {
+    stubApi(ONBOARDED_USER);
+    const app = createPreferencesApp();
+    await app.init();
+    vi.stubGlobal('navigator', {
+      geolocation: { getCurrentPosition: (_success: any, error: any) => error() },
+    });
+
+    app.useBrowserLocation();
+
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('permission denied'));
     vi.unstubAllGlobals();
   });
 
@@ -333,7 +354,7 @@ describe('preferences page', () => {
     vi.unstubAllGlobals();
   });
 
-  it('shows an error and keeps the genre in the list when unblocking fails', async () => {
+  it('growls an error toast and keeps the genre in the list when unblocking fails', async () => {
     const fetchMock = vi.fn(async (path: string, options: any = {}) => {
       if (path === '/api/me') return new Response(JSON.stringify({ user: ONBOARDED_USER }), { status: 200 });
       if (path === '/api/genres/blocked') return new Response(JSON.stringify({ genres: ['emo'] }), { status: 200 });
@@ -346,7 +367,7 @@ describe('preferences page', () => {
 
     await app.unblockGenre('emo');
 
-    expect(app.error).toBeTruthy();
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('unblock'));
     expect(app.blockedGenres).toEqual(['emo']);
     vi.unstubAllGlobals();
   });

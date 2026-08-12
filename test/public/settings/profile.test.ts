@@ -1,5 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createProfileApp } from '../../../public/settings/profile.js';
+import { showErrorToast } from '../../../public/toast.js';
+
+vi.mock('../../../public/toast.js', () => ({ showErrorToast: vi.fn() }));
+
+beforeEach(() => {
+  vi.mocked(showErrorToast).mockClear();
+});
 
 function stubApi(user: Record<string, unknown>, photos: Array<Record<string, unknown>> = []) {
   const calls: Array<{ path: string; options: any }> = [];
@@ -75,7 +82,7 @@ describe('profile page', () => {
     app.displayName = '   ';
     await app.save();
 
-    expect(app.error).toBeTruthy();
+    expect(showErrorToast).toHaveBeenCalled();
     expect(app.saved).toBe(false);
     expect(api.calls.some((c) => c.path === '/api/onboarding')).toBe(false);
     vi.unstubAllGlobals();
@@ -89,7 +96,7 @@ describe('profile page', () => {
     app.displayName = 'Jordan!!';
     await app.save();
 
-    expect(app.error).toBeTruthy();
+    expect(showErrorToast).toHaveBeenCalled();
     expect(api.calls.some((c) => c.path === '/api/onboarding')).toBe(false);
     vi.unstubAllGlobals();
   });
@@ -168,7 +175,7 @@ describe('profile page', () => {
 
     await app.save();
 
-    expect(app.error).toContain('bio');
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('bio'));
     expect(app.saved).toBe(false);
     vi.unstubAllGlobals();
   });
@@ -188,7 +195,7 @@ describe('profile page', () => {
 
     await app.save();
 
-    expect(app.error).toContain('Preferences');
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('Preferences'));
     expect(app.saved).toBe(false);
     vi.unstubAllGlobals();
   });
@@ -235,7 +242,7 @@ describe('profile page', () => {
     await app.uploadPhoto({ target: { files: [{ type: 'image/jpeg', size: 1000 }], value: '' } });
 
     expect(app.photos).toEqual([{ photoId: 'p2', url: '/photos/p2' }]);
-    expect(app.photoError).toBeNull();
+    expect(showErrorToast).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 
@@ -255,8 +262,28 @@ describe('profile page', () => {
     await app.uploadPhoto({ target: { files: [{ type: 'image/jpeg', size: 1000 }], value: '' } });
 
     expect(app.photos).toHaveLength(10);
-    expect(app.photoError).toContain('10');
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('10'));
     expect(fetchMock.mock.calls.filter((c) => c[0] === '/api/photos' && c[1]?.method === 'POST')).toHaveLength(0);
+    vi.unstubAllGlobals();
+  });
+
+  it('growls an error toast when the upload itself fails (not just the cap check)', async () => {
+    const fetchMock = vi.fn(async (path: string, options: any = {}) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: ONBOARDED_USER }), { status: 200 });
+      if (path === '/api/photos' && (!options.method || options.method === 'GET')) {
+        return new Response(JSON.stringify({ photos: [] }), { status: 200 });
+      }
+      if (path === '/api/photos' && options.method === 'POST') return new Response('nope', { status: 500 });
+      throw new Error(`unexpected ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createProfileApp();
+    await app.init();
+
+    await app.uploadPhoto({ target: { files: [{ type: 'image/jpeg', size: 1000 }], value: '' } });
+
+    expect(app.photos).toHaveLength(0);
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('upload'));
     vi.unstubAllGlobals();
   });
 
@@ -272,6 +299,27 @@ describe('profile page', () => {
 
     expect(app.photos.map((p: any) => p.photoId)).toEqual(['p2']);
     expect(api.calls.some((c) => c.path === '/api/photos/p1' && c.options.method === 'DELETE')).toBe(true);
+    expect(showErrorToast).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('growls an error toast and keeps the photo when removal fails', async () => {
+    const fetchMock = vi.fn(async (path: string, options: any = {}) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: ONBOARDED_USER }), { status: 200 });
+      if (path === '/api/photos' && (!options.method || options.method === 'GET')) {
+        return new Response(JSON.stringify({ photos: [{ photoId: 'p1', url: '/photos/p1', position: 0 }] }), { status: 200 });
+      }
+      if (path === '/api/photos/p1' && options.method === 'DELETE') return new Response('nope', { status: 500 });
+      throw new Error(`unexpected ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createProfileApp();
+    await app.init();
+
+    await app.removePhoto('p1');
+
+    expect(app.photos).toHaveLength(1);
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('remove'));
     vi.unstubAllGlobals();
   });
 
@@ -291,6 +339,27 @@ describe('profile page', () => {
     await app.deleteAccount();
 
     expect(fakeWindow.location.href).toBe('/');
+    expect(showErrorToast).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('growls an error toast and does not redirect when account deletion fails', async () => {
+    const fetchMock = vi.fn(async (path: string, options: any = {}) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: ONBOARDED_USER }), { status: 200 });
+      if (path === '/api/photos') return new Response(JSON.stringify({ photos: [] }), { status: 200 });
+      if (path === '/api/account' && options.method === 'DELETE') return new Response('nope', { status: 500 });
+      throw new Error(`unexpected ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const fakeWindow = { location: { href: '' } };
+    vi.stubGlobal('window', fakeWindow);
+    const app = createProfileApp();
+    await app.init();
+
+    await app.deleteAccount();
+
+    expect(fakeWindow.location.href).toBe('');
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('delete'));
     vi.unstubAllGlobals();
   });
 });

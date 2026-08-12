@@ -1,4 +1,5 @@
 import { api } from '../app.js';
+import { showErrorToast } from '../toast.js';
 
 // Loose client-side normalization, purely for UX (avoids a round-trip on
 // obviously-US-shaped input) -- src/routes/phone.ts's E164_RE and Twilio's
@@ -40,8 +41,6 @@ export function createMessagingApp() {
     sendingCode: false,
     verifyingCode: false,
     /** @type {string|null} */
-    phoneError: null,
-    /** @type {string|null} */
     phoneInfo: null,
 
     async init() {
@@ -64,11 +63,10 @@ export function createMessagingApp() {
     },
 
     async sendCode() {
-      this.phoneError = null;
       this.phoneInfo = null;
       const normalized = normalizePhoneNumber(this.phoneInput);
       if (!normalized || normalized.length < 8) {
-        this.phoneError = 'Enter a valid phone number.';
+        showErrorToast('Enter a valid phone number.');
         return;
       }
       this.sendingCode = true;
@@ -79,13 +77,13 @@ export function createMessagingApp() {
         this.phoneInfo = 'Code sent. Check your texts.';
       } catch (e) {
         if (e.status === 429) {
-          this.phoneError = "You've tried too many times. Wait a minute and try again.";
+          showErrorToast("You've tried too many times. Wait a minute and try again.");
         } else if (e.body?.error === 'voip_not_allowed') {
-          this.phoneError = "That number can't be verified -- Wavelengthz doesn't accept VOIP numbers.";
+          showErrorToast("That number can't be verified -- Wavelengthz doesn't accept VOIP numbers.");
         } else if (e.body?.error === 'invalid_phone_number') {
-          this.phoneError = "That doesn't look like a valid phone number.";
+          showErrorToast("That doesn't look like a valid phone number.");
         } else {
-          this.phoneError = 'Could not send a code. Please try again.';
+          showErrorToast('Could not send a code. Please try again.');
         }
       } finally {
         this.sendingCode = false;
@@ -93,9 +91,8 @@ export function createMessagingApp() {
     },
 
     async verifyCode() {
-      this.phoneError = null;
       if (!this.codeInput.trim()) {
-        this.phoneError = 'Enter the code you were sent.';
+        showErrorToast('Enter the code you were sent.');
         return;
       }
       this.verifyingCode = true;
@@ -107,11 +104,11 @@ export function createMessagingApp() {
         this.recomputeReady();
       } catch (e) {
         if (e.body?.error === 'phone_already_verified') {
-          this.phoneError = 'That number is already verified on a different account.';
+          showErrorToast('That number is already verified on a different account.');
         } else if (e.body?.error === 'invalid_code') {
-          this.phoneError = 'That code is incorrect or expired.';
+          showErrorToast('That code is incorrect or expired.');
         } else {
-          this.phoneError = 'Could not verify that code. Please try again.';
+          showErrorToast('Could not verify that code. Please try again.');
         }
       } finally {
         this.verifyingCode = false;
@@ -122,7 +119,6 @@ export function createMessagingApp() {
     // on a fresh page load -- back to the entry step, same input field.
     editPhoneNumber() {
       this.phoneStep = 'entry';
-      this.phoneError = null;
       this.phoneInfo = null;
       this.codeInput = '';
     },

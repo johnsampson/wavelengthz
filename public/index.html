@@ -30,8 +30,6 @@
   </header>
 
   <main class="flex flex-col items-center gap-8 px-4">
-    <p x-show="error" x-text="error" class="mx-auto max-w-sm text-center text-red-400" role="alert"></p>
-
     <div x-show="authed === false" class="card flex w-full max-w-sm flex-col items-center gap-3 px-6 py-12 text-center">
       <span class="text-3xl">🎧</span>
       <p class="font-semibold text-neutral-100">Find your wavelength</p>
@@ -212,7 +210,6 @@
       />
       <button class="btn-ghost" @click="closeSearch()">Cancel</button>
     </div>
-    <p x-show="searchError" x-text="searchError" class="mx-auto mt-4 w-full max-w-md text-red-400" role="alert"></p>
     <ul class="mx-auto mt-4 flex w-full max-w-md flex-col gap-2 overflow-y-auto">
       <template x-for="result in searchResults" :key="result.id || result.spotifyArtistId">
         <li>
@@ -267,6 +264,7 @@
     import { getAuthedUser } from '/auth.js';
     import { shouldSearch, debounce } from '/search.js';
     import { checkPlayerAvailability, playTrack, pausePlayback, resumePlayback, onStateChange } from '/wavelengthzPlayer.js';
+    import { showErrorToast } from '/toast.js';
     mountHeader();
     mountNav();
 
@@ -281,14 +279,12 @@
         searchQuery: '',
         searchResults: [],
         searching: false,
-        searchError: null,
         debouncedSearch: null,
         matchModal: null,
         // Set to a genre name once the swipe response reports that genre's
         // pass count just crossed the threshold (src/routes/musicSwipes.ts);
         // null the rest of the time.
         genrePrompt: null,
-        error: null,
         // Whether the current card's anthem player is expanded -- reset
         // wherever `current` changes (showNext, decide) so a track never
         // keeps playing into the next card.
@@ -360,7 +356,6 @@
         async decide(direction) {
           if (!this.current) return;
           const swiped = this.current;
-          this.error = null;
           // Stop any playing anthem the instant the swipe is decided, not
           // 250ms later when the card's fling animation finishes and
           // showNext() actually runs -- otherwise it keeps playing, unheard,
@@ -387,10 +382,11 @@
             // Leave `current` in place either way -- the swipe didn't save,
             // so advancing would silently drop it instead of letting the
             // user retry.
-            this.error =
+            showErrorToast(
               e.status === 429
                 ? "You're swiping too fast -- wait a moment and try again."
-                : 'Could not save that. Please try again.';
+                : 'Could not save that. Please try again.'
+            );
             return;
           }
           if (this.queue.length === 0) await this.loadQueue();
@@ -412,7 +408,7 @@
             // Non-fatal -- the deck already moved on by the time this
             // prompt appears, so a failed block just means the genre
             // keeps showing up; nothing here to roll back or retry inline.
-            this.error = 'Could not hide that genre. You can try again from Settings → Preferences.';
+            showErrorToast('Could not hide that genre. You can try again from Settings → Preferences.');
           }
         },
 
@@ -430,7 +426,6 @@
           this.showSearch = false;
           this.searchQuery = '';
           this.searchResults = [];
-          this.searchError = null;
         },
 
         onSearchInput() {
@@ -443,12 +438,11 @@
 
         async runSearch() {
           this.searching = true;
-          this.searchError = null;
           try {
             const res = await api.artistSearch(this.searchQuery.trim());
             this.searchResults = res.results;
           } catch (e) {
-            this.searchError = 'Could not search right now. Please try again.';
+            showErrorToast('Could not search right now. Please try again.');
           } finally {
             this.searching = false;
           }
@@ -463,12 +457,11 @@
           // A live Spotify result has no internal id yet (see GET
           // /api/artists/search's `inCatalog: false` shape) -- persist it
           // first so there's a real artist row (and UUID) to navigate to.
-          this.searchError = null;
           try {
             const res = await api.createArtist(result.spotifyArtistId);
             window.location.href = `/artist?id=${res.artistId}`;
           } catch (e) {
-            this.searchError = 'Could not add that artist. Please try again.';
+            showErrorToast('Could not add that artist. Please try again.');
           }
         },
 

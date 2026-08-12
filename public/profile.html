@@ -389,6 +389,7 @@
     import { mountHeader, mountNav } from '/nav.js';
     import { requireAuth } from '/auth.js';
     import { checkPlayerAvailability, playTrack, pausePlayback, resumePlayback, onStateChange } from '/wavelengthzPlayer.js';
+    import { showErrorToast } from '/toast.js';
     mountHeader();
     mountNav();
 
@@ -477,13 +478,12 @@
         // Clicking the currently-set anthem again clears it (trackId: null) --
         // there's no separate "remove" affordance, same toggle either way.
         async toggleAnthem(track) {
-          this.error = null;
           const next = this.profile.anthemTrack?.id === track.id ? null : track.id;
           try {
             await api.setAnthem(next);
             this.profile.anthemTrack = next ? track : null;
           } catch (e) {
-            this.error = 'Could not update your anthem. Please try again.';
+            showErrorToast('Could not update your anthem. Please try again.');
           }
         },
 
@@ -511,11 +511,10 @@
         async report() {
           const reason = prompt('Reason (inappropriate_photos, harassment, fake_profile, spam, underage, other):');
           if (!reason) return;
-          this.error = null;
           try {
             await api.report(this.userId, reason);
           } catch (e) {
-            this.error = 'Could not submit that report. Please try again.';
+            showErrorToast('Could not submit that report. Please try again.');
           }
         },
       };

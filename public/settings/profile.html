@@ -45,7 +45,6 @@
         :disabled="photos.length >= maxPhotos"
       />
     </label>
-    <p x-show="photoError" x-text="photoError" class="text-sm text-red-400" role="alert"></p>
     <div class="grid grid-cols-4 gap-2">
       <template x-for="photo in photos" :key="photo.photoId">
         <div class="relative">

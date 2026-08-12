@@ -1,5 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createConnectionsApp } from '../../../public/settings/connections.js';
+import { showErrorToast } from '../../../public/toast.js';
+
+vi.mock('../../../public/toast.js', () => ({ showErrorToast: vi.fn() }));
+
+beforeEach(() => {
+  vi.mocked(showErrorToast).mockClear();
+});
 
 function stubApi(user: Record<string, unknown>) {
   const fetchMock = vi.fn(async (path: string) => {
@@ -48,7 +55,7 @@ describe('connections page', () => {
     vi.unstubAllGlobals();
   });
 
-  it('shows an already-linked error and strips the query string after a failed connect', async () => {
+  it('growls an already-linked error toast and strips the query string after a failed connect', async () => {
     stubApi({ id: 'u1', hasSpotify: false });
     const fakeWindow = { location: { search: '?spotify_error=already_linked' }, history: { replaceState: vi.fn() } };
     vi.stubGlobal('window', fakeWindow);
@@ -56,7 +63,7 @@ describe('connections page', () => {
 
     await app.init();
 
-    expect(app.error).toContain('already linked');
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('already linked'));
     expect(fakeWindow.history.replaceState).toHaveBeenCalledWith({}, '', '/settings/connections');
     vi.unstubAllGlobals();
   });

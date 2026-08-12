@@ -1,5 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createMessagingApp, normalizePhoneNumber } from '../../../public/settings/messaging.js';
+import { showErrorToast } from '../../../public/toast.js';
+
+vi.mock('../../../public/toast.js', () => ({ showErrorToast: vi.fn() }));
+
+beforeEach(() => {
+  vi.mocked(showErrorToast).mockClear();
+});
 
 const NOT_READY_STATUS = {
   ready: false,
@@ -102,7 +109,7 @@ describe('messaging page', () => {
 
     await app.sendCode();
 
-    expect(app.phoneError).toBeTruthy();
+    expect(showErrorToast).toHaveBeenCalled();
     expect(calls.some((c) => c.path === '/api/phone/verify/start')).toBe(false);
     vi.unstubAllGlobals();
   });
@@ -136,7 +143,7 @@ describe('messaging page', () => {
 
     await app.sendCode();
 
-    expect(app.phoneError).toContain('VOIP');
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('VOIP'));
     expect(app.phoneStep).toBe('entry');
     vi.unstubAllGlobals();
   });
@@ -154,7 +161,7 @@ describe('messaging page', () => {
 
     await app.sendCode();
 
-    expect(app.phoneError).toContain('too many times');
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('too many times'));
     vi.unstubAllGlobals();
   });
 
@@ -168,7 +175,7 @@ describe('messaging page', () => {
 
     await app.verifyCode();
 
-    expect(app.phoneError).toBeTruthy();
+    expect(showErrorToast).toHaveBeenCalled();
     expect(calls.some((c) => c.path === '/api/phone/verify/check')).toBe(false);
     vi.unstubAllGlobals();
   });
@@ -206,7 +213,7 @@ describe('messaging page', () => {
 
     await app.verifyCode();
 
-    expect(app.phoneError).toContain('incorrect');
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('incorrect'));
     expect(app.phone.met).toBe(false);
     vi.unstubAllGlobals();
   });
@@ -217,13 +224,11 @@ describe('messaging page', () => {
     await app.init();
     app.phoneStep = 'code';
     app.codeInput = '123456';
-    app.phoneError = 'stale error';
 
     app.editPhoneNumber();
 
     expect(app.phoneStep).toBe('entry');
     expect(app.codeInput).toBe('');
-    expect(app.phoneError).toBeNull();
     vi.unstubAllGlobals();
   });
 });

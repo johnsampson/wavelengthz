@@ -78,6 +78,7 @@
     import { api } from '/app.js';
     import { mountHeader, mountNav } from '/nav.js';
     import { requireAuth } from '/auth.js';
+    import { showErrorToast } from '/toast.js';
     mountHeader();
     mountNav();
 
@@ -100,33 +101,30 @@
         },
 
         async unmatch() {
-          this.error = null;
           try {
             await api.unmatch(this.matchId);
             window.location.href = '/matches';
           } catch (e) {
-            this.error = 'Could not unmatch. Please try again.';
+            showErrorToast('Could not unmatch. Please try again.');
           }
         },
 
         async block() {
-          this.error = null;
           try {
             await api.block(this.match.otherUserId);
             window.location.href = '/matches';
           } catch (e) {
-            this.error = 'Could not block that user. Please try again.';
+            showErrorToast('Could not block that user. Please try again.');
           }
         },
 
         async report() {
           const reason = prompt('Reason (inappropriate_photos, harassment, fake_profile, spam, underage, other):');
           if (!reason) return;
-          this.error = null;
           try {
             await api.report(this.match.otherUserId, reason);
           } catch (e) {
-            this.error = 'Could not submit that report. Please try again.';
+            showErrorToast('Could not submit that report. Please try again.');
           }
         },
       };

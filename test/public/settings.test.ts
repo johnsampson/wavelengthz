@@ -1,5 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createSettingsApp } from '../../public/settings.js';
+import { showErrorToast } from '../../public/toast.js';
+
+vi.mock('../../public/toast.js', () => ({ showErrorToast: vi.fn() }));
+
+beforeEach(() => {
+  vi.mocked(showErrorToast).mockClear();
+});
 
 function stubApi(user: Record<string, unknown>) {
   const fetchMock = vi.fn(async (path: string) => {
@@ -66,7 +73,7 @@ describe('settings hub', () => {
     vi.unstubAllGlobals();
   });
 
-  it('surfaces an error and does not redirect when the logout request fails', async () => {
+  it('growls an error toast and does not redirect when the logout request fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
     const fakeWindow = { location: { href: '' } };
     vi.stubGlobal('window', fakeWindow);
@@ -75,7 +82,7 @@ describe('settings hub', () => {
     await app.logout();
 
     expect(fakeWindow.location.href).toBe('');
-    expect(app.error).toBeTruthy();
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('log out'));
     vi.unstubAllGlobals();
   });
 });
