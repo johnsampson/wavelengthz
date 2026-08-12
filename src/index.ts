@@ -69,6 +69,19 @@ const CALLBACK_LIMIT = { limit: 20, windowSeconds: 60 };
 // limit is warranted purely on cost/abuse grounds, independent of anything
 // Twilio's own Verify service rate-limits on its side.
 const PHONE_VERIFY_LIMIT = { limit: 5, windowSeconds: 60 };
+// public/messages.html and public/group.html each poll their own
+// GET .../messages endpoint every 3s while the tab is visible (20 req/min,
+// per open tab) -- legitimate, expected traffic, not abuse. Left on the
+// shared general bucket, a couple of open chat tabs alone permanently
+// saturate GENERAL_LIMIT (120/min) for that IP: every *other* unrelated
+// action -- loading an artist, swiping, anything -- gets starved out by
+// background polling that never stops refilling the bucket, so the 429s
+// never actually clear no matter how long you wait. Its own bucket, sized
+// for a handful of concurrently-open polling tabs (60/20 = 3), keeps that
+// traffic from crowding out everything else in the app, the same reasoning
+// SWIPE_LIMIT/CALLBACK_LIMIT/PHONE_VERIFY_LIMIT already get their own
+// buckets for.
+const POLL_LIMIT = { limit: 60, windowSeconds: 60 };
 
 // Static HTML/JS/CSS under public/ is served directly by the Assets binding
 // and never reaches this fetch() handler at all (no run_worker_first), so
@@ -197,7 +210,18 @@ export default {
         if (!phoneVerifyAllowed) return withSecurityHeaders(Response.json({ error: 'rate_limited' }, { status: 429 }));
       }
 
-      if (url.pathname.startsWith('/api/')) {
+      // GET .../messages under either -- see POLL_LIMIT's own comment.
+      // Deliberately its own bucket instead of ALSO falling through to the
+      // general check below (unlike swipe/phone-verify, which count against
+      // both that bucket and general): the whole point is to stop this
+      // traffic from consuming the same budget as everything else, so it
+      // can't be allowed to double-count against general too.
+      const isPollPath = request.method === 'GET' && /^\/api\/(matches|groups)\/[^/]+\/messages$/.test(url.pathname);
+
+      if (isPollPath) {
+        const pollAllowed = await rateLimitAllows(env.RATE_LIMIT_KV, `poll:${ip}`, POLL_LIMIT.limit, POLL_LIMIT.windowSeconds, env, ctx, url.pathname);
+        if (!pollAllowed) return withSecurityHeaders(Response.json({ error: 'rate_limited' }, { status: 429 }));
+      } else if (url.pathname.startsWith('/api/')) {
         const generallyAllowed = await rateLimitAllows(env.RATE_LIMIT_KV, `general:${ip}`, GENERAL_LIMIT.limit, GENERAL_LIMIT.windowSeconds, env, ctx, url.pathname);
         if (!generallyAllowed) return withSecurityHeaders(Response.json({ error: 'rate_limited' }, { status: 429 }));
       }
