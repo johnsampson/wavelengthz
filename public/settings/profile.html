@@ -20,7 +20,7 @@
   <form class="card mx-auto flex max-w-md flex-col gap-4 p-5" @submit.prevent="save()">
     <label class="flex flex-col gap-1">
       <span class="field-label">Display name</span>
-      <input class="field" type="text" x-model="displayName" maxlength="50" pattern="[-A-Za-z0-9 ]+" :disabled="loading" />
+      <input class="field" type="text" x-model="displayName" maxlength="50" pattern="[\-A-Za-z0-9 ]+" :disabled="loading" />
     </label>
     <label class="flex flex-col gap-1">
       <span class="field-label">Bio</span>

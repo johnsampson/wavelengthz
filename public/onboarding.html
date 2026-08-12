@@ -18,7 +18,7 @@
 
     <label class="flex flex-col gap-1">
       <span class="field-label">Display name</span>
-      <input class="field" type="text" x-model="displayName" maxlength="50" pattern="[-A-Za-z0-9 ]+" required />
+      <input class="field" type="text" x-model="displayName" maxlength="50" pattern="[\-A-Za-z0-9 ]+" required />
     </label>
     <p x-show="error === 'invalid_display_name'" class="text-sm text-red-400" role="alert">
       Display name can only contain letters, numbers, dashes, and spaces.
