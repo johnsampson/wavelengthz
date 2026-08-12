@@ -5,6 +5,8 @@ import {
   searchArtistsByName,
   fetchArtistById,
   fetchArtistTracks,
+  fetchArtistTracksQuick,
+  QUICK_TRACK_LIMIT,
   searchTracksByArtist,
   fetchTrackById,
   getClientCredentialsToken,
@@ -13,6 +15,8 @@ import { genresFromRow } from '../lib/genres';
 import { recordCatalogGenres } from '../lib/genreCatalog';
 import { upsertArtist, upsertTrack } from '../lib/catalogUpsert';
 import { haversineKm } from '../lib/scoring';
+import { readArtistTracksCache, writeArtistTracksCache } from '../lib/artistTracksCache';
+import { enqueueArtistTrackBackfill } from '../lib/artistTrackBackfill';
 
 // Raised from 10 -- fetchArtistTracks (src/lib/spotify.ts) now fans out
 // across up to 10 albums/singles in parallel rather than fetching
@@ -40,28 +44,12 @@ const ARTIST_PROFILE_TRACK_MAX_LIMIT = 90;
 // every single time, hammering Spotify's own rate limit with fully
 // redundant traffic. A short cache absorbs that without going stale enough
 // to matter for a discography that doesn't change minute to minute.
-const ARTIST_TRACKS_CACHE_TTL_SECONDS = 600;
-
 async function fetchArtistTracksCached(env: Env, token: string, spotifyArtistId: string, limit: number) {
-  const cacheKey = `artist-tracks-cache:${spotifyArtistId}:${limit}`;
-
-  try {
-    const cached = await env.RATE_LIMIT_KV.get(cacheKey);
-    if (cached) return JSON.parse(cached);
-  } catch {
-    // KV outage -- fall through to a live fetch rather than failing the
-    // whole page load over a cache read that couldn't complete.
-  }
+  const cached = await readArtistTracksCache(env.RATE_LIMIT_KV, spotifyArtistId, limit);
+  if (cached) return cached;
 
   const tracks = await fetchArtistTracks(token, spotifyArtistId, limit);
-
-  try {
-    await env.RATE_LIMIT_KV.put(cacheKey, JSON.stringify(tracks), { expirationTtl: ARTIST_TRACKS_CACHE_TTL_SECONDS });
-  } catch {
-    // Non-fatal -- this page load already has its (live-fetched) result;
-    // the only cost of a failed write is not caching it for the next one.
-  }
-
+  await writeArtistTracksCache(env.RATE_LIMIT_KV, spotifyArtistId, limit, tracks);
   return tracks;
 }
 
@@ -118,10 +106,8 @@ export function registerCatalogRoutes(router: RouterType) {
     // default rather than being treated as an error -- this param is
     // optional and only the frontend's own "Load more" ever sets it.
     const requestedLimit = Number(new URL(request.url).searchParams.get('limit'));
-    const trackLimit =
-      Number.isFinite(requestedLimit) && requestedLimit > 0
-        ? Math.min(requestedLimit, ARTIST_PROFILE_TRACK_MAX_LIMIT)
-        : ARTIST_PROFILE_TRACK_LIMIT;
+    const hasExplicitLimit = Number.isFinite(requestedLimit) && requestedLimit > 0;
+    const trackLimit = hasExplicitLimit ? Math.min(requestedLimit, ARTIST_PROFILE_TRACK_MAX_LIMIT) : ARTIST_PROFILE_TRACK_LIMIT;
 
     let artistRow = await env.DB.prepare('SELECT * FROM artists WHERE id = ?').bind(requestedId).first<any>();
     if (!artistRow) artistRow = await env.DB.prepare('SELECT * FROM artists WHERE spotify_id = ?').bind(requestedId).first<any>();
@@ -136,7 +122,50 @@ export function registerCatalogRoutes(router: RouterType) {
     }
 
     const artistGenres = genresFromRow(artistRow.genres);
-    const topTracks = await fetchArtistTracksCached(env, token, artistRow.spotify_id, trackLimit);
+
+    // No ?limit= means this is the very first view of this artist page --
+    // the common, hot-path case, and previously always ran the full ~40-call
+    // fetchArtistTracks fan-out synchronously, which is what was tripping
+    // Spotify's own rate limit under real load. If a prior visitor's
+    // backfill (src/lib/artistTrackBackfill.ts) already completed, the cache
+    // has the full list and this is a plain cache hit like any other. Only
+    // on a genuine cache miss does this fall back to fetchArtistTracksQuick
+    // (a handful of calls, just enough to render something) and hand the
+    // rest off to the backfill queue instead of fetching it inline.
+    // ?limit= (an explicit "Load more" tap) always goes through the full,
+    // already-hardened fetchArtistTracksCached path unchanged -- it's a
+    // deliberate, less-frequent user action, not the page's hot path.
+    let topTracks: any[];
+    let quickPath = false;
+    if (hasExplicitLimit) {
+      topTracks = await fetchArtistTracksCached(env, token, artistRow.spotify_id, trackLimit);
+    } else {
+      const cached = await readArtistTracksCache(env.RATE_LIMIT_KV, artistRow.spotify_id, trackLimit);
+      if (cached) {
+        topTracks = cached;
+      } else {
+        quickPath = true;
+        // Its own short-lived cache, separate from the full-limit one above
+        // -- without this, every view of the same brand-new artist between
+        // "first viewer triggered the quick fetch" and "the backfill queue
+        // actually finishes" would re-run the quick fetch's own live Spotify
+        // calls from scratch, the exact repeated-reload problem
+        // ARTIST_TRACKS_CACHE_TTL_SECONDS already exists to prevent for the
+        // full-fetch path.
+        const quickCached = await readArtistTracksCache(env.RATE_LIMIT_KV, artistRow.spotify_id, QUICK_TRACK_LIMIT);
+        if (quickCached) {
+          topTracks = quickCached;
+        } else {
+          topTracks = await fetchArtistTracksQuick(token, artistRow.spotify_id);
+          await writeArtistTracksCache(env.RATE_LIMIT_KV, artistRow.spotify_id, QUICK_TRACK_LIMIT, topTracks);
+        }
+        await enqueueArtistTrackBackfill(env, {
+          artistId: artistRow.id,
+          spotifyArtistId: artistRow.spotify_id,
+          limit: trackLimit,
+        });
+      }
+    }
     const now = Date.now();
     // Pairs each live Spotify track with its resolved internal id -- needed
     // because everything downstream (swipe direction lookup, totalLikes,
@@ -214,7 +243,15 @@ export function registerCatalogRoutes(router: RouterType) {
       // is already exhausted (sparse discography) and asking for more
       // wouldn't turn up anything new. False once trackLimit has hit the
       // ceiling regardless, since this endpoint won't fetch any deeper.
-      hasMore: enrichedTracks.length === trackLimit && trackLimit < ARTIST_PROFILE_TRACK_MAX_LIMIT,
+      // The length===trackLimit comparison doesn't apply on the quick path
+      // (enrichedTracks is deliberately much shorter than trackLimit there,
+      // by design, not because the artist ran out) -- any nonzero quick
+      // result means there's more the backfill queue is already fetching,
+      // so "Load more" tapping into this same route again is always worth
+      // offering, short of a genuinely empty (no releases at all) artist.
+      hasMore: quickPath
+        ? enrichedTracks.length > 0
+        : enrichedTracks.length === trackLimit && trackLimit < ARTIST_PROFILE_TRACK_MAX_LIMIT,
     });
   });
 

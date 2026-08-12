@@ -20,6 +20,7 @@ import { purgeExpiredDeletions } from './lib/accountDeletion';
 import { refreshCatalogFromProfiles } from './db/catalogRefresh';
 import { sendDelayedMatchNotificationEmails } from './lib/notifications';
 import { runHourlyGenreEnrichment, processGenreEnrichmentQueueBatch, type GenreEnrichmentQueueMessage } from './lib/genreEnrichment';
+import { processArtistTrackBackfillBatch, type ArtistTrackBackfillMessage } from './lib/artistTrackBackfill';
 import { checkRateLimit } from './lib/rateLimit';
 import { reportError } from './lib/sentry';
 import { constantTimeEqual } from './lib/crypto';
@@ -294,7 +295,18 @@ export default {
       );
     }
   },
-  queue: async (batch: MessageBatch<GenreEnrichmentQueueMessage>, env: Env): Promise<void> => {
-    await processGenreEnrichmentQueueBatch(batch, env.DB);
+  // A single `queue` export handles every queue this Worker consumes from --
+  // Cloudflare doesn't support one export per queue, so batch.queue (the
+  // real queue name, `-test` suffixed under env.test) is the only way to
+  // tell which one a given batch came from. TS can't narrow
+  // MessageBatch<A | B> to MessageBatch<A> from that check on its own, hence
+  // the explicit cast in each branch -- batch.queue is what actually
+  // guarantees the shape at runtime.
+  queue: async (batch: MessageBatch<GenreEnrichmentQueueMessage | ArtistTrackBackfillMessage>, env: Env): Promise<void> => {
+    if (batch.queue.startsWith('artist-track-backfill')) {
+      await processArtistTrackBackfillBatch(batch as MessageBatch<ArtistTrackBackfillMessage>, env);
+    } else {
+      await processGenreEnrichmentQueueBatch(batch as MessageBatch<GenreEnrichmentQueueMessage>, env.DB);
+    }
   },
 };

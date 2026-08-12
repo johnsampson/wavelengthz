@@ -1,5 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
-import { buildAuthUrl, fetchSpotifyProfile, fetchArtistTracks, fetchArtistById, SpotifyRateLimitError } from '../../src/lib/spotify';
+import {
+  buildAuthUrl,
+  fetchSpotifyProfile,
+  fetchArtistTracks,
+  fetchArtistTracksQuick,
+  QUICK_TRACK_LIMIT,
+  fetchArtistById,
+  SpotifyRateLimitError,
+} from '../../src/lib/spotify';
 
 const env = {
   SPOTIFY_CLIENT_ID: 'client123',
@@ -300,6 +308,137 @@ describe('fetchArtistTracks', () => {
     stubSpotify({ albums: [] });
 
     const tracks = await fetchArtistTracks('token', 'artist-1', 10);
+
+    expect(tracks).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('fetchArtistTracksQuick', () => {
+  it('only asks for the single most recent album, and only up to QUICK_TRACK_LIMIT tracks from it -- not the full ~40-call fan-out', async () => {
+    const albumsCalls: string[] = [];
+    let albumTracksCallUrl = '';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          albumsCalls.push(url);
+          return new Response(JSON.stringify({ items: [{ id: 'album-1' }, { id: 'album-2' }] }), { status: 200 });
+        }
+        if (url.includes('/albums/album-1/tracks')) {
+          albumTracksCallUrl = url;
+          return new Response(JSON.stringify({ items: Array.from({ length: 20 }, (_, i) => ({ id: `t${i}` })) }), { status: 200 });
+        }
+        if (url.includes('/v1/tracks/')) {
+          const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
+          return new Response(JSON.stringify({ id, name: id, artists: [{ id: 'artist-1', name: 'X' }] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+
+    const tracks = await fetchArtistTracksQuick('token', 'artist-1');
+
+    // Only the albums endpoint's own ?limit= reflects the single-album
+    // request; the actual returned array length is what matters for call
+    // count -- fetchAlbumTrackIds is only ever called once (for album-1),
+    // never album-2.
+    expect(albumsCalls).toHaveLength(1);
+    expect(new URL(albumsCalls[0]).searchParams.get('limit')).toBe('1');
+    expect(new URL(albumTracksCallUrl).searchParams.get('limit')).toBe(String(QUICK_TRACK_LIMIT));
+    expect(tracks).toHaveLength(QUICK_TRACK_LIMIT);
+    vi.unstubAllGlobals();
+  });
+
+  it('truncates client-side to QUICK_TRACK_LIMIT even if the album-tracks response ignores ?limit= and returns more', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+        }
+        if (url.includes('/albums/album-1/tracks')) {
+          // Deliberately ignores the requested limit, like a naive test
+          // double (or a misbehaving real response) might.
+          return new Response(JSON.stringify({ items: Array.from({ length: 50 }, (_, i) => ({ id: `t${i}` })) }), { status: 200 });
+        }
+        if (url.includes('/v1/tracks/')) {
+          const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
+          return new Response(JSON.stringify({ id, name: id, artists: [{ id: 'artist-1', name: 'X' }] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+
+    const tracks = await fetchArtistTracksQuick('token', 'artist-1');
+
+    expect(tracks).toHaveLength(QUICK_TRACK_LIMIT);
+    vi.unstubAllGlobals();
+  });
+
+  it('returns fewer than QUICK_TRACK_LIMIT without error when the artist\'s one album has fewer tracks', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+        }
+        if (url.includes('/albums/album-1/tracks')) {
+          return new Response(JSON.stringify({ items: [{ id: 't1' }, { id: 't2' }] }), { status: 200 });
+        }
+        if (url.includes('/v1/tracks/')) {
+          const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
+          return new Response(JSON.stringify({ id, name: id, artists: [{ id: 'artist-1', name: 'X' }] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+
+    const tracks = await fetchArtistTracksQuick('token', 'artist-1');
+
+    expect(tracks).toHaveLength(2);
+    vi.unstubAllGlobals();
+  });
+
+  it('returns no tracks, and makes no track-detail calls, when the artist has no albums at all', async () => {
+    const fetchSpy = vi.fn(async (input: RequestInfo) => {
+      const url = input.toString();
+      if (url.includes('/artists/') && url.includes('/albums')) {
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const tracks = await fetchArtistTracksQuick('token', 'artist-1');
+
+    expect(tracks).toEqual([]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1); // just the albums call, nothing more
+    vi.unstubAllGlobals();
+  });
+
+  it('filters out a track credited to a different artist, same defensive check as fetchArtistTracks', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+        }
+        if (url.includes('/albums/album-1/tracks')) {
+          return new Response(JSON.stringify({ items: [{ id: 't1' }] }), { status: 200 });
+        }
+        if (url.includes('/v1/tracks/t1')) {
+          return new Response(JSON.stringify({ id: 't1', name: 'Wrong Credit', artists: [{ id: 'someone-else' }] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+
+    const tracks = await fetchArtistTracksQuick('token', 'artist-1');
 
     expect(tracks).toEqual([]);
     vi.unstubAllGlobals();
