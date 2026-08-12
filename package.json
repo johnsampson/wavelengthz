@@ -8,7 +8,8 @@
   },
   "scripts": {
     "test": "vitest run",
-    "build:css": "tailwindcss -i ./public/styles.css -o ./public/tailwind.css --minify"
+    "build:css": "tailwindcss -i ./public/styles.css -o ./public/tailwind.css --minify",
+    "vendor:alpine": "cp node_modules/alpinejs/dist/cdn.min.js public/alpine.js"
   },
   "keywords": [],
   "author": "",
@@ -21,6 +22,7 @@
     "@cloudflare/vitest-pool-workers": "^0.20.1",
     "@cloudflare/workers-types": "^5.20260801.1",
     "@tailwindcss/cli": "^4.3.3",
+    "alpinejs": "^3.16.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10",
