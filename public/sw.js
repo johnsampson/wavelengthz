@@ -62,8 +62,12 @@
 // (public/toast.js's new error variant) -- touches most precached HTML/JS
 // files in this list (index, artist, match, messages, group, groups,
 // profile, onboarding, history.js, settings.js, and every settings/*.js
-// sub-page).
-const CACHE_NAME = 'wavelengthz-shell-v27';
+// sub-page). v28 fixes /onboarding and /settings/profile's display-name
+// `pattern` attribute -- Chrome now compiles <input pattern> as a `v`-flag
+// (unicodeSets) regex, which requires escaping `-` inside a character class
+// even at the leading/trailing edge, unlike classic regex; the unescaped
+// version threw "Invalid regular expression" in the console on every save.
+const CACHE_NAME = 'wavelengthz-shell-v28';
 const APP_SHELL = [
   '/',
   '/app.js',
