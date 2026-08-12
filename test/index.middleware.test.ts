@@ -154,6 +154,30 @@ describe('global middleware', () => {
     vi.unstubAllGlobals();
   });
 
+  it('returns a distinct 503 (not the generic 500) when Spotify is still rate-limiting a route after spotifyFetch\'s own retry', async () => {
+    // Regression: this was reported as "constantly 429" loading an artist,
+    // where the underlying failure -- Spotify's own rate limit, tripped by
+    // GET /api/artists/:id's fan-out to dozens of parallel calls -- was
+    // indistinguishable from any other server failure, since both landed on
+    // the same generic 500. /callback's token exchange is a simpler way to
+    // exercise the same spotifyFetch path end to end than standing up a full
+    // artist-load fixture.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('rate limited', { status: 429, headers: { 'Retry-After': '0.001' } }))
+    );
+    const callbackReq = new Request('http://localhost/callback?code=x&state=y', {
+      headers: { Cookie: 'wl_oauth_state=y', 'CF-Connecting-IP': '9.9.9.6' },
+    });
+
+    const res = await worker.fetch(callbackReq, env, {} as ExecutionContext);
+
+    expect(res.status).toBe(503);
+    const body = await res.json<any>();
+    expect(body.error).toBe('spotify_rate_limited');
+    vi.unstubAllGlobals();
+  });
+
   it('returns a generic 500 and does not leak error internals when a route throws', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('downstream Spotify outage'); }));
     const req = new Request('http://localhost/login', { headers: { 'CF-Connecting-IP': '9.9.9.9' } });
