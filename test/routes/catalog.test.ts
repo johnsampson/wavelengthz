@@ -16,6 +16,13 @@ beforeEach(async () => {
   await env.DB.exec(
     'DELETE FROM genres; DELETE FROM music_swipes; DELETE FROM sessions; DELETE FROM tracks; DELETE FROM artists; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;'
   );
+  // fetchArtistTracksCached (src/routes/catalog.ts) caches GET /api/artists/:id's
+  // track fetch in RATE_LIMIT_KV, keyed by spotify_id+limit -- since most tests
+  // below reuse the same seeded 'local-1' artist, a stale cached result from an
+  // earlier test would otherwise leak into a later one asserting a different
+  // track list for that same artist/limit pair.
+  const cachedKeys = await env.RATE_LIMIT_KV.list({ prefix: 'artist-tracks-cache:' });
+  await Promise.all(cachedKeys.keys.map((k) => env.RATE_LIMIT_KV.delete(k.name)));
   await insertTestUser(env.DB, { id: 'u1', spotifyId: 'sp1', createdAt: 1000, updatedAt: 1000 });
   await env.DB.prepare(
     `INSERT INTO artists (id, spotify_id, name, genres, source, approved, created_at) VALUES ('local-1', 'spotify-local-1', 'Local Artist', '{"pop":true}', 'seed', 1, 1000)`
@@ -330,6 +337,102 @@ describe('GET /api/artists/:id', () => {
       const body = await res.json<any>();
       expect(body.artist.totalLikesInArea).toBe(0);
       expect(body.artist.totalLikes).toBe(3); // unaffected -- this one doesn't need the viewer's location
+      vi.unstubAllGlobals();
+    });
+  });
+
+  describe('artist tracks caching (fetchArtistTracksCached)', () => {
+    // Regression: repeatedly reloading the same artist page -- exactly what
+    // happens while someone is testing/debugging it -- used to re-run the
+    // whole ~40-call Spotify fan-out from scratch every time, which was
+    // itself enough redundant traffic to keep re-tripping Spotify's own rate
+    // limit. A short KV cache absorbs that.
+    function stubTrackSearchCounting(tracks: any[]) {
+      let albumsCalls = 0;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo) => {
+          const url = input.toString();
+          if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+          if (url.includes('/artists/') && url.includes('/albums')) {
+            albumsCalls += 1;
+            return new Response(JSON.stringify({ items: tracks.length > 0 ? [{ id: 'album-1' }] : [] }), { status: 200 });
+          }
+          if (url.includes('/albums/album-1/tracks')) {
+            return new Response(JSON.stringify({ items: tracks.map((t) => ({ id: t.id })) }), { status: 200 });
+          }
+          const trackByIdMatch = url.match(/\/v1\/tracks\/([^/?]+)$/);
+          if (trackByIdMatch) {
+            const track = tracks.find((t) => t.id === trackByIdMatch[1]);
+            return track ? new Response(JSON.stringify(track), { status: 200 }) : new Response('not found', { status: 404 });
+          }
+          throw new Error(`unexpected ${url}`);
+        })
+      );
+      return () => albumsCalls;
+    }
+
+    it('serves the second request for the same artist from cache, without calling Spotify again', async () => {
+      const getAlbumsCalls = stubTrackSearchCounting([
+        { id: 'trk1', name: 'Track One', artists: [{ id: 'spotify-local-1', name: 'Local Artist' }], album: { images: [] }, preview_url: null },
+      ]);
+      const cookie = await cookieFor('u1');
+      const req = () => new Request('http://localhost/api/artists/local-1', { headers: { Cookie: cookie } });
+
+      const first = await worker.fetch(req(), env, {} as ExecutionContext);
+      const firstBody = await first.json<any>();
+      const second = await worker.fetch(req(), env, {} as ExecutionContext);
+      const secondBody = await second.json<any>();
+
+      expect(getAlbumsCalls()).toBe(1); // not 2 -- the second request never touched Spotify
+      expect(secondBody.tracks.map((t: any) => t.spotifyId)).toEqual(firstBody.tracks.map((t: any) => t.spotifyId));
+      vi.unstubAllGlobals();
+    });
+
+    it('does not reuse a cached result across different ?limit= values for the same artist', async () => {
+      const getAlbumsCalls = stubTrackSearchCounting(
+        Array.from({ length: 10 }, (_, i) => ({
+          id: `trk${i}`,
+          name: `Track ${i}`,
+          artists: [{ id: 'spotify-local-1', name: 'Local Artist' }],
+          album: { images: [] },
+          preview_url: null,
+        }))
+      );
+      const cookie = await cookieFor('u1');
+
+      await worker.fetch(new Request('http://localhost/api/artists/local-1', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+      await worker.fetch(new Request('http://localhost/api/artists/local-1?limit=5', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+
+      expect(getAlbumsCalls()).toBe(2); // different cache key per limit -- both are live fetches
+      vi.unstubAllGlobals();
+    });
+
+    it('falls back to a live fetch when the KV cache read fails, instead of failing the request', async () => {
+      const getAlbumsCalls = stubTrackSearchCounting([
+        { id: 'trk1', name: 'Track One', artists: [{ id: 'spotify-local-1', name: 'Local Artist' }], album: { images: [] }, preview_url: null },
+      ]);
+      const brokenKv = {
+        get: async () => {
+          throw new Error('KV namespace unavailable');
+        },
+        put: async () => {},
+        list: env.RATE_LIMIT_KV.list.bind(env.RATE_LIMIT_KV),
+        delete: env.RATE_LIMIT_KV.delete.bind(env.RATE_LIMIT_KV),
+      };
+      const brokenEnv = { ...env, RATE_LIMIT_KV: brokenKv } as any;
+      const cookie = await cookieFor('u1');
+
+      const res = await worker.fetch(
+        new Request('http://localhost/api/artists/local-1', { headers: { Cookie: cookie } }),
+        brokenEnv,
+        {} as ExecutionContext
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json<any>();
+      expect(body.tracks).toHaveLength(1);
+      expect(getAlbumsCalls()).toBe(1);
       vi.unstubAllGlobals();
     });
   });

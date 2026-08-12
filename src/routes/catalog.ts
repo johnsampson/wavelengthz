@@ -31,6 +31,40 @@ const ARTIST_PROFILE_TRACK_LIMIT = 30;
 // subrequest limit PR #18 was written to avoid re-hitting.
 const ARTIST_PROFILE_TRACK_MAX_LIMIT = 90;
 
+// fetchArtistTracks is the expensive part of this route -- up to ~40
+// Spotify calls (see spotifyFetch's own comment in lib/spotify.ts) -- and
+// nothing about its result is viewer-specific (unlike totalLikes/direction
+// below, computed fresh per request from D1). Reloading the same artist
+// repeatedly, which is exactly what happens while someone is actively
+// testing/debugging a broken page, re-ran that entire fan-out from scratch
+// every single time, hammering Spotify's own rate limit with fully
+// redundant traffic. A short cache absorbs that without going stale enough
+// to matter for a discography that doesn't change minute to minute.
+const ARTIST_TRACKS_CACHE_TTL_SECONDS = 600;
+
+async function fetchArtistTracksCached(env: Env, token: string, spotifyArtistId: string, limit: number) {
+  const cacheKey = `artist-tracks-cache:${spotifyArtistId}:${limit}`;
+
+  try {
+    const cached = await env.RATE_LIMIT_KV.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+  } catch {
+    // KV outage -- fall through to a live fetch rather than failing the
+    // whole page load over a cache read that couldn't complete.
+  }
+
+  const tracks = await fetchArtistTracks(token, spotifyArtistId, limit);
+
+  try {
+    await env.RATE_LIMIT_KV.put(cacheKey, JSON.stringify(tracks), { expirationTtl: ARTIST_TRACKS_CACHE_TTL_SECONDS });
+  } catch {
+    // Non-fatal -- this page load already has its (live-fetched) result;
+    // the only cost of a failed write is not caching it for the next one.
+  }
+
+  return tracks;
+}
+
 export function registerCatalogRoutes(router: RouterType) {
   router.get('/api/artists/search', async (request: Request, env: Env) => {
     const user = await getSessionUser(request, env.DB);
@@ -102,7 +136,7 @@ export function registerCatalogRoutes(router: RouterType) {
     }
 
     const artistGenres = genresFromRow(artistRow.genres);
-    const topTracks = await fetchArtistTracks(token, artistRow.spotify_id, trackLimit);
+    const topTracks = await fetchArtistTracksCached(env, token, artistRow.spotify_id, trackLimit);
     const now = Date.now();
     // Pairs each live Spotify track with its resolved internal id -- needed
     // because everything downstream (swipe direction lookup, totalLikes,
