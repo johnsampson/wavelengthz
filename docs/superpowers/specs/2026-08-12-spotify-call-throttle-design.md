@@ -82,8 +82,16 @@ export async function markSpotifyCooldown(
 // derived from retryAfterSeconds when it's a valid positive number, else
 // SPOTIFY_COOLDOWN_DEFAULT_SECONDS = 15 (a conservative starting guess --
 // roughly half of the ~30s window implied by the Sentry reports -- tune
-// from observed production data as it comes in). KV `expirationTtl` is set
-// to the same duration so the key self-cleans.
+// from observed production data as it comes in).
+//
+// Cloudflare KV requires expirationTtl >= 60s, which is longer than the
+// intended cooldown duration (15s default, and most real Retry-After
+// values). The KV write's own expirationTtl is floored to 60s purely so
+// the row eventually self-cleans -- it is NOT the signal isSpotifyCoolingDown
+// uses. That function compares the stored expiry timestamp (the real,
+// possibly-shorter duration) against Date.now(), so cooldown correctly
+// clears after the intended 15s even though the underlying KV row persists
+// up to 60s.
 
 export async function isSpotifyCoolingDown(
   kv: KVNamespace
@@ -97,25 +105,30 @@ the moment it sees the *first* 429 for a given call, before its existing
 retry loop proceeds — for calls of either priority. This is the earliest,
 most actionable signal that Spotify is currently constrained.
 
-### 2. Priority-aware admission in `spotifyFetch`
+### 2. Priority-aware admission (checked once per background job, not per HTTP call)
 
-`spotifyFetch` gains a `priority: 'interactive' | 'background'` parameter,
-defaulting to `'interactive'` (fail-safe: an unclassified call is never
-throttled by mistake).
+`spotifyFetch` gains an optional `kv?: KVNamespace` parameter, used only to
+**write** the cooldown flag when it sees a 429 — it makes no admission
+decision itself and carries no concept of priority.
 
-- `'background'`: before making the request, checks `isSpotifyCoolingDown`.
-  If cooldown is active, throws `SpotifyCooldownActiveError` immediately —
-  **no HTTP request is made at all**. No Spotify budget is wasted piling
-  onto whatever is already causing pressure.
-- `'interactive'`: skips the cooldown check entirely and always attempts
-  the call, protected only by the existing 429-retry-with-backoff loop
-  (unchanged). A real user waiting on a response is never preemptively
-  blocked by our own internal guess.
+The admission **check** lives one level up, in `fetchArtistTracks` and
+`searchArtistsByGenre` (the only two functions ever invoked with
+`'background'` priority) — once at the very top of each call, before any
+Spotify request is made:
 
-The cooldown check happens once per **logical unit of background work**
-(inside `fetchArtistTracks` and `searchArtistsByGenre`, not inside
-`spotifyFetch` itself) to keep KV read volume low — see "KV volume" below.
-A fan-out that's already mid-flight when cooldown appears is allowed to
+- `'background'`: checks `isSpotifyCoolingDown` first. If cooldown is
+  active, throws `SpotifyCooldownActiveError` immediately — **no HTTP
+  request is made at all**. No Spotify budget is wasted piling onto
+  whatever is already causing pressure.
+- `'interactive'` (the default for callers that never pass a priority):
+  skips the check entirely and always attempts the call, protected only by
+  `spotifyFetch`'s existing 429-retry-with-backoff loop (unchanged). A real
+  user waiting on a response is never preemptively blocked by our own
+  internal guess.
+
+Checking once per **logical unit of background work**, rather than inside
+`spotifyFetch` itself, keeps KV read volume low — see "KV volume" below. A
+fan-out that's already mid-flight when cooldown appears is allowed to
 finish; the goal is stopping background jobs from *starting* fresh bursts
 during a hot window, not micromanaging one already running.
 
