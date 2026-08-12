@@ -47,7 +47,7 @@ export async function startVerification(phoneNumber: string, env: Env): Promise<
 }
 
 export async function checkVerification(phoneNumber: string, code: string, env: Env): Promise<{ approved: boolean }> {
-  const res = await fetch(`https://verify.twilio.com/v2/Services/${env.TWILIO_VERIFY_SERVICE_SID}/VerificationChecks`, {
+  const res = await fetch(`https://verify.twilio.com/v2/Services/${env.TWILIO_VERIFY_SERVICE_SID}/VerificationCheck`, {
     method: 'POST',
     headers: { Authorization: basicAuthHeader(env), 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ To: phoneNumber, Code: code }),

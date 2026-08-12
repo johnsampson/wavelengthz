@@ -42,7 +42,7 @@ function stubTwilio({ lineType = 'mobile', lookupValid = true, verifyStatus = 'a
       if (url.includes('/Verifications') && !url.includes('Check')) {
         return new Response(JSON.stringify({ status: 'pending' }), { status: 201 });
       }
-      if (url.includes('/VerificationChecks')) {
+      if (url.includes('/VerificationCheck')) {
         return new Response(JSON.stringify({ status: verifyStatus }), { status: 200 });
       }
       throw new Error(`unexpected fetch ${url}`);
