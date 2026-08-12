@@ -35,30 +35,43 @@ export class SpotifyRateLimitError extends Error {
 // outage.
 //
 // Every Spotify call in this file goes through this instead of a raw
-// fetch(): a 429 gets one short, bounded retry, honoring Spotify's own
-// Retry-After header when present. Still 429 after that retry throws
-// SpotifyRateLimitError specifically (see above) rather than the generic
-// "... fetch failed: 429 ..." Error every other failure throws.
-const SPOTIFY_RETRY_MAX_DELAY_MS = 2000;
+// fetch(): a 429 gets a few bounded retries with exponential backoff,
+// honoring Spotify's own Retry-After header when present. Still 429 after
+// every attempt throws SpotifyRateLimitError specifically (see above)
+// rather than the generic "... fetch failed: 429 ..." Error every other
+// failure throws.
+//
+// Raised from a single retry -- production kept surfacing
+// SpotifyRateLimitError (the "Spotify's a little busy" 503) even after that
+// one short retry, meaning Spotify's own limit window can outlast a single
+// ~1-2s backoff. SPOTIFY_MAX_RETRIES=3 (4 attempts total) with the delay
+// doubling each time gives a real fan-out (GET /api/artists/:id, up to ~40
+// calls) meaningfully more runway to clear Spotify's window before this
+// gives up and reports the honest "still limited" error.
+const SPOTIFY_MAX_RETRIES = 3;
+const SPOTIFY_RETRY_MAX_DELAY_MS = 4000;
 const SPOTIFY_RETRY_DEFAULT_DELAY_MS = 1000;
 
 async function spotifyFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  const res = await fetch(url, options);
-  if (res.status !== 429) return res;
+  let res = await fetch(url, options);
 
-  const retryAfterHeader = res.headers.get('Retry-After');
-  const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : NaN;
-  const delayMs = Math.min(
-    Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : SPOTIFY_RETRY_DEFAULT_DELAY_MS,
-    SPOTIFY_RETRY_MAX_DELAY_MS
-  );
-  await new Promise((resolve) => setTimeout(resolve, delayMs));
-
-  const retried = await fetch(url, options);
-  if (retried.status === 429) {
-    throw new SpotifyRateLimitError(`Spotify rate-limited this request even after a retry: ${url}`);
+  for (let attempt = 0; attempt < SPOTIFY_MAX_RETRIES && res.status === 429; attempt++) {
+    const retryAfterHeader = res.headers.get('Retry-After');
+    const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : NaN;
+    const delayMs = Math.min(
+      Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+        ? retryAfterSeconds * 1000
+        : SPOTIFY_RETRY_DEFAULT_DELAY_MS * 2 ** attempt,
+      SPOTIFY_RETRY_MAX_DELAY_MS
+    );
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    res = await fetch(url, options);
   }
-  return retried;
+
+  if (res.status === 429) {
+    throw new SpotifyRateLimitError(`Spotify rate-limited this request even after ${SPOTIFY_MAX_RETRIES} retries: ${url}`);
+  }
+  return res;
 }
 
 // Caps how many individual GET /v1/tracks/{id} calls (fetchTracksByIds,
@@ -69,6 +82,15 @@ async function spotifyFetch(url: string, options: RequestInit = {}): Promise<Res
 // should need to send at once. Batching keeps the peak burst size bounded
 // without falling back to a fully sequential (much slower) loop.
 const TRACK_FETCH_CONCURRENCY = 5;
+
+// Same reasoning as TRACK_FETCH_CONCURRENCY, applied to fetchArtistTracks'
+// other fan-out: fetchAlbumTrackIds (below) used to fire once per album --
+// up to ARTIST_ALBUMS_PAGE_SIZE (10) -- as one simultaneous Promise.all.
+// Smaller than TRACK_FETCH_CONCURRENCY only because it never has as many
+// items to bound in the first place (max 10 vs. up to 90); the point is the
+// same, keep every phase of the pipeline's peak burst bounded, not just the
+// track-detail phase.
+const ALBUM_TRACKS_FETCH_CONCURRENCY = 5;
 
 async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
@@ -326,7 +348,9 @@ export async function fetchArtistTracks(token: string, artistId: string, limit: 
   // preserved via .flat(), so the truncation below still favors newer
   // releases.
   const albumIds = await fetchArtistAlbumIds(token, artistId, limit);
-  const albumTrackIdLists = await Promise.all(albumIds.map((albumId) => fetchAlbumTrackIds(token, albumId, limit)));
+  const albumTrackIdLists = await mapWithConcurrency(albumIds, ALBUM_TRACKS_FETCH_CONCURRENCY, (albumId) =>
+    fetchAlbumTrackIds(token, albumId, limit)
+  );
   const trackIds = albumTrackIdLists.flat().slice(0, limit);
   const tracks = await fetchTracksByIds(token, trackIds);
   // Belt-and-suspenders: a release where this artist is the album artist

@@ -169,6 +169,38 @@ describe('fetchArtistTracks', () => {
     vi.unstubAllGlobals();
   });
 
+  it('bounds album-tracks fetches to ALBUM_TRACKS_FETCH_CONCURRENCY instead of firing them all at once', async () => {
+    // Regression: this fan-out (up to ARTIST_ALBUMS_PAGE_SIZE albums, 10) used
+    // to fire every album-tracks call in one simultaneous Promise.all, just
+    // like fetchTracksByIds did before TRACK_FETCH_CONCURRENCY. 8 albums here
+    // (more than the concurrency cap of 5) proves the cap is real.
+    const albumIds = Array.from({ length: 8 }, (_, i) => `album-${i}`);
+    let inFlight = 0;
+    let maxConcurrent = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: albumIds.map((id) => ({ id })) }), { status: 200 });
+        }
+        if (url.includes('/albums/')) {
+          inFlight += 1;
+          maxConcurrent = Math.max(maxConcurrent, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          inFlight -= 1;
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+
+    await fetchArtistTracks('token', 'artist-1', 10);
+
+    expect(maxConcurrent).toBe(5);
+    vi.unstubAllGlobals();
+  });
+
   it('bounds individual track-detail fetches to TRACK_FETCH_CONCURRENCY instead of firing them all at once', async () => {
     // Regression: this was the single biggest contributor to tripping
     // Spotify's own app-wide rate limit -- a full artist load (up to
@@ -317,10 +349,41 @@ describe('spotifyFetch (retry-on-429, via fetchArtistById)', () => {
     vi.unstubAllGlobals();
   }, 10000);
 
-  it('throws SpotifyRateLimitError, not the generic fetch-failed Error, when still 429 after the retry', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('rate limited', { status: 429, headers: { 'Retry-After': '0.001' } })));
+  it('retries multiple times (not just once) before giving up, succeeding on a later attempt', async () => {
+    // Regression: a single retry wasn't enough runway to clear Spotify's own
+    // rate-limit window under real production load -- "Spotify's a little
+    // busy" kept appearing even after that one retry. Succeeding on the 3rd
+    // attempt (2 retries) proves this isn't capped back down to one.
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        if (calls < 3) return new Response('rate limited', { status: 429, headers: { 'Retry-After': '0.001' } });
+        return new Response(JSON.stringify({ id: 'artist-1', name: 'Real Artist' }), { status: 200 });
+      })
+    );
+
+    const artist = await fetchArtistById('token', 'artist-1');
+
+    expect(artist.name).toBe('Real Artist');
+    expect(calls).toBe(3);
+    vi.unstubAllGlobals();
+  });
+
+  it('throws SpotifyRateLimitError, not the generic fetch-failed Error, when still 429 after every retry', async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        return new Response('rate limited', { status: 429, headers: { 'Retry-After': '0.001' } });
+      })
+    );
 
     await expect(fetchArtistById('token', 'artist-1')).rejects.toThrow(SpotifyRateLimitError);
+    // 1 initial attempt + SPOTIFY_MAX_RETRIES (3) retries.
+    expect(calls).toBe(4);
 
     vi.unstubAllGlobals();
   });
