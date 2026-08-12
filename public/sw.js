@@ -67,7 +67,17 @@
 // (unicodeSets) regex, which requires escaping `-` inside a character class
 // even at the leading/trailing edge, unlike classic regex; the unescaped
 // version threw "Invalid regular expression" in the console on every save.
-const CACHE_NAME = 'wavelengthz-shell-v28';
+// v29 self-hosts Alpine.js (public/alpine.js, vendored from the alpinejs npm
+// package via `npm run vendor:alpine`) instead of loading it from the
+// cdn.jsdelivr.net CDN on every one of the 17 pages that use it -- that CDN
+// request was un-cacheable by this SW (cross-origin requests are left to the
+// browser's normal fetch, see the fetch handler below) and render-blocking,
+// so even an install with the rest of the shell served instantly from cache
+// still had to wait on a live network round-trip before Alpine's x-init
+// directives ran and the page became interactive. CSP's script-src no longer
+// allow-lists cdn.jsdelivr.net (src/index.ts and public/_headers) since
+// 'self' now covers it.
+const CACHE_NAME = 'wavelengthz-shell-v29';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -78,6 +88,7 @@ const APP_SHELL = [
   '/history.js',
   '/search.js',
   '/photos.js',
+  '/alpine.js',
   '/tailwind.css',
   '/manifest.json',
   '/onboarding',
