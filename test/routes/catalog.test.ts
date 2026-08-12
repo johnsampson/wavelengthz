@@ -3,6 +3,7 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
 import { insertTestUser } from '../helpers/createUser';
+import { processArtistTrackBackfillBatch, type ArtistTrackBackfillMessage } from '../../src/lib/artistTrackBackfill';
 import worker from '../../src/index';
 
 beforeAll(async () => {
@@ -228,16 +229,11 @@ describe('GET /api/artists/:id', () => {
       }));
     }
 
-    it('defaults to the server limit and reports hasMore when exactly that many tracks come back', async () => {
-      stubTrackSearch({ tracks: makeTracks(30) });
-      const cookie = await cookieFor('u1');
-      const req = new Request('http://localhost/api/artists/local-1', { headers: { Cookie: cookie } });
-      const res = await worker.fetch(req, env, {} as ExecutionContext);
-      const body = await res.json<any>();
-      expect(body.tracks).toHaveLength(30);
-      expect(body.hasMore).toBe(true);
-      vi.unstubAllGlobals();
-    });
+    // No ?limit= is the quick path now (see the "quick path" describe block
+    // below for the full behavior) -- these two just confirm the plain
+    // pagination contract (?limit= itself, hasMore near the ceiling) is
+    // unaffected, since that's still served by the original, unchanged
+    // fetchArtistTracksCached path.
 
     it('honors a higher ?limit=, returning more tracks than the server default', async () => {
       stubTrackSearch({ tracks: makeTracks(10) });
@@ -271,14 +267,15 @@ describe('GET /api/artists/:id', () => {
       vi.unstubAllGlobals();
     });
 
-    it('falls back to the server default for a non-numeric or non-positive ?limit=', async () => {
+    it('treats a non-numeric or non-positive ?limit= the same as no ?limit= (the quick path), not an error', async () => {
       stubTrackSearch({ tracks: makeTracks(30) });
       const cookie = await cookieFor('u1');
       for (const limit of ['abc', '0', '-5']) {
         const req = new Request(`http://localhost/api/artists/local-1?limit=${limit}`, { headers: { Cookie: cookie } });
         const res = await worker.fetch(req, env, {} as ExecutionContext);
+        expect(res.status).toBe(200);
         const body = await res.json<any>();
-        expect(body.tracks).toHaveLength(30); // the default, not an error
+        expect(body.tracks.length).toBeLessThanOrEqual(5); // QUICK_TRACK_LIMIT, not the 30-track error case
       }
       vi.unstubAllGlobals();
     });
@@ -401,8 +398,12 @@ describe('GET /api/artists/:id', () => {
       );
       const cookie = await cookieFor('u1');
 
+      // ?limit=10, not ?limit=5 -- 5 would coincidentally collide with
+      // QUICK_TRACK_LIMIT's own cache key (the no-?limit= request just below
+      // populates that one), which is a deliberate, separate optimization
+      // (see the "quick path" describe block), not what this test is about.
       await worker.fetch(new Request('http://localhost/api/artists/local-1', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
-      await worker.fetch(new Request('http://localhost/api/artists/local-1?limit=5', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+      await worker.fetch(new Request('http://localhost/api/artists/local-1?limit=10', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
 
       expect(getAlbumsCalls()).toBe(2); // different cache key per limit -- both are live fetches
       vi.unstubAllGlobals();
@@ -433,6 +434,139 @@ describe('GET /api/artists/:id', () => {
       const body = await res.json<any>();
       expect(body.tracks).toHaveLength(1);
       expect(getAlbumsCalls()).toBe(1);
+      vi.unstubAllGlobals();
+    });
+  });
+
+  describe('quick path on a first (no ?limit=) view of an uncached artist', () => {
+    function makeTracks(count: number) {
+      return Array.from({ length: count }, (_, i) => ({
+        id: `trk${i}`,
+        name: `Track ${i}`,
+        artists: [{ id: 'spotify-local-1', name: 'Local Artist' }],
+        album: { images: [] },
+        preview_url: null,
+      }));
+    }
+
+    // Same shape as stubTrackSearch above, plus a call counter -- needed
+    // here (not just stubTrackSearch) to prove the second, post-backfill
+    // view really is served from cache and not a second live fetch.
+    function stubTrackSearchCounting(tracks: any[]) {
+      let albumsCalls = 0;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo) => {
+          const url = input.toString();
+          if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+          if (url.includes('/artists/') && url.includes('/albums')) {
+            albumsCalls += 1;
+            return new Response(JSON.stringify({ items: tracks.length > 0 ? [{ id: 'album-1' }] : [] }), { status: 200 });
+          }
+          if (url.includes('/albums/album-1/tracks')) {
+            return new Response(JSON.stringify({ items: tracks.map((t) => ({ id: t.id })) }), { status: 200 });
+          }
+          const trackByIdMatch = url.match(/\/v1\/tracks\/([^/?]+)$/);
+          if (trackByIdMatch) {
+            const track = tracks.find((t) => t.id === trackByIdMatch[1]);
+            return track ? new Response(JSON.stringify(track), { status: 200 }) : new Response('not found', { status: 404 });
+          }
+          throw new Error(`unexpected ${url}`);
+        })
+      );
+      return () => albumsCalls;
+    }
+
+    function fakeBackfillBatch(messages: ArtistTrackBackfillMessage[]) {
+      const acked: ArtistTrackBackfillMessage[] = [];
+      const retried: ArtistTrackBackfillMessage[] = [];
+      const batchMessages = messages.map((body, i) => ({
+        id: `bm${i}`,
+        timestamp: new Date(),
+        body,
+        attempts: 1,
+        ack: () => acked.push(body),
+        retry: () => retried.push(body),
+      }));
+      return {
+        batch: { messages: batchMessages, queue: 'artist-track-backfill', metadata: {} as any, retryAll: () => {}, ackAll: () => {} },
+        acked,
+        retried,
+      };
+    }
+
+    it('returns a small track set immediately and reports hasMore: true, even though far fewer than the server default came back', async () => {
+      stubTrackSearch({ tracks: makeTracks(30) });
+      const cookie = await cookieFor('u1');
+      const req = new Request('http://localhost/api/artists/local-1', { headers: { Cookie: cookie } });
+
+      const res = await worker.fetch(req, env, {} as ExecutionContext);
+      const body = await res.json<any>();
+
+      expect(res.status).toBe(200);
+      expect(body.tracks.length).toBeLessThanOrEqual(5); // QUICK_TRACK_LIMIT
+      expect(body.tracks.length).toBeGreaterThan(0);
+      expect(body.hasMore).toBe(true);
+      vi.unstubAllGlobals();
+    });
+
+    it('reports hasMore: false for a genuinely empty artist (no albums at all), not a false-positive "Load more"', async () => {
+      stubTrackSearch({ tracks: [] });
+      const cookie = await cookieFor('u1');
+      const req = new Request('http://localhost/api/artists/local-1', { headers: { Cookie: cookie } });
+
+      const res = await worker.fetch(req, env, {} as ExecutionContext);
+      const body = await res.json<any>();
+
+      expect(body.tracks).toHaveLength(0);
+      expect(body.hasMore).toBe(false);
+      vi.unstubAllGlobals();
+    });
+
+    it('once the backfill queue consumer completes, a later no-?limit= view serves the full set instantly from cache, with no further live Spotify calls', async () => {
+      const getAlbumsCalls = stubTrackSearchCounting(makeTracks(30));
+      const cookie = await cookieFor('u1');
+
+      // First view: quick path, enqueues (but doesn't itself run) the backfill.
+      const firstRes = await worker.fetch(
+        new Request('http://localhost/api/artists/local-1', { headers: { Cookie: cookie } }),
+        env,
+        {} as ExecutionContext
+      );
+      const firstBody = await firstRes.json<any>();
+      expect(firstBody.tracks.length).toBeLessThanOrEqual(5);
+      const callsAfterQuickFetch = getAlbumsCalls();
+
+      // Simulate the queue actually delivering that message -- this is the
+      // same backfill job GET /api/artists/:id enqueued above, run directly
+      // rather than waiting on real queue infrastructure in a test.
+      const { batch, acked } = fakeBackfillBatch([{ artistId: 'local-1', spotifyArtistId: 'spotify-local-1', limit: 30 }]);
+      await processArtistTrackBackfillBatch(batch as any, env as any);
+      expect(acked).toHaveLength(1);
+
+      // Second view: full result now cached by the backfill, no live Spotify
+      // call needed at all.
+      const secondRes = await worker.fetch(
+        new Request('http://localhost/api/artists/local-1', { headers: { Cookie: cookie } }),
+        env,
+        {} as ExecutionContext
+      );
+      const secondBody = await secondRes.json<any>();
+
+      expect(secondBody.tracks).toHaveLength(30);
+      expect(secondBody.hasMore).toBe(true); // exactly ARTIST_PROFILE_TRACK_LIMIT came back
+      expect(getAlbumsCalls()).toBe(callsAfterQuickFetch + 1); // +1 for the backfill's own live fetch, nothing for the second view
+      vi.unstubAllGlobals();
+    });
+
+    it('the backfill consumer upserts every track it fetches, not just the quick handful', async () => {
+      stubTrackSearchCounting(makeTracks(10));
+      const { batch } = fakeBackfillBatch([{ artistId: 'local-1', spotifyArtistId: 'spotify-local-1', limit: 30 }]);
+
+      await processArtistTrackBackfillBatch(batch as any, env as any);
+
+      const rows = await env.DB.prepare('SELECT spotify_id FROM tracks WHERE artist_id = ?').bind('local-1').all<any>();
+      expect(rows.results.map((r: any) => r.spotify_id).sort()).toEqual(makeTracks(10).map((t) => t.id).sort());
       vi.unstubAllGlobals();
     });
   });

@@ -95,6 +95,32 @@ max_batch_timeout = 30
 max_retries = 3
 max_concurrency = 1
 
+[[queues.producers]]
+# Enqueued by GET /api/artists/:id (src/routes/catalog.ts) whenever a
+# first-time view (no ?limit=) has no cached full track list yet and falls
+# back to the quick path (fetchArtistTracksQuick, src/lib/spotify.ts) --
+# see src/lib/artistTrackBackfill.ts for why: that quick fetch deliberately
+# leaves most of the artist's discography unfetched, and this queue is what
+# completes it off the request path instead of synchronously, which is what
+# was tripping Spotify's own rate limit under real load (see fetchArtistTracks'
+# own comment in spotify.ts for the ~40-call fan-out this replaces on the hot
+# path).
+queue = "artist-track-backfill"
+binding = "ARTIST_TRACK_BACKFILL_QUEUE"
+
+[[queues.consumers]]
+queue = "artist-track-backfill"
+# max_concurrency = 1, and messages within a batch are processed one at a
+# time (processArtistTrackBackfillBatch) -- each individual backfill job
+# already fans out to ~40 Spotify calls (bounded by TRACK_FETCH_CONCURRENCY/
+# ALBUM_TRACKS_FETCH_CONCURRENCY = 5 concurrent at a time, src/lib/spotify.ts),
+# so running several different artists' backfills at once would just
+# reintroduce the same burst-size problem this whole feature exists to fix.
+max_batch_size = 5
+max_batch_timeout = 30
+max_retries = 3
+max_concurrency = 1
+
 [triggers]
 # "0 3 * * *": nightly purgeExpiredDeletions. "0 4 * * sun": weekly catalog
 # refresh -- Cloudflare's day-of-week is 1=Sunday..7=Saturday, NOT the usual
@@ -128,6 +154,17 @@ binding = "GENRE_ENRICHMENT_QUEUE"
 [[env.test.queues.consumers]]
 queue = "musicbrainz-genre-enrichment-test"
 max_batch_size = 10
+max_batch_timeout = 30
+max_retries = 3
+max_concurrency = 1
+
+[[env.test.queues.producers]]
+queue = "artist-track-backfill-test"
+binding = "ARTIST_TRACK_BACKFILL_QUEUE"
+
+[[env.test.queues.consumers]]
+queue = "artist-track-backfill-test"
+max_batch_size = 5
 max_batch_timeout = 30
 max_retries = 3
 max_concurrency = 1

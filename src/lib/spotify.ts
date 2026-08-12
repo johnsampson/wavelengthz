@@ -359,6 +359,31 @@ export async function fetchArtistTracks(token: string, artistId: string, limit: 
   return tracks.filter((track) => track.artists?.some((a: any) => a.id === artistId));
 }
 
+// Only the single most recent release, and only enough tracks from it to
+// show something -- not fetchArtistTracks' full ~10-album/~40-call fan-out.
+// Exists for GET /api/artists/:id's first (no ?limit=) view of a brand-new
+// artist specifically: the full fan-out was what tripped Spotify's own rate
+// limit under real load even after retries/concurrency-capping/caching
+// (see fetchArtistTracks' own comment above, and src/lib/artistTrackBackfill.ts,
+// which fetches the rest of this same artist's discography off the request
+// path once this quick response has already gone out).
+const QUICK_ALBUM_LIMIT = 1;
+export const QUICK_TRACK_LIMIT = 5;
+
+export async function fetchArtistTracksQuick(token: string, artistId: string, trackCount: number = QUICK_TRACK_LIMIT) {
+  const albumIds = await fetchArtistAlbumIds(token, artistId, QUICK_ALBUM_LIMIT);
+  if (albumIds.length === 0) return [];
+
+  // Sliced client-side after the call, not just trusted to the endpoint's
+  // own `?limit=` (which fetchAlbumTrackIds does pass) -- keeps this
+  // function's actual Spotify-call count deterministic regardless of how
+  // many tracks come back, the same defense-in-depth reasoning as
+  // fetchArtistTracks' own `.slice(0, limit)` above.
+  const trackIds = (await fetchAlbumTrackIds(token, albumIds[0], trackCount)).slice(0, trackCount);
+  const tracks = await fetchTracksByIds(token, trackIds);
+  return tracks.filter((track) => track.artists?.some((a: any) => a.id === artistId));
+}
+
 export async function searchArtistsByName(token: string, query: string, limit: number) {
   const res = await spotifyFetch(
     `https://api.spotify.com/v1/search?type=artist&limit=${limit}&q=${encodeURIComponent(query)}`,
