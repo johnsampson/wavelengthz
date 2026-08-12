@@ -129,6 +129,7 @@
     import { mountHeader, mountNav } from '/nav.js';
     import { requireAuth } from '/auth.js';
     import { checkPlayerAvailability, playTrack, pausePlayback, resumePlayback, onStateChange } from '/wavelengthzPlayer.js';
+    import { showErrorToast } from '/toast.js';
     mountHeader();
     mountNav();
 
@@ -214,7 +215,6 @@
         async loadMoreTracks() {
           if (this.loadingMore || !this.hasMoreTracks) return;
           this.loadingMore = true;
-          this.error = null;
           const nextLimit = this.trackLimit + TRACKS_PAGE_SIZE;
           try {
             const res = await api.artistProfile(this.artistId, nextLimit);
@@ -222,7 +222,7 @@
             this.tracks = res.tracks;
             this.hasMoreTracks = res.hasMore;
           } catch (e) {
-            this.error = 'Could not load more songs. Please try again.';
+            showErrorToast('Could not load more songs. Please try again.');
           } finally {
             this.loadingMore = false;
           }
@@ -250,14 +250,13 @@
         },
 
         async swipeTrack(track, direction) {
-          this.error = null;
           const previous = track.direction;
           track.direction = direction; // optimistic
           try {
             await api.swipe('music', { item_type: 'track', item_id: track.id, direction });
           } catch (e) {
             track.direction = previous;
-            this.error = 'Could not save that. Please try again.';
+            showErrorToast('Could not save that. Please try again.');
           }
         },
       };

@@ -63,7 +63,6 @@
 
       <template x-if="!phone.met">
         <div class="mt-2 flex flex-col gap-3">
-          <p x-show="phoneError" x-text="phoneError" class="text-sm text-red-400" role="alert"></p>
           <p x-show="phoneInfo" x-text="phoneInfo" class="text-sm text-brand-400"></p>
 
           <form x-show="phoneStep === 'entry'" class="flex flex-col gap-2" @submit.prevent="sendCode()">

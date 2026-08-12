@@ -52,6 +52,7 @@
     import { api } from '/app.js';
     import { mountHeader, mountNav } from '/nav.js';
     import { requireAuth } from '/auth.js';
+    import { showErrorToast } from '/toast.js';
     mountHeader();
     mountNav();
 
@@ -88,7 +89,7 @@
             this.showCreate = false;
             await this.load();
           } catch (e) {
-            this.error = 'Could not create that group. Please try again.';
+            showErrorToast('Could not create that group. Please try again.');
           }
         },
 
@@ -99,11 +100,11 @@
             window.location.href = `/group?id=${g.id}`;
           } catch (e) {
             if (e.status === 403 && e.body?.error === 'group_full') {
-              this.error = 'That group is full.';
+              showErrorToast('That group is full.');
             } else if (e.status === 403 && e.body?.error === 'blocked') {
-              this.error = 'Could not join that group.';
+              showErrorToast('Could not join that group.');
             } else {
-              this.error = 'Could not join that group. Please try again.';
+              showErrorToast('Could not join that group. Please try again.');
             }
           }
         },

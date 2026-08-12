@@ -1,5 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createHistoryApp, PAGE_SIZE } from '../../public/history.js';
+import { showErrorToast } from '../../public/toast.js';
+
+vi.mock('../../public/toast.js', () => ({ showErrorToast: vi.fn() }));
+
+beforeEach(() => {
+  vi.mocked(showErrorToast).mockClear();
+});
 
 function stubSwipeHistoryPages(pages: Record<string, any[]>) {
   const calls: string[] = [];
@@ -138,6 +145,67 @@ describe('history page pagination', () => {
     expect(app.swipes).toHaveLength(2);
     expect(calls.some((c) => c.startsWith('/api/swipes/music?') && c.includes('item_type=track'))).toBe(true);
   });
+
+  it('a direct load() failure (the initial page-mount call) sets the inline error, not a toast', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
+    const app = createHistoryApp();
+
+    await app.load();
+
+    expect(app.error).toBeTruthy();
+    expect(showErrorToast).not.toHaveBeenCalled();
+  });
+
+  it('a load failure triggered by switching tabs growls a toast, not the inline error', async () => {
+    stubSwipeHistoryPages({ 'people:0': page(2, 0) });
+    const app = createHistoryApp();
+    await app.load();
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
+    await app.setMode('artist');
+
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('swipe history'));
+    expect(app.error).toBeNull();
+  });
+
+  it('a load failure triggered by paging growls a toast, not the inline error', async () => {
+    stubSwipeHistoryPages({ 'people:0': page(PAGE_SIZE, 0) });
+    const app = createHistoryApp();
+    await app.load();
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
+    await app.next();
+
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('swipe history'));
+    expect(app.error).toBeNull();
+  });
+
+  it('toggle() growls an error toast and leaves the direction unchanged on failure', async () => {
+    stubSwipeHistoryPages({ 'people:0': page(1, 0) });
+    const app = createHistoryApp();
+    await app.load();
+    const swipe = app.swipes[0] as any;
+    const originalDirection = swipe.direction;
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
+    await app.toggle(swipe);
+
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('update that swipe'));
+    expect(swipe.direction).toBe(originalDirection);
+  });
+
+  it('toggle() flips the direction on success', async () => {
+    const calls = stubSwipeHistoryPages({ 'people:0': page(1, 0) });
+    const app = createHistoryApp();
+    await app.load();
+    const swipe = app.swipes[0] as any;
+    expect(swipe.direction).toBe('right');
+
+    await app.toggle(swipe);
+
+    expect(swipe.direction).toBe('left');
+    expect(calls.some((c) => c.includes(`/api/swipes/people/${swipe.id}`))).toBe(true);
+  });
 });
 
 describe('history page direction filter', () => {
@@ -223,7 +291,7 @@ describe('history page blocked view', () => {
     expect(app.swipes.map((s: any) => s.id)).toEqual(['u3']);
   });
 
-  it('surfaces an error and keeps the row when unblock fails', async () => {
+  it('growls an error toast and keeps the row when unblock fails', async () => {
     const calls = stubBlocks([{ userId: 'u2', displayName: 'Blocked User' }]);
     vi.stubGlobal(
       'fetch',
@@ -238,7 +306,7 @@ describe('history page blocked view', () => {
 
     await app.unblock(app.swipes[0]);
 
-    expect(app.error).toBeTruthy();
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('unblock'));
     expect(app.swipes).toHaveLength(1);
   });
 

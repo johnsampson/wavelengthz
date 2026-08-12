@@ -118,7 +118,6 @@
           :disabled="photos.length >= maxPhotos"
         />
       </label>
-      <p x-show="photoError" x-text="photoError" class="text-sm text-red-400" role="alert"></p>
       <div class="grid grid-cols-4 gap-2">
         <template x-for="photo in photos" :key="photo.photoId">
           <div class="relative">
@@ -141,6 +140,7 @@
     import { api, INTENT_OPTIONS } from '/app.js';
     import { requireAuth } from '/auth.js';
     import { MAX_PHOTOS, uploadPhotoFile } from '/photos.js';
+    import { showErrorToast } from '/toast.js';
 
     window.onboardingApp = function () {
       return {
@@ -161,7 +161,6 @@
         photos: [],
         maxPhotos: MAX_PHOTOS,
         error: null,
-        photoError: null,
 
         async init() {
           await requireAuth();
@@ -184,9 +183,8 @@
           const file = event.target.files[0];
           event.target.value = '';
           if (!file) return;
-          this.photoError = null;
           if (this.photos.length >= this.maxPhotos) {
-            this.photoError = `You can upload up to ${this.maxPhotos} photos.`;
+            showErrorToast(`You can upload up to ${this.maxPhotos} photos.`);
             return;
           }
           try {
@@ -194,17 +192,16 @@
             this.photos.push(uploaded);
           } catch (e) {
             console.error('Photo upload failed:', e);
-            this.photoError = 'Could not upload that photo. Please try again.';
+            showErrorToast('Could not upload that photo. Please try again.');
           }
         },
 
         async removePhoto(photoId) {
-          this.photoError = null;
           try {
             await api.deletePhoto(photoId);
             this.photos = this.photos.filter((p) => p.photoId !== photoId);
           } catch (e) {
-            this.photoError = 'Could not remove that photo. Please try again.';
+            showErrorToast('Could not remove that photo. Please try again.');
           }
         },
 

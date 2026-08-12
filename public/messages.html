@@ -42,6 +42,7 @@
     import { api } from '/app.js';
     import { mountHeader, mountNav } from '/nav.js';
     import { requireAuth } from '/auth.js';
+    import { showErrorToast } from '/toast.js';
     mountHeader();
     mountNav();
 
@@ -184,7 +185,7 @@
             await api.recallMessage(this.matchId, message.id);
             message.recalledAt = Date.now();
           } catch (e) {
-            this.error = 'Could not recall that message. Please try again.';
+            showErrorToast('Could not recall that message. Please try again.');
           }
         },
         async send() {
@@ -197,7 +198,7 @@
           // below is still the authoritative check either way. Must stay in
           // sync with src/lib/messageFilter.ts's ALLOWED_CHARS_RE.
           if (!/^[-A-Za-z0-9 .,!?']*$/.test(trimmed)) {
-            this.error = 'Messages can only contain letters, numbers, spaces, and basic punctuation ( . , ! ? \' ).';
+            showErrorToast('Messages can only contain letters, numbers, spaces, and basic punctuation ( . , ! ? \' ).');
             return;
           }
           try {
@@ -208,11 +209,11 @@
             this.$nextTick(() => this.scrollToBottom());
           } catch (e) {
             if (e.status === 400 && e.body?.error === 'invalid_message') {
-              this.error = 'That message isn\'t allowed. Please rephrase it.';
+              showErrorToast('That message isn\'t allowed. Please rephrase it.');
             } else if (e.status === 403 && e.body?.error === 'profile_incomplete') {
-              this.error = 'Finish setting up messaging in Settings → Messaging before sending.';
+              showErrorToast('Finish setting up messaging in Settings → Messaging before sending.');
             } else {
-              this.error = 'Could not send that message. Please try again.';
+              showErrorToast('Could not send that message. Please try again.');
             }
           }
         },

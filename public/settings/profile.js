@@ -1,5 +1,6 @@
 import { api } from '../app.js';
 import { MAX_PHOTOS, uploadPhotoFile } from '../photos.js';
+import { showErrorToast } from '../toast.js';
 
 export function createProfileApp() {
   return {
@@ -7,7 +8,6 @@ export function createProfileApp() {
     bio: '',
     photos: [],
     maxPhotos: MAX_PHOTOS,
-    photoError: null,
     confirmingDelete: false,
     error: null,
     saved: false,
@@ -31,14 +31,13 @@ export function createProfileApp() {
     },
 
     async save() {
-      this.error = null;
       this.saved = false;
       if (!this.displayName.trim()) {
-        this.error = 'Please enter a display name.';
+        showErrorToast('Please enter a display name.');
         return;
       }
       if (!/^[-A-Za-z0-9 ]+$/.test(this.displayName.trim())) {
-        this.error = 'Display name can only contain letters, numbers, dashes, and spaces.';
+        showErrorToast('Display name can only contain letters, numbers, dashes, and spaces.');
         return;
       }
       try {
@@ -70,11 +69,11 @@ export function createProfileApp() {
         this.saved = true;
       } catch (e) {
         if (e.status === 400 && e.body?.error === 'invalid_intent') {
-          this.error = "Please choose what you're interested in under Settings → Preferences first.";
+          showErrorToast("Please choose what you're interested in under Settings → Preferences first.");
         } else if (e.status === 400 && e.body?.error === 'invalid_bio') {
-          this.error = 'Your bio is too long, or contains language that isn\'t allowed.';
+          showErrorToast('Your bio is too long, or contains language that isn\'t allowed.');
         } else {
-          this.error = 'Could not save your settings. Please try again.';
+          showErrorToast('Could not save your settings. Please try again.');
         }
       }
     },
@@ -83,9 +82,8 @@ export function createProfileApp() {
       const file = event.target.files[0];
       event.target.value = '';
       if (!file) return;
-      this.photoError = null;
       if (this.photos.length >= this.maxPhotos) {
-        this.photoError = `You can upload up to ${this.maxPhotos} photos.`;
+        showErrorToast(`You can upload up to ${this.maxPhotos} photos.`);
         return;
       }
       try {
@@ -93,27 +91,25 @@ export function createProfileApp() {
         this.photos.push(uploaded);
       } catch (e) {
         console.error('Photo upload failed:', e);
-        this.photoError = 'Could not upload that photo. Please try again.';
+        showErrorToast('Could not upload that photo. Please try again.');
       }
     },
 
     async removePhoto(photoId) {
-      this.photoError = null;
       try {
         await api.deletePhoto(photoId);
         this.photos = this.photos.filter((p) => p.photoId !== photoId);
       } catch (e) {
-        this.photoError = 'Could not remove that photo. Please try again.';
+        showErrorToast('Could not remove that photo. Please try again.');
       }
     },
 
     async deleteAccount() {
-      this.error = null;
       try {
         await api.deleteAccount();
         window.location.href = '/';
       } catch (e) {
-        this.error = 'Could not delete your account. Please try again.';
+        showErrorToast('Could not delete your account. Please try again.');
       }
     },
   };

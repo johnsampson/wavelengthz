@@ -57,8 +57,13 @@
 // opaque "Could not load this artist" for a Spotify-rate-limit failure as
 // every other error -- it now shows a specific "Spotify's a little busy"
 // message for that case (src/index.ts's new SpotifyRateLimitError -> 503
-// translation).
-const CACHE_NAME = 'wavelengthz-shell-v26';
+// translation). v27 replaces nearly every page's scroll-prone inline
+// "<p x-show=error>" action-failure banner with a growl toast
+// (public/toast.js's new error variant) -- touches most precached HTML/JS
+// files in this list (index, artist, match, messages, group, groups,
+// profile, onboarding, history.js, settings.js, and every settings/*.js
+// sub-page).
+const CACHE_NAME = 'wavelengthz-shell-v27';
 const APP_SHELL = [
   '/',
   '/app.js',

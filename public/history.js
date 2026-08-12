@@ -1,5 +1,6 @@
 import { api } from './app.js';
 import { requireAuth } from './auth.js';
+import { showErrorToast } from './toast.js';
 
 // Extracted from history.html's inline script so the pagination logic below
 // is directly testable (same pattern as settings.js). The page just does
@@ -38,16 +39,24 @@ export function createHistoryApp() {
       // tab with it still selected would silently try (and fail) to load
       // blocked-users data for a music mode.
       if (mode !== 'people' && this.directionFilter === 'blocked') this.directionFilter = null;
-      await this.load();
+      await this.load({ isReload: true });
     },
 
     async setDirectionFilter(direction) {
       this.directionFilter = direction;
       this.offset = 0;
-      await this.load();
+      await this.load({ isReload: true });
     },
 
-    async load() {
+    // isReload distinguishes the very first, page-mount call (init(), below
+    // -- a failure here leaves the page with nothing else to show, so it
+    // gets a persistent inline banner) from every later action-triggered
+    // call (switching tabs/filters, paging) -- a failure there leaves the
+    // previous page's data still visible and functional, so a growl toast
+    // (public/toast.js) is the better fit: it doesn't block anything, and
+    // auto-dismisses instead of lingering until the user notices and
+    // manually clears it.
+    async load({ isReload = false } = {}) {
       this.error = null;
       try {
         if (this.directionFilter === 'blocked') {
@@ -60,7 +69,9 @@ export function createHistoryApp() {
           this.hasNext = res.swipes.length === PAGE_SIZE;
         }
       } catch (e) {
-        this.error = 'Could not load your swipe history. Please try again.';
+        const message = 'Could not load your swipe history. Please try again.';
+        if (isReload) showErrorToast(message);
+        else this.error = message;
       }
     },
 
@@ -68,36 +79,34 @@ export function createHistoryApp() {
       if (!this.hasNext) return;
       this.offset += PAGE_SIZE;
       scrollToTop();
-      await this.load();
+      await this.load({ isReload: true });
     },
 
     async prev() {
       if (this.offset === 0) return;
       this.offset = Math.max(0, this.offset - PAGE_SIZE);
       scrollToTop();
-      await this.load();
+      await this.load({ isReload: true });
     },
 
     async toggle(swipe) {
-      this.error = null;
       const newDirection = swipe.direction === 'right' ? 'left' : 'right';
       try {
         await api.updateSwipe(this.mode, swipe.id, newDirection);
         swipe.direction = newDirection;
       } catch (e) {
-        this.error = 'Could not update that swipe. Please try again.';
+        showErrorToast('Could not update that swipe. Please try again.');
       }
     },
 
     // `swipe.id` here is the blocked user's id (see load()'s mapping above),
     // not a people_swipes row id -- unblock() acts on the user, not a swipe.
     async unblock(swipe) {
-      this.error = null;
       try {
         await api.unblock(swipe.id);
         this.swipes = this.swipes.filter((s) => s.id !== swipe.id);
       } catch (e) {
-        this.error = 'Could not unblock that person. Please try again.';
+        showErrorToast('Could not unblock that person. Please try again.');
       }
     },
   };

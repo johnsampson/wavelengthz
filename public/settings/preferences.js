@@ -1,4 +1,5 @@
 import { api, INTENT_OPTIONS } from '../app.js';
+import { showErrorToast } from '../toast.js';
 
 const LOCATION_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_AGE = 18;
@@ -100,7 +101,7 @@ export function createPreferencesApp() {
           this.locationLabel = 'Current location';
         },
         () => {
-          this.error = 'Location permission denied.';
+          showErrorToast('Location permission denied.');
         }
       );
     },
@@ -116,14 +117,13 @@ export function createPreferencesApp() {
     },
 
     async save() {
-      this.error = null;
       this.saved = false;
       if (!this.seeking) {
-        this.error = "Please select who you're seeking.";
+        showErrorToast("Please select who you're seeking.");
         return;
       }
       if (!this.intent) {
-        this.error = "Please select what you're interested in.";
+        showErrorToast("Please select what you're interested in.");
         return;
       }
       try {
@@ -150,22 +150,21 @@ export function createPreferencesApp() {
         if (e.status === 429 && e.body?.error === 'location_change_cooldown') {
           this.locationUpdatedAt = Date.now() - LOCATION_COOLDOWN_MS + e.body.retryAfterMs;
           const days = this.locationCooldownRemainingDays;
-          this.error = `You can only change your location once every 7 days. Try again in ${days} day${days === 1 ? '' : 's'}.`;
+          showErrorToast(`You can only change your location once every 7 days. Try again in ${days} day${days === 1 ? '' : 's'}.`);
         } else if (e.status === 400 && e.body?.error === 'age_range_excludes_self') {
-          this.error = 'Your age range must include your own age.';
+          showErrorToast('Your age range must include your own age.');
         } else {
-          this.error = 'Could not save your settings. Please try again.';
+          showErrorToast('Could not save your settings. Please try again.');
         }
       }
     },
 
     async unblockGenre(genre) {
-      this.error = null;
       try {
         await api.unblockGenre(genre);
         this.blockedGenres = this.blockedGenres.filter((g) => g !== genre);
       } catch (e) {
-        this.error = 'Could not unblock that genre. Please try again.';
+        showErrorToast('Could not unblock that genre. Please try again.');
       }
     },
   };
