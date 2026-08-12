@@ -109,14 +109,20 @@ async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (it
 // Wavelengthz Player (public/wavelengthzPlayer.js, src/routes/player.ts) --
 // the Spotify Web Playback SDK, which plays a full track in-page via a
 // browser-side Spotify Connect device instead of the read-only
-// open.spotify.com/embed iframe (public/artist.html et al). Adding scopes
-// here only affects *new* consents (this app's own registered redirect_uri
-// going forward) -- every already-logged-in user's existing token keeps
-// whatever scope they originally consented to until their next full
-// /login, since a refresh can't silently grant scopes never approved.
+// open.spotify.com/embed iframe (public/artist.html et al). user-read-private
+// is required for a different reason: Spotify's /v1/me response only
+// includes the `product` field (fetchSpotifyProfile below, stored as
+// music_source_tokens.product_tier) when this scope was granted -- without
+// it `product` is silently omitted, not "free", so player.ts's premium gate
+// fails for every account regardless of actual tier. Adding scopes here
+// only affects *new* consents (this app's own registered redirect_uri going
+// forward) -- every already-logged-in user's existing token keeps whatever
+// scope they originally consented to until their next full /login, since a
+// refresh can't silently grant scopes never approved.
 const SCOPES = [
   'user-top-read',
   'user-read-email',
+  'user-read-private',
   'streaming',
   'user-read-playback-state',
   'user-modify-playback-state',
@@ -194,6 +200,9 @@ export async function fetchSpotifyProfile(
   // occasionally "open" (a legacy ad-supported tier in some regions,
   // functionally equivalent to free). Refreshed on every login (not just
   // once) since it can genuinely change over time as a user upgrades/downgrades.
+  // Spotify omits this field entirely unless the access token carries the
+  // user-read-private scope (see SCOPES above) -- without it, this comes
+  // back undefined even for a Premium account.
   return res.json();
 }
 

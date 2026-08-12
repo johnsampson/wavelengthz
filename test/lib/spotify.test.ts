@@ -16,6 +16,10 @@ describe('buildAuthUrl', () => {
     expect(url.searchParams.get('state')).toBe('state-abc');
     expect(url.searchParams.get('scope')).toContain('user-top-read');
     expect(url.searchParams.get('scope')).toContain('user-read-email');
+    // Required for Spotify's /v1/me response to include `product` at all --
+    // without it, player.ts's premium gate silently fails for every account
+    // regardless of actual tier. Regression coverage for that bug.
+    expect(url.searchParams.get('scope')).toContain('user-read-private');
   });
 });
 
