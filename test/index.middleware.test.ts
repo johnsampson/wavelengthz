@@ -52,6 +52,64 @@ describe('global middleware', () => {
     vi.unstubAllGlobals();
   });
 
+  it('rate-limits GET .../messages polling (matches and groups) in its own bucket', async () => {
+    const makePollReq = (path: string) => new Request(`http://localhost${path}`, { headers: { 'CF-Connecting-IP': '6.6.6.1' } });
+
+    let lastStatus = 0;
+    for (let i = 0; i < 61; i++) {
+      const res = await worker.fetch(makePollReq('/api/matches/m1/messages'), env, {} as ExecutionContext);
+      lastStatus = res.status;
+    }
+    expect(lastStatus).toBe(429);
+
+    const groupRes = await worker.fetch(makePollReq('/api/groups/g1/messages'), env, {} as ExecutionContext);
+    // Same bucket (keyed by IP, not by conversation) -- already exhausted by
+    // the matches polling above.
+    expect(groupRes.status).toBe(429);
+  });
+
+  it('does not let message/group polling starve unrelated /api/ traffic sharing the same IP', async () => {
+    // Regression: GET .../messages used to share the general 120/min bucket
+    // with every other /api/ call. public/messages.html and public/group.html
+    // both poll every 3s while visible (20 req/min per open tab) -- a couple
+    // of open chat tabs alone permanently saturated that shared budget, so
+    // an unrelated action (loading an artist, etc.) got 429'd right along
+    // with it and never recovered, since the polling never stopped refilling
+    // the bucket faster than it could empty.
+    const ip = '6.6.6.2';
+    const pollReq = () => new Request('http://localhost/api/matches/m1/messages', { headers: { 'CF-Connecting-IP': ip } });
+
+    // Well past even the OLD shared general budget (120/min), to prove this
+    // traffic no longer counts against it at all.
+    for (let i = 0; i < 150; i++) {
+      await worker.fetch(pollReq(), env, {} as ExecutionContext);
+    }
+
+    const unrelatedReq = new Request('http://localhost/api/me', { headers: { 'CF-Connecting-IP': ip } });
+    const res = await worker.fetch(unrelatedReq, env, {} as ExecutionContext);
+    expect(res.status).not.toBe(429);
+  });
+
+  it('does not exempt POSTing a message (sending, not polling) from the general bucket', async () => {
+    // isPollPath is GET-only -- guards against the message-*send* endpoint
+    // (same path, POST) accidentally getting the loose polling budget
+    // instead of general's tighter spam protection.
+    const ip = '6.6.6.3';
+    const sendReq = () =>
+      new Request('http://localhost/api/matches/m1/messages', {
+        method: 'POST',
+        headers: { 'CF-Connecting-IP': ip, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: 'hi' }),
+      });
+
+    let lastStatus = 0;
+    for (let i = 0; i < 121; i++) {
+      const res = await worker.fetch(sendReq(), env, {} as ExecutionContext);
+      lastStatus = res.status;
+    }
+    expect(lastStatus).toBe(429);
+  });
+
   it('reports a KV failure during rate limiting to Sentry, but fails open instead of 500ing the request', async () => {
     // A KV outage during a rate-limit check used to propagate as an
     // unhandled exception -- at one point invisibly (before Sentry
