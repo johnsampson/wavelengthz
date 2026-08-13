@@ -3,6 +3,20 @@ main = "src/index.ts"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Powers `wrangler tail` / the dashboard's Logs > Live view against the
+# deployed Worker -- src/lib/spotify.ts's spotifyFetch logs a structured
+# `spotify_call` entry for every outbound Spotify request (web, the backfill
+# queue consumer, the deck top-up job, the admin seed script all funnel
+# through it), filterable via `wrangler tail --search spotify_call`.
+# head_sampling_rate=1 captures 100% of invocations -- appropriate while
+# actively debugging Spotify rate-limit collisions; dial back if log volume
+# becomes a cost/noise concern once things stabilize. Retention is 3 days on
+# the free plan / 7 days on paid, so this is a live-debugging tool, not an
+# archive.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [[d1_databases]]
 binding = "DB"
 database_name = "wavelengthz-db"

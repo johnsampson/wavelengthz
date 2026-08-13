@@ -790,6 +790,69 @@ describe('spotifyFetch (retry-on-429, via fetchArtistById)', () => {
   });
 });
 
+describe('spotifyFetch structured call logging (via fetchArtistById)', () => {
+  it('logs a structured spotify_call entry for a successful call', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ id: 'artist-1', name: 'Real Artist' }), { status: 200 }))
+    );
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await fetchArtistById('token', 'artist-1');
+
+    const call = logSpy.mock.calls.find(([entry]) => entry?.type === 'spotify_call');
+    expect(call).toBeDefined();
+    const [entry] = call!;
+    expect(entry.url).toBe('https://api.spotify.com/v1/artists/artist-1');
+    expect(entry.method).toBe('GET');
+    expect(entry.status).toBe(200);
+    expect(entry.attempts).toBe(1);
+    expect(entry.rateLimited).toBe(false);
+    expect(typeof entry.durationMs).toBe('number');
+    logSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it('logs attempts > 1 and rateLimited: true when the call retries through a 429 before succeeding', async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) return new Response('rate limited', { status: 429, headers: { 'Retry-After': '0.001' } });
+        return new Response(JSON.stringify({ id: 'artist-1', name: 'Real Artist' }), { status: 200 });
+      })
+    );
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await fetchArtistById('token', 'artist-1');
+
+    const [entry] = logSpy.mock.calls.find(([e]) => e?.type === 'spotify_call')!;
+    expect(entry.attempts).toBe(2);
+    expect(entry.rateLimited).toBe(true);
+    expect(entry.status).toBe(200);
+    logSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it('still logs the call, with the final 429 status, when every retry is exhausted', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('rate limited', { status: 429, headers: { 'Retry-After': '0.001' } }))
+    );
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await expect(fetchArtistById('token', 'artist-1')).rejects.toThrow(SpotifyRateLimitError);
+
+    const [entry] = logSpy.mock.calls.find(([e]) => e?.type === 'spotify_call')!;
+    expect(entry.status).toBe(429);
+    expect(entry.attempts).toBe(4); // 1 initial + 3 retries
+    expect(entry.rateLimited).toBe(true);
+    logSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+});
+
 // A separate block from the one above (which exercises retry behavior via
 // fetchArtistById, a function that never gets a kv param) -- kv-forwarding
 // and cooldown-marking are new behavior only reachable through the

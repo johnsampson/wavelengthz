@@ -90,6 +90,30 @@ describe('processArtistTrackBackfillBatch', () => {
     expect(cached?.map((t: any) => t.id)).toEqual(['t1', 't2']);
   });
 
+  it('logs a spotify_call_context marker for this artist before its Spotify calls, so a live log tail can attribute the burst to this queue job', async () => {
+    await insertArtist('a1', 'sp1', { indie: true });
+    stubSpotify([{ id: 't1', name: 'Track One' }]);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { batch } = fakeBatch([{ artistId: 'a1', spotifyArtistId: 'sp1', limit: 30 }]);
+
+    await processArtistTrackBackfillBatch(batch as any, env as any);
+
+    const marker = logSpy.mock.calls.find(([entry]) => entry?.type === 'spotify_call_context');
+    expect(marker).toBeDefined();
+    expect(marker![0]).toEqual({
+      type: 'spotify_call_context',
+      context: 'artist-track-backfill',
+      spotifyArtistId: 'sp1',
+    });
+    // The marker must actually precede this artist's Spotify calls (not just
+    // exist somewhere in the log), so a human reading a live tail sees it
+    // immediately above the burst it explains.
+    const markerIndex = logSpy.mock.calls.findIndex(([entry]) => entry?.type === 'spotify_call_context');
+    const firstCallIndex = logSpy.mock.calls.findIndex(([entry]) => entry?.type === 'spotify_call');
+    expect(markerIndex).toBeLessThan(firstCallIndex);
+    logSpy.mockRestore();
+  });
+
   it('records the artist\'s own genres against each newly-inserted track', async () => {
     await insertArtist('a1', 'sp1', { indie: true, rock: true });
     stubSpotify([{ id: 't1', name: 'Track One' }]);
