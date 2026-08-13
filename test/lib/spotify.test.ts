@@ -809,6 +809,7 @@ describe('spotifyFetch structured call logging (via fetchArtistById)', () => {
     expect(entry.attempts).toBe(1);
     expect(entry.rateLimited).toBe(false);
     expect(typeof entry.durationMs).toBe('number');
+    expect(entry.retryAfterSeconds).toEqual([]); // no 429 ever seen
     logSpy.mockRestore();
     vi.unstubAllGlobals();
   });
@@ -831,9 +832,32 @@ describe('spotifyFetch structured call logging (via fetchArtistById)', () => {
     expect(entry.attempts).toBe(2);
     expect(entry.rateLimited).toBe(true);
     expect(entry.status).toBe(200);
+    // Only one 429 was actually seen (the retry succeeded), so the array
+    // has exactly one entry -- the real value Spotify sent.
+    expect(entry.retryAfterSeconds).toEqual([0.001]);
     logSpy.mockRestore();
     vi.unstubAllGlobals();
   });
+
+  it('records null in retryAfterSeconds when a 429 arrives with no Retry-After header at all', async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) return new Response('rate limited', { status: 429 });
+        return new Response(JSON.stringify({ id: 'artist-1', name: 'Real Artist' }), { status: 200 });
+      })
+    );
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await fetchArtistById('token', 'artist-1');
+
+    const [entry] = logSpy.mock.calls.find(([e]) => e?.type === 'spotify_call')!;
+    expect(entry.retryAfterSeconds).toEqual([null]);
+    logSpy.mockRestore();
+    vi.unstubAllGlobals();
+  }, 10000);
 
   it('still logs the call, with the final 429 status, when every retry is exhausted', async () => {
     vi.stubGlobal(
@@ -848,6 +872,11 @@ describe('spotifyFetch structured call logging (via fetchArtistById)', () => {
     expect(entry.status).toBe(429);
     expect(entry.attempts).toBe(4); // 1 initial + 3 retries
     expect(entry.rateLimited).toBe(true);
+    // Every one of the 4 attempts (1 initial + 3 retries) got a 429 back
+    // with the same Retry-After value -- this is the exact evidence needed
+    // to tell whether SPOTIFY_RETRY_MAX_DELAY_MS is truncating a real,
+    // larger value Spotify actually asked for.
+    expect(entry.retryAfterSeconds).toEqual([0.001, 0.001, 0.001, 0.001]);
     logSpy.mockRestore();
     vi.unstubAllGlobals();
   });

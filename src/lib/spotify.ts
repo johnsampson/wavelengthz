@@ -72,6 +72,16 @@ const SPOTIFY_MAX_RETRIES = 3;
 const SPOTIFY_RETRY_MAX_DELAY_MS = 4000;
 const SPOTIFY_RETRY_DEFAULT_DELAY_MS = 1000;
 
+// A real Spotify-specified value (Retry-After present and valid) vs. the
+// absence of one -- null, not NaN/0, so it's unambiguous in the structured
+// log below (spotifyFetch's own comment) and in markSpotifyCooldown's
+// undefined-means-use-the-default contract.
+function parseRetryAfterSeconds(res: Response): number | null {
+  const header = res.headers.get('Retry-After');
+  const seconds = header ? Number(header) : NaN;
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+}
+
 async function spotifyFetch(url: string, options: RequestInit = {}, kv?: KVNamespace): Promise<Response> {
   const startedAt = Date.now();
   let res = await fetch(url, options);
@@ -81,6 +91,12 @@ async function spotifyFetch(url: string, options: RequestInit = {}, kv?: KVNames
   // this single check at the top fully captures "was a 429 seen at all"
   // across the whole call, retries included.
   const rateLimited = res.status === 429;
+  // One entry per 429 response actually seen (up to SPOTIFY_MAX_RETRIES + 1)
+  // -- logged verbatim below so a real, larger Retry-After value Spotify
+  // sends can be told apart from SPOTIFY_RETRY_MAX_DELAY_MS silently
+  // truncating it, instead of inferring that from total call duration.
+  const retryAfterSecondsSeen: Array<number | null> = [];
+  if (rateLimited) retryAfterSecondsSeen.push(parseRetryAfterSeconds(res));
 
   // Reported the moment ANY call actually sees a 429 -- the earliest, most
   // actionable signal that Spotify is currently constrained -- before this
@@ -89,23 +105,19 @@ async function spotifyFetch(url: string, options: RequestInit = {}, kv?: KVNames
   // (login/profile/top-tracks/single-item search) don't pass one and keep
   // their exact pre-existing behavior.
   if (res.status === 429 && kv) {
-    const retryAfterHeader = res.headers.get('Retry-After');
-    const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : NaN;
-    await markSpotifyCooldown(kv, retryAfterSeconds);
+    await markSpotifyCooldown(kv, retryAfterSecondsSeen[0] ?? undefined);
   }
 
   for (let attempt = 0; attempt < SPOTIFY_MAX_RETRIES && res.status === 429; attempt++) {
-    const retryAfterHeader = res.headers.get('Retry-After');
-    const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : NaN;
+    const retryAfterSeconds = retryAfterSecondsSeen[retryAfterSecondsSeen.length - 1];
     const delayMs = Math.min(
-      Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
-        ? retryAfterSeconds * 1000
-        : SPOTIFY_RETRY_DEFAULT_DELAY_MS * 2 ** attempt,
+      retryAfterSeconds != null ? retryAfterSeconds * 1000 : SPOTIFY_RETRY_DEFAULT_DELAY_MS * 2 ** attempt,
       SPOTIFY_RETRY_MAX_DELAY_MS
     );
     await new Promise((resolve) => setTimeout(resolve, delayMs));
     res = await fetch(url, options);
     attempts += 1;
+    if (res.status === 429) retryAfterSecondsSeen.push(parseRetryAfterSeconds(res));
   }
 
   // A structured object (not a template string) so Cloudflare Workers Logs
@@ -124,6 +136,7 @@ async function spotifyFetch(url: string, options: RequestInit = {}, kv?: KVNames
     attempts,
     durationMs: Date.now() - startedAt,
     rateLimited,
+    retryAfterSeconds: retryAfterSecondsSeen,
   });
 
   if (res.status === 429) {
