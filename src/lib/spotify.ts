@@ -1,4 +1,4 @@
-import { markSpotifyCooldown } from './spotifyThrottle';
+import { markSpotifyCooldown, isSpotifyCoolingDown } from './spotifyThrottle';
 
 export interface SpotifyTokenResponse {
   access_token: string;
@@ -388,7 +388,55 @@ async function fetchTracksByIds(token: string, trackIds: string[], kv?: KVNamesp
   return results.filter((track): track is NonNullable<typeof track> => track != null);
 }
 
-export async function fetchArtistTracks(token: string, artistId: string, limit: number) {
+// Conservative starting guess for spacing out a background-priority
+// fan-out's individual Spotify calls -- same total call count as today, but
+// spread over more wall-clock time so it doesn't cluster inside whatever
+// Spotify's real rolling rate-limit window turns out to be (see
+// src/lib/spotifyThrottle.ts's own comment). Interactive-priority calls
+// never use this -- a real user is waiting on those.
+const SPOTIFY_BACKGROUND_PACING_DELAY_MS = 250;
+
+// Only used for 'background'-priority fetchArtistTracks calls (the backfill
+// queue consumer, the deck's candidate top-up) -- fetches albums' track-ID
+// lists in ALBUM_TRACKS_FETCH_CONCURRENCY-sized chunks instead of one
+// mapWithConcurrency call across all (up to 10) albums, stopping as soon as
+// `limit` track ids have been gathered. The interactive branch below
+// deliberately keeps fetching everything up front (see its own comment) --
+// this early-stop only makes sense once nothing is waiting on the result.
+async function gatherAlbumTrackIdsForBackground(
+  token: string,
+  albumIds: string[],
+  limit: number,
+  kv: KVNamespace | undefined
+): Promise<string[]> {
+  const collected: string[] = [];
+  for (let i = 0; i < albumIds.length && collected.length < limit; i += ALBUM_TRACKS_FETCH_CONCURRENCY) {
+    const chunk = albumIds.slice(i, i + ALBUM_TRACKS_FETCH_CONCURRENCY);
+    const chunkResults = await mapWithConcurrency(chunk, ALBUM_TRACKS_FETCH_CONCURRENCY, (albumId) =>
+      fetchAlbumTrackIds(token, albumId, limit, kv)
+    );
+    collected.push(...chunkResults.flat());
+    const hasMoreAlbums = i + ALBUM_TRACKS_FETCH_CONCURRENCY < albumIds.length;
+    if (collected.length < limit && hasMoreAlbums) {
+      await new Promise((resolve) => setTimeout(resolve, SPOTIFY_BACKGROUND_PACING_DELAY_MS));
+    }
+  }
+  return collected;
+}
+
+export async function fetchArtistTracks(
+  token: string,
+  artistId: string,
+  limit: number,
+  priority: 'interactive' | 'background' = 'interactive',
+  kv?: KVNamespace
+) {
+  if (priority === 'background') {
+    if (!kv) throw new Error('fetchArtistTracks: kv is required when priority is "background"');
+    const cooldownMs = await isSpotifyCoolingDown(kv);
+    if (cooldownMs !== null) throw new SpotifyCooldownActiveError(cooldownMs);
+  }
+
   // Fetched in parallel, not stopping early once enough tracks are found in
   // earlier albums -- a handful of extra album-tracks calls (bounded by
   // ARTIST_ALBUMS_PAGE_SIZE, at most 10) is a better trade than sequential
@@ -398,13 +446,22 @@ export async function fetchArtistTracks(token: string, artistId: string, limit: 
   // out to 10 albums' worth of calls just to keep 2 tracks. Album order
   // (most recent release first -- see the module comment above) is
   // preserved via .flat(), so the truncation below still favors newer
-  // releases.
-  const albumIds = await fetchArtistAlbumIds(token, artistId, limit);
-  const albumTrackIdLists = await mapWithConcurrency(albumIds, ALBUM_TRACKS_FETCH_CONCURRENCY, (albumId) =>
-    fetchAlbumTrackIds(token, albumId, limit)
-  );
-  const trackIds = albumTrackIdLists.flat().slice(0, limit);
-  const tracks = await fetchTracksByIds(token, trackIds);
+  // releases. This trade-off (fetch everything up front) is interactive-only
+  // -- 'background' priority uses gatherAlbumTrackIdsForBackground instead,
+  // since nothing is waiting on a background job's latency.
+  const albumIds = await fetchArtistAlbumIds(token, artistId, limit, kv);
+
+  let trackIds: string[];
+  if (priority === 'background') {
+    trackIds = (await gatherAlbumTrackIdsForBackground(token, albumIds, limit, kv)).slice(0, limit);
+  } else {
+    const albumTrackIdLists = await mapWithConcurrency(albumIds, ALBUM_TRACKS_FETCH_CONCURRENCY, (albumId) =>
+      fetchAlbumTrackIds(token, albumId, limit, kv)
+    );
+    trackIds = albumTrackIdLists.flat().slice(0, limit);
+  }
+
+  const tracks = await fetchTracksByIds(token, trackIds, kv, priority === 'background' ? SPOTIFY_BACKGROUND_PACING_DELAY_MS : 0);
   // Belt-and-suspenders: a release where this artist is the album artist
   // should credit them on every track, but this costs nothing and matches
   // the same defensive check the old search-based path needed for real.

@@ -8,6 +8,7 @@ import {
   fetchArtistById,
   fetchTrackById,
   SpotifyRateLimitError,
+  SpotifyCooldownActiveError,
 } from '../../src/lib/spotify';
 
 const env = {
@@ -321,6 +322,160 @@ describe('fetchArtistTracks', () => {
     const tracks = await fetchArtistTracks('token', 'artist-1', 10);
 
     expect(tracks).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+
+  it('throws SpotifyCooldownActiveError, without making any Spotify call, when background priority is used during an active cooldown', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const kv = fakeKv({ 'spotify-cooldown': String(Date.now() + 10000) });
+
+    await expect(fetchArtistTracks('token', 'artist-1', 10, 'background', kv)).rejects.toThrow(SpotifyCooldownActiveError);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('proceeds normally with background priority when there is no active cooldown', async () => {
+    stubSpotify({
+      albums: [{ id: 'album-1' }],
+      albumTracks: { 'album-1': [{ id: 't1' }] },
+      tracksById: { t1: { id: 't1', name: 'Track One', artists: [{ id: 'artist-1' }] } },
+    });
+    const kv = fakeKv();
+
+    const tracks = await fetchArtistTracks('token', 'artist-1', 10, 'background', kv);
+
+    expect(tracks.map((t: any) => t.id)).toEqual(['t1']);
+    vi.unstubAllGlobals();
+  });
+
+  it('interactive priority ignores an active cooldown entirely and still fetches', async () => {
+    stubSpotify({
+      albums: [{ id: 'album-1' }],
+      albumTracks: { 'album-1': [{ id: 't1' }] },
+      tracksById: { t1: { id: 't1', name: 'Track One', artists: [{ id: 'artist-1' }] } },
+    });
+    const kv = fakeKv({ 'spotify-cooldown': String(Date.now() + 10000) });
+
+    const tracks = await fetchArtistTracks('token', 'artist-1', 10, 'interactive', kv);
+
+    expect(tracks.map((t: any) => t.id)).toEqual(['t1']);
+    vi.unstubAllGlobals();
+  });
+
+  it('background priority stops fetching further albums once enough track ids are already gathered', async () => {
+    // 8 albums, each with 10 tracks -- the first ALBUM_TRACKS_FETCH_CONCURRENCY
+    // (5) albums alone already yield 50 track ids, well past a limit of 30,
+    // so the remaining 3 albums' track-lists should never be requested.
+    const albumIds = Array.from({ length: 8 }, (_, i) => `album-${i}`);
+    const albumTrackCalls = new Set<string>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: albumIds.map((id) => ({ id })) }), { status: 200 });
+        }
+        const albumMatch = url.match(/\/albums\/([^/?]+)\/tracks/);
+        if (albumMatch) {
+          albumTrackCalls.add(albumMatch[1]);
+          const tracks = Array.from({ length: 10 }, (_, i) => ({ id: `${albumMatch[1]}-t${i}` }));
+          return new Response(JSON.stringify({ items: tracks }), { status: 200 });
+        }
+        if (url.includes('/v1/tracks/')) {
+          const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
+          return new Response(JSON.stringify({ id, name: id, artists: [{ id: 'artist-1' }] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+    const kv = fakeKv();
+
+    await fetchArtistTracks('token', 'artist-1', 30, 'background', kv);
+
+    expect(albumTrackCalls.size).toBe(5); // not all 8
+    vi.unstubAllGlobals();
+  }, 10000);
+
+  it("interactive priority still fetches every album's track-list up front (regression check against the background-only early-stop)", async () => {
+    const albumIds = Array.from({ length: 8 }, (_, i) => `album-${i}`);
+    const albumTrackCalls = new Set<string>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: albumIds.map((id) => ({ id })) }), { status: 200 });
+        }
+        const albumMatch = url.match(/\/albums\/([^/?]+)\/tracks/);
+        if (albumMatch) {
+          albumTrackCalls.add(albumMatch[1]);
+          const tracks = Array.from({ length: 10 }, (_, i) => ({ id: `${albumMatch[1]}-t${i}` }));
+          return new Response(JSON.stringify({ items: tracks }), { status: 200 });
+        }
+        if (url.includes('/v1/tracks/')) {
+          const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
+          return new Response(JSON.stringify({ id, name: id, artists: [{ id: 'artist-1' }] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+
+    await fetchArtistTracks('token', 'artist-1', 30);
+
+    expect(albumTrackCalls.size).toBe(8); // all of them, unlike background priority
+    vi.unstubAllGlobals();
+  }, 10000);
+
+  it('paces background-priority calls with a delay, unlike interactive priority', async () => {
+    const albumIds = ['album-1', 'album-2', 'album-3', 'album-4', 'album-5', 'album-6'];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: albumIds.map((id) => ({ id })) }), { status: 200 });
+        }
+        if (url.includes('/albums/')) {
+          // Each album has just 1 track, so even the first 5-album chunk
+          // alone (5 tracks) doesn't satisfy a limit of 10 -- forces a
+          // second chunk, which is where the pacing delay applies.
+          const albumMatch = url.match(/\/albums\/([^/?]+)\/tracks/)!;
+          return new Response(JSON.stringify({ items: [{ id: `${albumMatch[1]}-t1` }] }), { status: 200 });
+        }
+        if (url.includes('/v1/tracks/')) {
+          const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
+          return new Response(JSON.stringify({ id, name: id, artists: [{ id: 'artist-1' }] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+    const kv = fakeKv();
+
+    const start = Date.now();
+    await fetchArtistTracks('token', 'artist-1', 10, 'background', kv);
+    const elapsed = Date.now() - start;
+
+    // SPOTIFY_BACKGROUND_PACING_DELAY_MS = 250 -- at least one pacing wait
+    // fires (between the two album-list chunks, and/or in the track-detail
+    // phase), so elapsed time should clear a meaningful fraction of one delay.
+    expect(elapsed).toBeGreaterThanOrEqual(240);
+    vi.unstubAllGlobals();
+  }, 10000);
+
+  it('applies no pacing delay for interactive priority', async () => {
+    stubSpotify({
+      albums: [{ id: 'album-1' }],
+      albumTracks: { 'album-1': [{ id: 't1' }] },
+      tracksById: { t1: { id: 't1', name: 'Track One', artists: [{ id: 'artist-1' }] } },
+    });
+
+    const start = Date.now();
+    await fetchArtistTracks('token', 'artist-1', 10);
+    const elapsed = Date.now() - start;
+
+    expect(elapsed).toBeLessThan(200);
     vi.unstubAllGlobals();
   });
 });
