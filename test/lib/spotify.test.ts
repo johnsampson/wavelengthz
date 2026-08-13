@@ -788,6 +788,89 @@ describe('spotifyFetch (retry-on-429, via fetchArtistById)', () => {
     expect(calls).toBe(1);
     vi.unstubAllGlobals();
   });
+
+  it('gives up immediately, with no retries at all, when the initial 429 carries a Retry-After far beyond a normal short-term throttle', async () => {
+    // Regression for a real production incident: Spotify's Development Mode
+    // extended-quota penalty returns Retry-After values of many hours (seen
+    // live: ~54800s, ~15 hours) on catalog detail endpoints. Retrying
+    // against that is not just futile -- community reports say continuing
+    // to send requests before an active long Retry-After elapses can
+    // extend the penalty further -- so this must not retry at all.
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        return new Response('rate limited', { status: 429, headers: { 'Retry-After': '54797' } });
+      })
+    );
+
+    await expect(fetchArtistById('token', 'artist-1')).rejects.toThrow(SpotifyRateLimitError);
+
+    expect(calls).toBe(1); // no retries -- just the one doomed-from-the-start attempt
+    vi.unstubAllGlobals();
+  }, 10000);
+
+  it('still retries normally when Retry-After is within a normal short-term throttle window', async () => {
+    // Regression guard for the fix above: a real, ordinary short Retry-After
+    // (well under a minute -- Spotify's documented window is a rolling 30s)
+    // must still get the existing retry-with-backoff treatment, not be
+    // treated as an extended-penalty block.
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) return new Response('rate limited', { status: 429, headers: { 'Retry-After': '0.001' } });
+        return new Response(JSON.stringify({ id: 'artist-1', name: 'Real Artist' }), { status: 200 });
+      })
+    );
+
+    const artist = await fetchArtistById('token', 'artist-1');
+
+    expect(artist.name).toBe('Real Artist');
+    expect(calls).toBe(2);
+    vi.unstubAllGlobals();
+  });
+
+  it('stops retrying mid-loop if a later attempt escalates to a Retry-After beyond the threshold', async () => {
+    // Matches the community-reported "punishment" pattern: a short initial
+    // Retry-After that balloons on a subsequent 429 once we've already
+    // retried once. Must stop the moment that shows up, not burn through
+    // every remaining retry attempt against it.
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) return new Response('rate limited', { status: 429, headers: { 'Retry-After': '0.001' } });
+        return new Response('rate limited', { status: 429, headers: { 'Retry-After': '3600' } });
+      })
+    );
+
+    await expect(fetchArtistById('token', 'artist-1')).rejects.toThrow(SpotifyRateLimitError);
+
+    expect(calls).toBe(2); // 1 initial (short) + 1 retry (which reveals the escalation) -- then stop
+    vi.unstubAllGlobals();
+  }, 10000);
+
+  it('treats a Retry-After exactly at the abandon threshold as still retryable', async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) return new Response('rate limited', { status: 429, headers: { 'Retry-After': '60' } });
+        return new Response(JSON.stringify({ id: 'artist-1', name: 'Real Artist' }), { status: 200 });
+      })
+    );
+
+    const artist = await fetchArtistById('token', 'artist-1');
+
+    expect(artist.name).toBe('Real Artist');
+    expect(calls).toBe(2);
+    vi.unstubAllGlobals();
+  }, 10000); // the actual wait is capped at SPOTIFY_RETRY_MAX_DELAY_MS (4s), not the full 60s
 });
 
 describe('spotifyFetch structured call logging (via fetchArtistById)', () => {
