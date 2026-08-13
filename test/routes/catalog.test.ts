@@ -24,6 +24,7 @@ beforeEach(async () => {
   // track list for that same artist/limit pair.
   const cachedKeys = await env.RATE_LIMIT_KV.list({ prefix: 'artist-tracks-cache:' });
   await Promise.all(cachedKeys.keys.map((k) => env.RATE_LIMIT_KV.delete(k.name)));
+  await env.RATE_LIMIT_KV.delete('spotify-cooldown');
   await insertTestUser(env.DB, { id: 'u1', spotifyId: 'sp1', createdAt: 1000, updatedAt: 1000 });
   await env.DB.prepare(
     `INSERT INTO artists (id, spotify_id, name, genres, source, approved, created_at) VALUES ('local-1', 'spotify-local-1', 'Local Artist', '{"pop":true}', 'seed', 1, 1000)`
@@ -569,6 +570,70 @@ describe('GET /api/artists/:id', () => {
       expect(rows.results.map((r: any) => r.spotify_id).sort()).toEqual(makeTracks(10).map((t) => t.id).sort());
       vi.unstubAllGlobals();
     });
+
+    it('is unaffected by an active app-wide Spotify cooldown flag -- interactive priority is exempt from the background admission check', async () => {
+      const albumsCallCount = stubTrackSearchCounting(makeTracks(5));
+      await env.RATE_LIMIT_KV.put('spotify-cooldown', String(Date.now() + 10000));
+      const cookie = await cookieFor('u1');
+      const req = new Request('http://localhost/api/artists/local-1', { headers: { Cookie: cookie } });
+
+      const res = await worker.fetch(req, env, {} as ExecutionContext);
+      const body = await res.json<any>();
+
+      expect(res.status).toBe(200);
+      expect(body.tracks.length).toBeGreaterThan(0);
+      expect(albumsCallCount()).toBeGreaterThan(0); // it actually called Spotify, not skipped
+      vi.unstubAllGlobals();
+    });
+
+    it('the ?limit= "Load more" path (fetchArtistTracksCached) is also unaffected by an active cooldown flag', async () => {
+      stubTrackSearch({ tracks: makeTracks(10) });
+      await env.RATE_LIMIT_KV.put('spotify-cooldown', String(Date.now() + 10000));
+      const cookie = await cookieFor('u1');
+      const req = new Request('http://localhost/api/artists/local-1?limit=10', { headers: { Cookie: cookie } });
+
+      const res = await worker.fetch(req, env, {} as ExecutionContext);
+      const body = await res.json<any>();
+
+      expect(res.status).toBe(200);
+      expect(body.tracks.length).toBeGreaterThan(0);
+      vi.unstubAllGlobals();
+    });
+
+    it('marks the app-wide cooldown flag when the quick path itself hits a 429 -- the exact call site (GET /v1/albums/{id}/tracks?limit=5) the original production Sentry error came from', async () => {
+      let albumTracksCalls = 0;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo) => {
+          const url = input.toString();
+          if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+          if (url.includes('/artists/') && url.includes('/albums')) {
+            return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+          }
+          if (url.includes('/albums/album-1/tracks')) {
+            albumTracksCalls += 1;
+            if (albumTracksCalls === 1) return new Response('rate limited', { status: 429, headers: { 'Retry-After': '1' } });
+            return new Response(JSON.stringify({ items: [{ id: 'trk0' }] }), { status: 200 });
+          }
+          if (url.includes('/v1/tracks/')) {
+            const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
+            return new Response(
+              JSON.stringify({ id, name: 'Track', artists: [{ id: 'spotify-local-1', name: 'Local Artist' }], album: { images: [] }, preview_url: null }),
+              { status: 200 }
+            );
+          }
+          throw new Error(`unexpected ${url}`);
+        })
+      );
+      const cookie = await cookieFor('u1');
+      const req = new Request('http://localhost/api/artists/local-1', { headers: { Cookie: cookie } });
+
+      const res = await worker.fetch(req, env, {} as ExecutionContext);
+
+      expect(res.status).toBe(200); // spotifyFetch's own retry succeeds -- the user never sees this
+      expect(await env.RATE_LIMIT_KV.get('spotify-cooldown')).not.toBeNull();
+      vi.unstubAllGlobals();
+    }, 5000);
   });
 });
 

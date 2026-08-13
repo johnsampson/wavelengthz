@@ -14,6 +14,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await env.DB.exec('DELETE FROM tracks; DELETE FROM genres; DELETE FROM artists;');
+  await env.RATE_LIMIT_KV.delete('spotify-cooldown');
 });
 
 afterEach(() => {
@@ -53,18 +54,23 @@ function stubSpotify(tracks: Array<{ id: string; name: string }>) {
 function fakeBatch(messages: ArtistTrackBackfillMessage[]) {
   const acked: ArtistTrackBackfillMessage[] = [];
   const retried: ArtistTrackBackfillMessage[] = [];
+  const retryOptions: Array<{ delaySeconds?: number } | undefined> = [];
   const batchMessages = messages.map((body, i) => ({
     id: `m${i}`,
     timestamp: new Date(),
     body,
     attempts: 1,
     ack: () => acked.push(body),
-    retry: () => retried.push(body),
+    retry: (options?: { delaySeconds?: number }) => {
+      retried.push(body);
+      retryOptions.push(options);
+    },
   }));
   return {
     batch: { messages: batchMessages, queue: 'artist-track-backfill', metadata: {} as any, retryAll: () => {}, ackAll: () => {} },
     acked,
     retried,
+    retryOptions,
   };
 }
 
@@ -154,6 +160,38 @@ describe('processArtistTrackBackfillBatch', () => {
 
     expect(retried).toEqual([{ artistId: 'a1', spotifyArtistId: 'sp1', limit: 30 }]);
     expect(acked).toEqual([{ artistId: 'a2', spotifyArtistId: 'sp2', limit: 30 }]);
+  });
+
+  it('retries with a delay matching the remaining cooldown, and makes no Spotify call, when an active cooldown is in effect', async () => {
+    await insertArtist('a1', 'sp1');
+    const fetchSpy = vi.fn(async (input: RequestInfo) => {
+      const url = input.toString();
+      if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+      throw new Error(`unexpected ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    await env.RATE_LIMIT_KV.put('spotify-cooldown', String(Date.now() + 10000));
+    const { batch, acked, retried, retryOptions } = fakeBatch([{ artistId: 'a1', spotifyArtistId: 'sp1', limit: 30 }]);
+
+    await processArtistTrackBackfillBatch(batch as any, env as any);
+
+    expect(acked).toHaveLength(0);
+    expect(retried).toHaveLength(1);
+    expect(retryOptions[0]?.delaySeconds).toBeGreaterThan(0);
+    expect(retryOptions[0]?.delaySeconds).toBeLessThanOrEqual(10);
+    // Only the client-credentials token call happened -- no artist-albums
+    // fetch at all, since the cooldown check short-circuits before it.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('still processes normally when there is no active cooldown', async () => {
+    await insertArtist('a1', 'sp1');
+    stubSpotify([{ id: 't1', name: 'Track One' }]);
+    const { batch, acked } = fakeBatch([{ artistId: 'a1', spotifyArtistId: 'sp1', limit: 30 }]);
+
+    await processArtistTrackBackfillBatch(batch as any, env as any);
+
+    expect(acked).toHaveLength(1);
   });
 });
 

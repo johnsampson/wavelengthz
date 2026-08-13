@@ -48,7 +48,7 @@ async function fetchArtistTracksCached(env: Env, token: string, spotifyArtistId:
   const cached = await readArtistTracksCache(env.RATE_LIMIT_KV, spotifyArtistId, limit);
   if (cached) return cached;
 
-  const tracks = await fetchArtistTracks(token, spotifyArtistId, limit);
+  const tracks = await fetchArtistTracks(token, spotifyArtistId, limit, 'interactive', env.RATE_LIMIT_KV);
   await writeArtistTracksCache(env.RATE_LIMIT_KV, spotifyArtistId, limit, tracks);
   return tracks;
 }
@@ -156,7 +156,7 @@ export function registerCatalogRoutes(router: RouterType) {
         if (quickCached) {
           topTracks = quickCached;
         } else {
-          topTracks = await fetchArtistTracksQuick(token, artistRow.spotify_id);
+          topTracks = await fetchArtistTracksQuick(token, artistRow.spotify_id, env.RATE_LIMIT_KV);
           await writeArtistTracksCache(env.RATE_LIMIT_KV, artistRow.spotify_id, QUICK_TRACK_LIMIT, topTracks);
         }
         await enqueueArtistTrackBackfill(env, {
@@ -315,7 +315,7 @@ export function registerCatalogRoutes(router: RouterType) {
     if (!artist) return Response.json({ error: 'unknown artist_id' }, { status: 400 });
 
     const token = await getValidAccessToken(user, env, env.DB).catch(() => getClientCredentialsToken(env));
-    const track = await fetchTrackById(token, spotifyTrackId);
+    const track = await fetchTrackById(token, spotifyTrackId, env.RATE_LIMIT_KV);
 
     const now = Date.now();
     const result = await upsertTrack(env.DB, track, artistId, 'spotify_search', user.id, now);

@@ -48,7 +48,7 @@ export async function topUpArtistsForUser(env: Env, user: UserRow): Promise<numb
     const offset = Math.floor(Math.random() * 50);
     let artists: Array<{ id: string; name: string; genres: string[]; images: Array<{ url: string }>; popularity: number }>;
     try {
-      artists = await searchArtistsByGenre(token, genre, 10, offset);
+      artists = await searchArtistsByGenre(token, genre, 10, offset, env.RATE_LIMIT_KV);
     } catch (error) {
       console.error(`topUpArtistsForUser: search failed for genre "${genre}":`, error);
       continue;
@@ -70,7 +70,13 @@ export async function topUpArtistsForUser(env: Env, user: UserRow): Promise<numb
       await recordCatalogGenres(env.DB, artist.genres ?? [], 'artist', now);
       await env.GENRE_ENRICHMENT_QUEUE.send({ artistId: artistResult.id });
 
-      const tracks = await fetchArtistTracks(token, artist.id, TRACKS_PER_ARTIST);
+      let tracks: any[];
+      try {
+        tracks = await fetchArtistTracks(token, artist.id, TRACKS_PER_ARTIST, 'background', env.RATE_LIMIT_KV);
+      } catch (error) {
+        console.error(`topUpArtistsForUser: track fetch failed for artist "${artist.id}":`, error);
+        continue;
+      }
       for (const track of tracks) {
         const trackResult = await upsertTrack(env.DB, track, artistResult.id, 'spotify_search', null, now);
         if (trackResult.inserted) await recordCatalogGenres(env.DB, artist.genres ?? [], 'track', now);

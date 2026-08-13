@@ -1,3 +1,5 @@
+import { markSpotifyCooldown, isSpotifyCoolingDown } from './spotifyThrottle';
+
 export interface SpotifyTokenResponse {
   access_token: string;
   refresh_token: string;
@@ -20,6 +22,24 @@ export class SpotifyRateLimitError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'SpotifyRateLimitError';
+  }
+}
+
+// Thrown by fetchArtistTracks/searchArtistsByGenre (never by spotifyFetch
+// itself) when a 'background'-priority call is skipped because
+// isSpotifyCoolingDown (src/lib/spotifyThrottle.ts) reports an active
+// cooldown -- meaning this call was never even attempted, unlike
+// SpotifyRateLimitError which means Spotify was actually asked and said no
+// after real retries. src/lib/artistTrackBackfill.ts's queue consumer
+// checks for this specifically to retry with a delay matching the
+// remaining cooldown instead of the default immediate retry every other
+// error gets.
+export class SpotifyCooldownActiveError extends Error {
+  remainingMs: number;
+  constructor(remainingMs: number) {
+    super(`Skipping Spotify call -- app-wide cooldown active for another ${Math.ceil(remainingMs / 1000)}s`);
+    this.name = 'SpotifyCooldownActiveError';
+    this.remainingMs = remainingMs;
   }
 }
 
@@ -52,8 +72,20 @@ const SPOTIFY_MAX_RETRIES = 3;
 const SPOTIFY_RETRY_MAX_DELAY_MS = 4000;
 const SPOTIFY_RETRY_DEFAULT_DELAY_MS = 1000;
 
-async function spotifyFetch(url: string, options: RequestInit = {}): Promise<Response> {
+async function spotifyFetch(url: string, options: RequestInit = {}, kv?: KVNamespace): Promise<Response> {
   let res = await fetch(url, options);
+
+  // Reported the moment ANY call actually sees a 429 -- the earliest, most
+  // actionable signal that Spotify is currently constrained -- before this
+  // function's own retry loop even runs. Only when a kv is provided: the
+  // handful of Spotify calls outside the artist-tracks fan-out
+  // (login/profile/top-tracks/single-item search) don't pass one and keep
+  // their exact pre-existing behavior.
+  if (res.status === 429 && kv) {
+    const retryAfterHeader = res.headers.get('Retry-After');
+    const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : NaN;
+    await markSpotifyCooldown(kv, retryAfterSeconds);
+  }
 
   for (let attempt = 0; attempt < SPOTIFY_MAX_RETRIES && res.status === 429; attempt++) {
     const retryAfterHeader = res.headers.get('Retry-After');
@@ -92,13 +124,16 @@ const TRACK_FETCH_CONCURRENCY = 5;
 // track-detail phase.
 const ALBUM_TRACKS_FETCH_CONCURRENCY = 5;
 
-async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>, delayMs = 0): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let nextIndex = 0;
   async function worker() {
     while (nextIndex < items.length) {
       const i = nextIndex++;
       results[i] = await fn(items[i]);
+      if (delayMs > 0 && nextIndex < items.length) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
     }
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
@@ -260,10 +295,14 @@ export async function getClientCredentialsToken(env: Env): Promise<string> {
   return data.access_token;
 }
 
-export async function searchArtistsByGenre(token: string, genre: string, limit: number, offset = 0) {
+export async function searchArtistsByGenre(token: string, genre: string, limit: number, offset: number, kv: KVNamespace) {
+  const cooldownMs = await isSpotifyCoolingDown(kv);
+  if (cooldownMs !== null) throw new SpotifyCooldownActiveError(cooldownMs);
+
   const res = await spotifyFetch(
     `https://api.spotify.com/v1/search?type=artist&limit=${limit}&offset=${offset}&q=${encodeURIComponent(`genre:"${genre}"`)}`,
-    { headers: { Authorization: `Bearer ${token}` } }
+    { headers: { Authorization: `Bearer ${token}` } },
+    kv
   );
   if (!res.ok) throw new Error(`Spotify artist search failed: ${res.status} ${await res.text()}`);
   const data = await res.json<{ artists: { items: any[] } }>();
@@ -305,29 +344,32 @@ const ARTIST_ALBUMS_PAGE_SIZE = 10;
 // Spotify's real max for this endpoint's `limit` is 50.
 const ALBUM_TRACKS_PAGE_SIZE = 50;
 
-async function fetchArtistAlbumIds(token: string, artistId: string, limit: number): Promise<string[]> {
+async function fetchArtistAlbumIds(token: string, artistId: string, limit: number, kv?: KVNamespace): Promise<string[]> {
   const res = await spotifyFetch(
     // include_groups excludes "compilation" and "appears_on" -- releases
     // where this artist isn't the actual album artist, which is exactly the
     // ambiguity this replaces the name-search fallback to avoid.
     `https://api.spotify.com/v1/artists/${artistId}/albums?include_groups=album,single&limit=${Math.min(limit, ARTIST_ALBUMS_PAGE_SIZE)}`,
-    { headers: { Authorization: `Bearer ${token}` } }
+    { headers: { Authorization: `Bearer ${token}` } },
+    kv
   );
   if (!res.ok) throw new Error(`Spotify artist albums fetch failed: ${res.status} ${await res.text()}`);
   const data = await res.json<{ items: Array<{ id: string }> }>();
   return data.items.map((album) => album.id);
 }
 
-async function fetchAlbumTrackIds(token: string, albumId: string, limit: number): Promise<string[]> {
-  const res = await spotifyFetch(`https://api.spotify.com/v1/albums/${albumId}/tracks?limit=${Math.min(limit, ALBUM_TRACKS_PAGE_SIZE)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+async function fetchAlbumTrackIds(token: string, albumId: string, limit: number, kv?: KVNamespace): Promise<string[]> {
+  const res = await spotifyFetch(
+    `https://api.spotify.com/v1/albums/${albumId}/tracks?limit=${Math.min(limit, ALBUM_TRACKS_PAGE_SIZE)}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+    kv
+  );
   if (!res.ok) throw new Error(`Spotify album tracks fetch failed: ${res.status} ${await res.text()}`);
   const data = await res.json<{ items: Array<{ id: string }> }>();
   return data.items.map((track) => track.id);
 }
 
-async function fetchTracksByIds(token: string, trackIds: string[]) {
+async function fetchTracksByIds(token: string, trackIds: string[], kv?: KVNamespace, delayMs = 0) {
   // GET /v1/albums/{id}/tracks returns simplified track objects with no
   // `album` field, so no album art -- full details come from fetchTrackById
   // instead. The batch form of this lookup (GET /v1/tracks?ids=, plural)
@@ -341,11 +383,64 @@ async function fetchTracksByIds(token: string, trackIds: string[]) {
   // One id failing (removed/region-locked track) shouldn't drop the rest of
   // the artist's tracks, so each fetch is isolated via .catch rather than
   // one throw wiping out the whole batch.
-  const results = await mapWithConcurrency(trackIds, TRACK_FETCH_CONCURRENCY, (id) => fetchTrackById(token, id).catch(() => null));
+  const results = await mapWithConcurrency(
+    trackIds,
+    TRACK_FETCH_CONCURRENCY,
+    (id) => fetchTrackById(token, id, kv).catch(() => null),
+    delayMs
+  );
   return results.filter((track): track is NonNullable<typeof track> => track != null);
 }
 
-export async function fetchArtistTracks(token: string, artistId: string, limit: number) {
+// Conservative starting guess for spacing out a background-priority
+// fan-out's individual Spotify calls -- same total call count as today, but
+// spread over more wall-clock time so it doesn't cluster inside whatever
+// Spotify's real rolling rate-limit window turns out to be (see
+// src/lib/spotifyThrottle.ts's own comment). Interactive-priority calls
+// never use this -- a real user is waiting on those.
+const SPOTIFY_BACKGROUND_PACING_DELAY_MS = 250;
+
+// Only used for 'background'-priority fetchArtistTracks calls (the backfill
+// queue consumer, the deck's candidate top-up) -- fetches albums' track-ID
+// lists in ALBUM_TRACKS_FETCH_CONCURRENCY-sized chunks instead of one
+// mapWithConcurrency call across all (up to 10) albums, stopping as soon as
+// `limit` track ids have been gathered. The interactive branch below
+// deliberately keeps fetching everything up front (see its own comment) --
+// this early-stop only makes sense once nothing is waiting on the result.
+async function gatherAlbumTrackIdsForBackground(
+  token: string,
+  albumIds: string[],
+  limit: number,
+  kv: KVNamespace | undefined
+): Promise<string[]> {
+  const collected: string[] = [];
+  for (let i = 0; i < albumIds.length && collected.length < limit; i += ALBUM_TRACKS_FETCH_CONCURRENCY) {
+    const chunk = albumIds.slice(i, i + ALBUM_TRACKS_FETCH_CONCURRENCY);
+    const chunkResults = await mapWithConcurrency(chunk, ALBUM_TRACKS_FETCH_CONCURRENCY, (albumId) =>
+      fetchAlbumTrackIds(token, albumId, limit, kv)
+    );
+    collected.push(...chunkResults.flat());
+    const hasMoreAlbums = i + ALBUM_TRACKS_FETCH_CONCURRENCY < albumIds.length;
+    if (collected.length < limit && hasMoreAlbums) {
+      await new Promise((resolve) => setTimeout(resolve, SPOTIFY_BACKGROUND_PACING_DELAY_MS));
+    }
+  }
+  return collected;
+}
+
+export async function fetchArtistTracks(
+  token: string,
+  artistId: string,
+  limit: number,
+  priority: 'interactive' | 'background' = 'interactive',
+  kv?: KVNamespace
+) {
+  if (priority === 'background') {
+    if (!kv) throw new Error('fetchArtistTracks: kv is required when priority is "background"');
+    const cooldownMs = await isSpotifyCoolingDown(kv);
+    if (cooldownMs !== null) throw new SpotifyCooldownActiveError(cooldownMs);
+  }
+
   // Fetched in parallel, not stopping early once enough tracks are found in
   // earlier albums -- a handful of extra album-tracks calls (bounded by
   // ARTIST_ALBUMS_PAGE_SIZE, at most 10) is a better trade than sequential
@@ -355,13 +450,22 @@ export async function fetchArtistTracks(token: string, artistId: string, limit: 
   // out to 10 albums' worth of calls just to keep 2 tracks. Album order
   // (most recent release first -- see the module comment above) is
   // preserved via .flat(), so the truncation below still favors newer
-  // releases.
-  const albumIds = await fetchArtistAlbumIds(token, artistId, limit);
-  const albumTrackIdLists = await mapWithConcurrency(albumIds, ALBUM_TRACKS_FETCH_CONCURRENCY, (albumId) =>
-    fetchAlbumTrackIds(token, albumId, limit)
-  );
-  const trackIds = albumTrackIdLists.flat().slice(0, limit);
-  const tracks = await fetchTracksByIds(token, trackIds);
+  // releases. This trade-off (fetch everything up front) is interactive-only
+  // -- 'background' priority uses gatherAlbumTrackIdsForBackground instead,
+  // since nothing is waiting on a background job's latency.
+  const albumIds = await fetchArtistAlbumIds(token, artistId, limit, kv);
+
+  let trackIds: string[];
+  if (priority === 'background') {
+    trackIds = (await gatherAlbumTrackIdsForBackground(token, albumIds, limit, kv)).slice(0, limit);
+  } else {
+    const albumTrackIdLists = await mapWithConcurrency(albumIds, ALBUM_TRACKS_FETCH_CONCURRENCY, (albumId) =>
+      fetchAlbumTrackIds(token, albumId, limit, kv)
+    );
+    trackIds = albumTrackIdLists.flat().slice(0, limit);
+  }
+
+  const tracks = await fetchTracksByIds(token, trackIds, kv, priority === 'background' ? SPOTIFY_BACKGROUND_PACING_DELAY_MS : 0);
   // Belt-and-suspenders: a release where this artist is the album artist
   // should credit them on every track, but this costs nothing and matches
   // the same defensive check the old search-based path needed for real.
@@ -379,8 +483,13 @@ export async function fetchArtistTracks(token: string, artistId: string, limit: 
 const QUICK_ALBUM_LIMIT = 1;
 export const QUICK_TRACK_LIMIT = 5;
 
-export async function fetchArtistTracksQuick(token: string, artistId: string, trackCount: number = QUICK_TRACK_LIMIT) {
-  const albumIds = await fetchArtistAlbumIds(token, artistId, QUICK_ALBUM_LIMIT);
+export async function fetchArtistTracksQuick(
+  token: string,
+  artistId: string,
+  kv?: KVNamespace,
+  trackCount: number = QUICK_TRACK_LIMIT
+) {
+  const albumIds = await fetchArtistAlbumIds(token, artistId, QUICK_ALBUM_LIMIT, kv);
   if (albumIds.length === 0) return [];
 
   // Sliced client-side after the call, not just trusted to the endpoint's
@@ -388,8 +497,8 @@ export async function fetchArtistTracksQuick(token: string, artistId: string, tr
   // function's actual Spotify-call count deterministic regardless of how
   // many tracks come back, the same defense-in-depth reasoning as
   // fetchArtistTracks' own `.slice(0, limit)` above.
-  const trackIds = (await fetchAlbumTrackIds(token, albumIds[0], trackCount)).slice(0, trackCount);
-  const tracks = await fetchTracksByIds(token, trackIds);
+  const trackIds = (await fetchAlbumTrackIds(token, albumIds[0], trackCount, kv)).slice(0, trackCount);
+  const tracks = await fetchTracksByIds(token, trackIds, kv);
   return tracks.filter((track) => track.artists?.some((a: any) => a.id === artistId));
 }
 
@@ -422,10 +531,12 @@ export async function searchTracksByArtist(token: string, artistName: string, tr
   return data.tracks.items;
 }
 
-export async function fetchTrackById(token: string, trackId: string) {
-  const res = await spotifyFetch(`https://api.spotify.com/v1/tracks/${trackId}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+export async function fetchTrackById(token: string, trackId: string, kv?: KVNamespace) {
+  const res = await spotifyFetch(
+    `https://api.spotify.com/v1/tracks/${trackId}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+    kv
+  );
   if (!res.ok) throw new Error(`Spotify track fetch failed: ${res.status} ${await res.text()}`);
   return res.json<any>();
 }

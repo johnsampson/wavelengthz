@@ -1,4 +1,4 @@
-import { fetchArtistTracks, getClientCredentialsToken } from './spotify';
+import { fetchArtistTracks, getClientCredentialsToken, SpotifyCooldownActiveError } from './spotify';
 import { genresFromRow } from './genres';
 import { recordCatalogGenres } from './genreCatalog';
 import { upsertTrack } from './catalogUpsert';
@@ -73,7 +73,7 @@ export async function processArtistTrackBackfillBatch(batch: MessageBatch<Artist
       }
 
       const token = await getClientCredentialsToken(env);
-      const tracks = await fetchArtistTracks(token, message.body.spotifyArtistId, message.body.limit);
+      const tracks = await fetchArtistTracks(token, message.body.spotifyArtistId, message.body.limit, 'background', env.RATE_LIMIT_KV);
 
       const artistGenres = genresFromRow(artistRow.genres);
       const now = Date.now();
@@ -85,13 +85,31 @@ export async function processArtistTrackBackfillBatch(batch: MessageBatch<Artist
       await writeArtistTracksCache(env.RATE_LIMIT_KV, message.body.spotifyArtistId, message.body.limit, tracks);
       message.ack();
     } catch (err) {
-      console.error('Artist track backfill failed', err);
-      // No dead-letter queue configured -- a message that exhausts its
-      // retries (wrangler.toml: max_retries = 3) is simply dropped. Same
-      // reasoning as genreEnrichment.ts's queue consumer: the next viewer's
-      // cache-miss quick-path request will attempt a fresh enqueue once the
-      // pending-lock TTL clears, so this artist isn't permanently stuck.
-      message.retry();
+      if (err instanceof SpotifyCooldownActiveError) {
+        // A cooldown-skip means we never even attempted a Spotify call for
+        // this artist -- retry once the cooldown itself has cleared instead
+        // of hot-looping straight back into it (the default immediate
+        // retry every other error still gets, below).
+        //
+        // This still spends one of the queue's max_retries = 3 attempts
+        // (wrangler.toml) even though no real Spotify call was made -- three
+        // consecutive cooldown-skips under sustained Spotify pressure can
+        // exhaust the budget and drop the message (no dead-letter queue, see
+        // below). Accepted: the artist's quick-path tracks are already
+        // served regardless (this only delays the rest of their
+        // discography), and it's self-healing -- a future viewer's
+        // cache-miss re-triggers a fresh backfill once
+        // BACKFILL_PENDING_TTL_SECONDS clears.
+        message.retry({ delaySeconds: Math.max(1, Math.ceil(err.remainingMs / 1000)) });
+      } else {
+        console.error('Artist track backfill failed', err);
+        // No dead-letter queue configured -- a message that exhausts its
+        // retries (wrangler.toml: max_retries = 3) is simply dropped. Same
+        // reasoning as genreEnrichment.ts's queue consumer: the next viewer's
+        // cache-miss quick-path request will attempt a fresh enqueue once the
+        // pending-lock TTL clears, so this artist isn't permanently stuck.
+        message.retry();
+      }
     }
   }
 }

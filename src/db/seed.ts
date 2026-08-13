@@ -86,7 +86,16 @@ export async function seedCatalog(
 
       let artists: Array<{ id: string; name: string; genres: string[]; images: Array<{ url: string }>; popularity: number }>;
       try {
-        artists = await searchArtistsByGenre(token, genre, SEARCH_PAGE_SIZE, offset);
+        // searchArtistsByGenre always checks the app-wide cooldown flag
+        // (it has no 'interactive' escape hatch -- its only other caller,
+        // artistTopUp.ts, is genuinely background work). So a cooldown set
+        // by some unrelated Spotify call elsewhere in the app makes every
+        // genre here throw SpotifyCooldownActiveError, which the catch
+        // below can't distinguish from "this genre is just out of artists"
+        // -- an admin's manual run can insert 0 artists during a live
+        // cooldown. Accepted: this tool is manual/re-runnable, and
+        // genreSearchErrors below makes the cause diagnosable.
+        artists = await searchArtistsByGenre(token, genre, SEARCH_PAGE_SIZE, offset, env.RATE_LIMIT_KV);
       } catch (error) {
         // A page's search failing (transient 429/500, or something more
         // systemic) shouldn't abort the whole run -- treat this genre as
@@ -127,7 +136,7 @@ export async function seedCatalog(
             await env.GENRE_ENRICHMENT_QUEUE.send({ artistId: artistResult.id });
           }
 
-          const tracks = await fetchArtistTracks(token, artist.id, TRACKS_PER_ARTIST);
+          const tracks = await fetchArtistTracks(token, artist.id, TRACKS_PER_ARTIST, 'interactive', env.RATE_LIMIT_KV);
           for (const track of tracks) {
             const trackResult = await upsertTrack(env.DB, track, artistResult.id, 'seed', null, now);
             if (trackResult.inserted) {

@@ -6,13 +6,26 @@ import {
   fetchArtistTracksQuick,
   QUICK_TRACK_LIMIT,
   fetchArtistById,
+  fetchTrackById,
+  searchArtistsByGenre,
   SpotifyRateLimitError,
+  SpotifyCooldownActiveError,
 } from '../../src/lib/spotify';
 
 const env = {
   SPOTIFY_CLIENT_ID: 'client123',
   SPOTIFY_REDIRECT_URI: 'http://localhost:8787/callback',
 } as any;
+
+function fakeKv(initial: Record<string, string> = {}): KVNamespace {
+  const store = new Map(Object.entries(initial));
+  return {
+    get: async (key: string) => store.get(key) ?? null,
+    put: async (key: string, value: string) => {
+      store.set(key, value);
+    },
+  } as unknown as KVNamespace;
+}
 
 describe('buildAuthUrl', () => {
   it('builds a Spotify authorize URL with client id, redirect uri, scope, and state', () => {
@@ -312,6 +325,160 @@ describe('fetchArtistTracks', () => {
     expect(tracks).toEqual([]);
     vi.unstubAllGlobals();
   });
+
+  it('throws SpotifyCooldownActiveError, without making any Spotify call, when background priority is used during an active cooldown', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const kv = fakeKv({ 'spotify-cooldown': String(Date.now() + 10000) });
+
+    await expect(fetchArtistTracks('token', 'artist-1', 10, 'background', kv)).rejects.toThrow(SpotifyCooldownActiveError);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('proceeds normally with background priority when there is no active cooldown', async () => {
+    stubSpotify({
+      albums: [{ id: 'album-1' }],
+      albumTracks: { 'album-1': [{ id: 't1' }] },
+      tracksById: { t1: { id: 't1', name: 'Track One', artists: [{ id: 'artist-1' }] } },
+    });
+    const kv = fakeKv();
+
+    const tracks = await fetchArtistTracks('token', 'artist-1', 10, 'background', kv);
+
+    expect(tracks.map((t: any) => t.id)).toEqual(['t1']);
+    vi.unstubAllGlobals();
+  });
+
+  it('interactive priority ignores an active cooldown entirely and still fetches', async () => {
+    stubSpotify({
+      albums: [{ id: 'album-1' }],
+      albumTracks: { 'album-1': [{ id: 't1' }] },
+      tracksById: { t1: { id: 't1', name: 'Track One', artists: [{ id: 'artist-1' }] } },
+    });
+    const kv = fakeKv({ 'spotify-cooldown': String(Date.now() + 10000) });
+
+    const tracks = await fetchArtistTracks('token', 'artist-1', 10, 'interactive', kv);
+
+    expect(tracks.map((t: any) => t.id)).toEqual(['t1']);
+    vi.unstubAllGlobals();
+  });
+
+  it('background priority stops fetching further albums once enough track ids are already gathered', async () => {
+    // 8 albums, each with 10 tracks -- the first ALBUM_TRACKS_FETCH_CONCURRENCY
+    // (5) albums alone already yield 50 track ids, well past a limit of 30,
+    // so the remaining 3 albums' track-lists should never be requested.
+    const albumIds = Array.from({ length: 8 }, (_, i) => `album-${i}`);
+    const albumTrackCalls = new Set<string>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: albumIds.map((id) => ({ id })) }), { status: 200 });
+        }
+        const albumMatch = url.match(/\/albums\/([^/?]+)\/tracks/);
+        if (albumMatch) {
+          albumTrackCalls.add(albumMatch[1]);
+          const tracks = Array.from({ length: 10 }, (_, i) => ({ id: `${albumMatch[1]}-t${i}` }));
+          return new Response(JSON.stringify({ items: tracks }), { status: 200 });
+        }
+        if (url.includes('/v1/tracks/')) {
+          const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
+          return new Response(JSON.stringify({ id, name: id, artists: [{ id: 'artist-1' }] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+    const kv = fakeKv();
+
+    await fetchArtistTracks('token', 'artist-1', 30, 'background', kv);
+
+    expect(albumTrackCalls.size).toBe(5); // not all 8
+    vi.unstubAllGlobals();
+  }, 10000);
+
+  it("interactive priority still fetches every album's track-list up front (regression check against the background-only early-stop)", async () => {
+    const albumIds = Array.from({ length: 8 }, (_, i) => `album-${i}`);
+    const albumTrackCalls = new Set<string>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: albumIds.map((id) => ({ id })) }), { status: 200 });
+        }
+        const albumMatch = url.match(/\/albums\/([^/?]+)\/tracks/);
+        if (albumMatch) {
+          albumTrackCalls.add(albumMatch[1]);
+          const tracks = Array.from({ length: 10 }, (_, i) => ({ id: `${albumMatch[1]}-t${i}` }));
+          return new Response(JSON.stringify({ items: tracks }), { status: 200 });
+        }
+        if (url.includes('/v1/tracks/')) {
+          const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
+          return new Response(JSON.stringify({ id, name: id, artists: [{ id: 'artist-1' }] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+
+    await fetchArtistTracks('token', 'artist-1', 30);
+
+    expect(albumTrackCalls.size).toBe(8); // all of them, unlike background priority
+    vi.unstubAllGlobals();
+  }, 10000);
+
+  it('paces background-priority calls with a delay, unlike interactive priority', async () => {
+    const albumIds = ['album-1', 'album-2', 'album-3', 'album-4', 'album-5', 'album-6'];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: albumIds.map((id) => ({ id })) }), { status: 200 });
+        }
+        if (url.includes('/albums/')) {
+          // Each album has just 1 track, so even the first 5-album chunk
+          // alone (5 tracks) doesn't satisfy a limit of 10 -- forces a
+          // second chunk, which is where the pacing delay applies.
+          const albumMatch = url.match(/\/albums\/([^/?]+)\/tracks/)!;
+          return new Response(JSON.stringify({ items: [{ id: `${albumMatch[1]}-t1` }] }), { status: 200 });
+        }
+        if (url.includes('/v1/tracks/')) {
+          const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
+          return new Response(JSON.stringify({ id, name: id, artists: [{ id: 'artist-1' }] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+    const kv = fakeKv();
+
+    const start = Date.now();
+    await fetchArtistTracks('token', 'artist-1', 10, 'background', kv);
+    const elapsed = Date.now() - start;
+
+    // SPOTIFY_BACKGROUND_PACING_DELAY_MS = 250 -- at least one pacing wait
+    // fires (between the two album-list chunks, and/or in the track-detail
+    // phase), so elapsed time should clear a meaningful fraction of one delay.
+    expect(elapsed).toBeGreaterThanOrEqual(240);
+    vi.unstubAllGlobals();
+  }, 10000);
+
+  it('applies no pacing delay for interactive priority', async () => {
+    stubSpotify({
+      albums: [{ id: 'album-1' }],
+      albumTracks: { 'album-1': [{ id: 't1' }] },
+      tracksById: { t1: { id: 't1', name: 'Track One', artists: [{ id: 'artist-1' }] } },
+    });
+
+    const start = Date.now();
+    await fetchArtistTracks('token', 'artist-1', 10);
+    const elapsed = Date.now() - start;
+
+    expect(elapsed).toBeLessThan(200);
+    vi.unstubAllGlobals();
+  });
 });
 
 describe('fetchArtistTracksQuick', () => {
@@ -443,6 +610,82 @@ describe('fetchArtistTracksQuick', () => {
     expect(tracks).toEqual([]);
     vi.unstubAllGlobals();
   });
+
+  it('forwards kv through to spotifyFetch so a 429 still marks cooldown, even though quick fetch never checks it (always interactive)', async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+        }
+        if (url.includes('/albums/album-1/tracks')) {
+          calls += 1;
+          if (calls === 1) return new Response('rate limited', { status: 429, headers: { 'Retry-After': '1' } });
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+    const kv = fakeKv();
+
+    await fetchArtistTracksQuick('token', 'artist-1', kv);
+
+    expect(await kv.get('spotify-cooldown')).not.toBeNull();
+    vi.unstubAllGlobals();
+  }, 5000);
+
+  it('still ignores an active cooldown and fetches anyway -- quick fetch is always interactive', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+        }
+        if (url.includes('/albums/album-1/tracks')) {
+          return new Response(JSON.stringify({ items: [{ id: 't1' }] }), { status: 200 });
+        }
+        if (url.includes('/v1/tracks/t1')) {
+          return new Response(JSON.stringify({ id: 't1', name: 'Track One', artists: [{ id: 'artist-1' }] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+    const kv = fakeKv({ 'spotify-cooldown': String(Date.now() + 10000) });
+
+    const tracks = await fetchArtistTracksQuick('token', 'artist-1', kv);
+
+    expect(tracks).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('searchArtistsByGenre', () => {
+  it("returns Spotify's results when there is no active cooldown", async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ artists: { items: [{ id: 'a1', name: 'Artist One' }] } }), { status: 200 }))
+    );
+    const kv = fakeKv();
+
+    const artists = await searchArtistsByGenre('token', 'indie', 10, 0, kv);
+
+    expect(artists).toEqual([{ id: 'a1', name: 'Artist One' }]);
+    vi.unstubAllGlobals();
+  });
+
+  it('throws SpotifyCooldownActiveError, without making any Spotify call, during an active cooldown', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const kv = fakeKv({ 'spotify-cooldown': String(Date.now() + 10000) });
+
+    await expect(searchArtistsByGenre('token', 'indie', 10, 0, kv)).rejects.toThrow(SpotifyCooldownActiveError);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
 });
 
 // Exercised via fetchArtistById (a single, simple call) rather than testing
@@ -543,6 +786,66 @@ describe('spotifyFetch (retry-on-429, via fetchArtistById)', () => {
 
     await expect(fetchArtistById('token', 'artist-1')).rejects.toThrow(/Spotify artist fetch failed: 404/);
     expect(calls).toBe(1);
+    vi.unstubAllGlobals();
+  });
+});
+
+// A separate block from the one above (which exercises retry behavior via
+// fetchArtistById, a function that never gets a kv param) -- kv-forwarding
+// and cooldown-marking are new behavior only reachable through the
+// functions in this file that DO take kv, and fetchTrackById is the
+// simplest of those.
+describe('spotifyFetch cooldown-marking on 429 (via fetchTrackById)', () => {
+  it('marks the cooldown flag, honoring Retry-After (not falling back to the default), when a kv is provided and a 429 occurs', async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) return new Response('rate limited', { status: 429, headers: { 'Retry-After': '1' } });
+        return new Response(JSON.stringify({ id: 'track-1', name: 'Song', artists: [] }), { status: 200 });
+      })
+    );
+    const kv = fakeKv();
+    const before = Date.now();
+
+    await fetchTrackById('token', 'track-1', kv);
+
+    const stored = await kv.get('spotify-cooldown');
+    expect(stored).not.toBeNull();
+    const expiresInFromBefore = Number(stored) - before;
+    // Retry-After: 1s should drive this to ~1s out from `before`, clearly
+    // distinct from SPOTIFY_COOLDOWN_DEFAULT_SECONDS (15s) -- proving the
+    // header value was actually read, not the fallback used.
+    expect(expiresInFromBefore).toBeGreaterThan(500);
+    expect(expiresInFromBefore).toBeLessThan(10000);
+    vi.unstubAllGlobals();
+  }, 5000);
+
+  it('does not touch KV at all when no kv is provided -- existing (pre-throttle) call sites are unaffected', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('rate limited', { status: 429, headers: { 'Retry-After': '0.001' } }))
+    );
+    const kv = fakeKv();
+    const putSpy = vi.spyOn(kv, 'put');
+
+    await expect(fetchTrackById('token', 'track-1')).rejects.toThrow(SpotifyRateLimitError);
+
+    expect(putSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('does not mark cooldown on a successful (non-429) response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ id: 'track-1', name: 'Song', artists: [] }), { status: 200 }))
+    );
+    const kv = fakeKv();
+
+    await fetchTrackById('token', 'track-1', kv);
+
+    expect(await kv.get('spotify-cooldown')).toBeNull();
     vi.unstubAllGlobals();
   });
 });
