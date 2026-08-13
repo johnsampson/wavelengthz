@@ -72,6 +72,24 @@ const SPOTIFY_MAX_RETRIES = 3;
 const SPOTIFY_RETRY_MAX_DELAY_MS = 4000;
 const SPOTIFY_RETRY_DEFAULT_DELAY_MS = 1000;
 
+// Spotify's documented rate limit window is a rolling 30 seconds
+// (https://developer.spotify.com/documentation/web-api/concepts/rate-limits).
+// A real Retry-After far beyond that isn't a normal short-term throttle --
+// it's Spotify's Development Mode extended-quota/anti-abuse penalty.
+// Confirmed live in production: Retry-After values of ~54800s (~15 hours)
+// on catalog detail endpoints (GET /v1/artists/{id}, /v1/albums/{id}/tracks),
+// matching widely-reported community experience (12-24+ hour penalties --
+// see https://community.spotify.com/t5/Spotify-for-Developers/Very-long-Retry-After-values-on-Web-API-429/td-p/7432857
+// and https://community.spotify.com/t5/Spotify-for-Developers/Rate-limit-unreasonably-high-after-one-single-429-response/td-p/5880001).
+// Retrying against one of those doesn't just waste ~12s per attempt for
+// nothing -- community reports say continuing to send requests before an
+// active long Retry-After elapses can extend the penalty further. So this
+// function gives up immediately, no retries at all, the moment any 429's
+// real Retry-After crosses this threshold, for both interactive and
+// background calls alike -- there is no scenario where retrying against an
+// hours-long block is the right call.
+const SPOTIFY_RETRY_ABANDON_THRESHOLD_SECONDS = 60;
+
 // A real Spotify-specified value (Retry-After present and valid) vs. the
 // absence of one -- null, not NaN/0, so it's unambiguous in the structured
 // log below (spotifyFetch's own comment) and in markSpotifyCooldown's
@@ -108,7 +126,13 @@ async function spotifyFetch(url: string, options: RequestInit = {}, kv?: KVNames
     await markSpotifyCooldown(kv, retryAfterSecondsSeen[0] ?? undefined);
   }
 
-  for (let attempt = 0; attempt < SPOTIFY_MAX_RETRIES && res.status === 429; attempt++) {
+  for (
+    let attempt = 0;
+    attempt < SPOTIFY_MAX_RETRIES &&
+    res.status === 429 &&
+    (retryAfterSecondsSeen[retryAfterSecondsSeen.length - 1] ?? 0) <= SPOTIFY_RETRY_ABANDON_THRESHOLD_SECONDS;
+    attempt++
+  ) {
     const retryAfterSeconds = retryAfterSecondsSeen[retryAfterSecondsSeen.length - 1];
     const delayMs = Math.min(
       retryAfterSeconds != null ? retryAfterSeconds * 1000 : SPOTIFY_RETRY_DEFAULT_DELAY_MS * 2 ** attempt,
