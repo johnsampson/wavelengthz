@@ -609,6 +609,56 @@ describe('fetchArtistTracksQuick', () => {
     expect(tracks).toEqual([]);
     vi.unstubAllGlobals();
   });
+
+  it('forwards kv through to spotifyFetch so a 429 still marks cooldown, even though quick fetch never checks it (always interactive)', async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+        }
+        if (url.includes('/albums/album-1/tracks')) {
+          calls += 1;
+          if (calls === 1) return new Response('rate limited', { status: 429, headers: { 'Retry-After': '1' } });
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+    const kv = fakeKv();
+
+    await fetchArtistTracksQuick('token', 'artist-1', kv);
+
+    expect(await kv.get('spotify-cooldown')).not.toBeNull();
+    vi.unstubAllGlobals();
+  }, 5000);
+
+  it('still ignores an active cooldown and fetches anyway -- quick fetch is always interactive', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+        }
+        if (url.includes('/albums/album-1/tracks')) {
+          return new Response(JSON.stringify({ items: [{ id: 't1' }] }), { status: 200 });
+        }
+        if (url.includes('/v1/tracks/t1')) {
+          return new Response(JSON.stringify({ id: 't1', name: 'Track One', artists: [{ id: 'artist-1' }] }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+    const kv = fakeKv({ 'spotify-cooldown': String(Date.now() + 10000) });
+
+    const tracks = await fetchArtistTracksQuick('token', 'artist-1', kv);
+
+    expect(tracks).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
 });
 
 // Exercised via fetchArtistById (a single, simple call) rather than testing

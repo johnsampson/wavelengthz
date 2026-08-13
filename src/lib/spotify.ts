@@ -479,8 +479,13 @@ export async function fetchArtistTracks(
 const QUICK_ALBUM_LIMIT = 1;
 export const QUICK_TRACK_LIMIT = 5;
 
-export async function fetchArtistTracksQuick(token: string, artistId: string, trackCount: number = QUICK_TRACK_LIMIT) {
-  const albumIds = await fetchArtistAlbumIds(token, artistId, QUICK_ALBUM_LIMIT);
+export async function fetchArtistTracksQuick(
+  token: string,
+  artistId: string,
+  kv?: KVNamespace,
+  trackCount: number = QUICK_TRACK_LIMIT
+) {
+  const albumIds = await fetchArtistAlbumIds(token, artistId, QUICK_ALBUM_LIMIT, kv);
   if (albumIds.length === 0) return [];
 
   // Sliced client-side after the call, not just trusted to the endpoint's
@@ -488,8 +493,8 @@ export async function fetchArtistTracksQuick(token: string, artistId: string, tr
   // function's actual Spotify-call count deterministic regardless of how
   // many tracks come back, the same defense-in-depth reasoning as
   // fetchArtistTracks' own `.slice(0, limit)` above.
-  const trackIds = (await fetchAlbumTrackIds(token, albumIds[0], trackCount)).slice(0, trackCount);
-  const tracks = await fetchTracksByIds(token, trackIds);
+  const trackIds = (await fetchAlbumTrackIds(token, albumIds[0], trackCount, kv)).slice(0, trackCount);
+  const tracks = await fetchTracksByIds(token, trackIds, kv);
   return tracks.filter((track) => track.artists?.some((a: any) => a.id === artistId));
 }
 
