@@ -73,7 +73,14 @@ const SPOTIFY_RETRY_MAX_DELAY_MS = 4000;
 const SPOTIFY_RETRY_DEFAULT_DELAY_MS = 1000;
 
 async function spotifyFetch(url: string, options: RequestInit = {}, kv?: KVNamespace): Promise<Response> {
+  const startedAt = Date.now();
   let res = await fetch(url, options);
+  let attempts = 1;
+  // Captured right after the first fetch, before the retry loop below can
+  // overwrite `res` -- the loop only ever runs while res.status === 429, so
+  // this single check at the top fully captures "was a 429 seen at all"
+  // across the whole call, retries included.
+  const rateLimited = res.status === 429;
 
   // Reported the moment ANY call actually sees a 429 -- the earliest, most
   // actionable signal that Spotify is currently constrained -- before this
@@ -98,7 +105,26 @@ async function spotifyFetch(url: string, options: RequestInit = {}, kv?: KVNames
     );
     await new Promise((resolve) => setTimeout(resolve, delayMs));
     res = await fetch(url, options);
+    attempts += 1;
   }
+
+  // A structured object (not a template string) so Cloudflare Workers Logs
+  // auto-extracts these as indexed, filterable fields -- lets every Spotify
+  // call across the whole app (web requests, the backfill queue consumer,
+  // the deck top-up job, the admin seed script) be watched centrally via
+  // `wrangler tail --search spotify_call` or Logs Explorer, regardless of
+  // which of the ~15 functions in this file ultimately triggered it. Logged
+  // before the 429-exhausted throw below, not after, so a call that
+  // ultimately fails still shows up.
+  console.log({
+    type: 'spotify_call',
+    url,
+    method: options.method ?? 'GET',
+    status: res.status,
+    attempts,
+    durationMs: Date.now() - startedAt,
+    rateLimited,
+  });
 
   if (res.status === 429) {
     throw new SpotifyRateLimitError(`Spotify rate-limited this request even after ${SPOTIFY_MAX_RETRIES} retries: ${url}`);

@@ -72,6 +72,15 @@ export async function processArtistTrackBackfillBatch(batch: MessageBatch<Artist
         continue;
       }
 
+      // Every other Spotify-calling path in the app is triggered by an HTTP
+      // request, whose method/URL is already captured automatically by
+      // Cloudflare Workers Logs -- this queue consumer is the one entry
+      // point that isn't, so it gets its own explicit marker. Logged before
+      // this artist's own spotify_call entries (see spotifyFetch's own
+      // comment in spotify.ts) so a human reading a live tail sees this line
+      // immediately above the burst it explains.
+      console.log({ type: 'spotify_call_context', context: 'artist-track-backfill', spotifyArtistId: message.body.spotifyArtistId });
+
       const token = await getClientCredentialsToken(env);
       const tracks = await fetchArtistTracks(token, message.body.spotifyArtistId, message.body.limit, 'background', env.RATE_LIMIT_KV);
 
