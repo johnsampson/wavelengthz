@@ -6,6 +6,7 @@ import {
   fetchArtistTracksQuick,
   QUICK_TRACK_LIMIT,
   fetchArtistById,
+  fetchTrackById,
   SpotifyRateLimitError,
 } from '../../src/lib/spotify';
 
@@ -13,6 +14,16 @@ const env = {
   SPOTIFY_CLIENT_ID: 'client123',
   SPOTIFY_REDIRECT_URI: 'http://localhost:8787/callback',
 } as any;
+
+function fakeKv(initial: Record<string, string> = {}): KVNamespace {
+  const store = new Map(Object.entries(initial));
+  return {
+    get: async (key: string) => store.get(key) ?? null,
+    put: async (key: string, value: string) => {
+      store.set(key, value);
+    },
+  } as unknown as KVNamespace;
+}
 
 describe('buildAuthUrl', () => {
   it('builds a Spotify authorize URL with client id, redirect uri, scope, and state', () => {
@@ -543,6 +554,66 @@ describe('spotifyFetch (retry-on-429, via fetchArtistById)', () => {
 
     await expect(fetchArtistById('token', 'artist-1')).rejects.toThrow(/Spotify artist fetch failed: 404/);
     expect(calls).toBe(1);
+    vi.unstubAllGlobals();
+  });
+});
+
+// A separate block from the one above (which exercises retry behavior via
+// fetchArtistById, a function that never gets a kv param) -- kv-forwarding
+// and cooldown-marking are new behavior only reachable through the
+// functions in this file that DO take kv, and fetchTrackById is the
+// simplest of those.
+describe('spotifyFetch cooldown-marking on 429 (via fetchTrackById)', () => {
+  it('marks the cooldown flag, honoring Retry-After (not falling back to the default), when a kv is provided and a 429 occurs', async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) return new Response('rate limited', { status: 429, headers: { 'Retry-After': '1' } });
+        return new Response(JSON.stringify({ id: 'track-1', name: 'Song', artists: [] }), { status: 200 });
+      })
+    );
+    const kv = fakeKv();
+    const before = Date.now();
+
+    await fetchTrackById('token', 'track-1', kv);
+
+    const stored = await kv.get('spotify-cooldown');
+    expect(stored).not.toBeNull();
+    const expiresInFromBefore = Number(stored) - before;
+    // Retry-After: 1s should drive this to ~1s out from `before`, clearly
+    // distinct from SPOTIFY_COOLDOWN_DEFAULT_SECONDS (15s) -- proving the
+    // header value was actually read, not the fallback used.
+    expect(expiresInFromBefore).toBeGreaterThan(500);
+    expect(expiresInFromBefore).toBeLessThan(10000);
+    vi.unstubAllGlobals();
+  }, 5000);
+
+  it('does not touch KV at all when no kv is provided -- existing (pre-throttle) call sites are unaffected', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('rate limited', { status: 429, headers: { 'Retry-After': '0.001' } }))
+    );
+    const kv = fakeKv();
+    const putSpy = vi.spyOn(kv, 'put');
+
+    await expect(fetchTrackById('token', 'track-1')).rejects.toThrow(SpotifyRateLimitError);
+
+    expect(putSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('does not mark cooldown on a successful (non-429) response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ id: 'track-1', name: 'Song', artists: [] }), { status: 200 }))
+    );
+    const kv = fakeKv();
+
+    await fetchTrackById('token', 'track-1', kv);
+
+    expect(await kv.get('spotify-cooldown')).toBeNull();
     vi.unstubAllGlobals();
   });
 });
