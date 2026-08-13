@@ -191,8 +191,14 @@ Two changes, both gated on `priority === 'background'` and both inside
 
 Net effect on a typical backfill job: album-list calls drop from up to 10
 down to whatever's actually needed (commonly 2-4 for a full album/single
-mix), and the remaining ~30-35 calls spread across roughly 10-15 seconds
-instead of 2-3.
+mix). The pacing delay is applied per-worker inside `mapWithConcurrency`,
+not as a single global serialization point, so with
+`TRACK_FETCH_CONCURRENCY = 5` concurrent workers during the track-detail
+phase, the effective spacing between consecutive calls across the whole
+fan-out is closer to `SPOTIFY_BACKGROUND_PACING_DELAY_MS / TRACK_FETCH_CONCURRENCY`
+(~50ms) than the full 250ms -- roughly a 2x reduction in call density
+versus the unpaced version, not the ~5x this section originally estimated.
+Still a real, test-verified improvement, just smaller than first described.
 
 ### 5. Error handling
 

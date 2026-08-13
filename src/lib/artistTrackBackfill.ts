@@ -90,6 +90,16 @@ export async function processArtistTrackBackfillBatch(batch: MessageBatch<Artist
         // this artist -- retry once the cooldown itself has cleared instead
         // of hot-looping straight back into it (the default immediate
         // retry every other error still gets, below).
+        //
+        // This still spends one of the queue's max_retries = 3 attempts
+        // (wrangler.toml) even though no real Spotify call was made -- three
+        // consecutive cooldown-skips under sustained Spotify pressure can
+        // exhaust the budget and drop the message (no dead-letter queue, see
+        // below). Accepted: the artist's quick-path tracks are already
+        // served regardless (this only delays the rest of their
+        // discography), and it's self-healing -- a future viewer's
+        // cache-miss re-triggers a fresh backfill once
+        // BACKFILL_PENDING_TTL_SECONDS clears.
         message.retry({ delaySeconds: Math.max(1, Math.ceil(err.remainingMs / 1000)) });
       } else {
         console.error('Artist track backfill failed', err);
