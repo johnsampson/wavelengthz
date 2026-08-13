@@ -48,7 +48,7 @@ export async function topUpArtistsForUser(env: Env, user: UserRow): Promise<numb
     const offset = Math.floor(Math.random() * 50);
     let artists: Array<{ id: string; name: string; genres: string[]; images: Array<{ url: string }>; popularity: number }>;
     try {
-      artists = await searchArtistsByGenre(token, genre, 10, offset);
+      artists = await searchArtistsByGenre(token, genre, 10, offset, env.RATE_LIMIT_KV);
     } catch (error) {
       console.error(`topUpArtistsForUser: search failed for genre "${genre}":`, error);
       continue;

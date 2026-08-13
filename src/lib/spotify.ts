@@ -295,10 +295,14 @@ export async function getClientCredentialsToken(env: Env): Promise<string> {
   return data.access_token;
 }
 
-export async function searchArtistsByGenre(token: string, genre: string, limit: number, offset = 0) {
+export async function searchArtistsByGenre(token: string, genre: string, limit: number, offset: number, kv: KVNamespace) {
+  const cooldownMs = await isSpotifyCoolingDown(kv);
+  if (cooldownMs !== null) throw new SpotifyCooldownActiveError(cooldownMs);
+
   const res = await spotifyFetch(
     `https://api.spotify.com/v1/search?type=artist&limit=${limit}&offset=${offset}&q=${encodeURIComponent(`genre:"${genre}"`)}`,
-    { headers: { Authorization: `Bearer ${token}` } }
+    { headers: { Authorization: `Bearer ${token}` } },
+    kv
   );
   if (!res.ok) throw new Error(`Spotify artist search failed: ${res.status} ${await res.text()}`);
   const data = await res.json<{ artists: { items: any[] } }>();

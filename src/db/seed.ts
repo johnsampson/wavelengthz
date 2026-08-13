@@ -86,7 +86,7 @@ export async function seedCatalog(
 
       let artists: Array<{ id: string; name: string; genres: string[]; images: Array<{ url: string }>; popularity: number }>;
       try {
-        artists = await searchArtistsByGenre(token, genre, SEARCH_PAGE_SIZE, offset);
+        artists = await searchArtistsByGenre(token, genre, SEARCH_PAGE_SIZE, offset, env.RATE_LIMIT_KV);
       } catch (error) {
         // A page's search failing (transient 429/500, or something more
         // systemic) shouldn't abort the whole run -- treat this genre as

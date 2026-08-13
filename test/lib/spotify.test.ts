@@ -7,6 +7,7 @@ import {
   QUICK_TRACK_LIMIT,
   fetchArtistById,
   fetchTrackById,
+  searchArtistsByGenre,
   SpotifyRateLimitError,
   SpotifyCooldownActiveError,
 } from '../../src/lib/spotify';
@@ -657,6 +658,32 @@ describe('fetchArtistTracksQuick', () => {
     const tracks = await fetchArtistTracksQuick('token', 'artist-1', kv);
 
     expect(tracks).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('searchArtistsByGenre', () => {
+  it("returns Spotify's results when there is no active cooldown", async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ artists: { items: [{ id: 'a1', name: 'Artist One' }] } }), { status: 200 }))
+    );
+    const kv = fakeKv();
+
+    const artists = await searchArtistsByGenre('token', 'indie', 10, 0, kv);
+
+    expect(artists).toEqual([{ id: 'a1', name: 'Artist One' }]);
+    vi.unstubAllGlobals();
+  });
+
+  it('throws SpotifyCooldownActiveError, without making any Spotify call, during an active cooldown', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const kv = fakeKv({ 'spotify-cooldown': String(Date.now() + 10000) });
+
+    await expect(searchArtistsByGenre('token', 'indie', 10, 0, kv)).rejects.toThrow(SpotifyCooldownActiveError);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 });
