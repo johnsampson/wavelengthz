@@ -15,9 +15,27 @@ function scrollToTop() {
   if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-export function createHistoryApp() {
+// Persists which tab (People/Artists/Tracks) was last selected, same fix
+// and reasoning as search.js's deck-mode persistence -- this page used to
+// hardcode `mode: 'people'` on every fresh load, so a link back into
+// History (e.g. from an artist's own history entry) always dropped back to
+// the People tab regardless of which one the user actually had open.
+const HISTORY_MODE_KEY = 'wl_history_mode';
+const VALID_MODES = ['people', 'artist', 'track'];
+// No localStorage in this project's Workers-runtime test environment
+// unless a test explicitly stubs one -- same guard shape as scrollToTop
+// above, but as a real fallback object (not a skipped call) since `mode`
+// needs an actual value either way.
+const noopStorage = { getItem: () => null, setItem: () => {} };
+
+export function loadStoredHistoryMode(storage) {
+  const value = storage.getItem(HISTORY_MODE_KEY);
+  return VALID_MODES.includes(value) ? value : 'people';
+}
+
+export function createHistoryApp(storage = typeof localStorage !== 'undefined' ? localStorage : noopStorage) {
   return {
-    mode: 'people',
+    mode: loadStoredHistoryMode(storage),
     swipes: [],
     error: null,
     offset: 0,
@@ -34,6 +52,7 @@ export function createHistoryApp() {
 
     async setMode(mode) {
       this.mode = mode;
+      storage.setItem(HISTORY_MODE_KEY, mode);
       this.offset = 0;
       // "Blocked" is a people-only concept -- switching to an Artists/Tracks
       // tab with it still selected would silently try (and fail) to load

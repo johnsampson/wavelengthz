@@ -76,8 +76,14 @@
 // still had to wait on a live network round-trip before Alpine's x-init
 // directives ran and the page became interactive. CSP's script-src no longer
 // allow-lists cdn.jsdelivr.net (src/index.ts and public/_headers) since
-// 'self' now covers it.
-const CACHE_NAME = 'wavelengthz-shell-v29';
+// 'self' now covers it. v30 fixes the deck (/) and /history always
+// defaulting to People mode on every fresh load, no matter which mode was
+// last selected -- switching to Music mode never stuck across a page
+// reload or the browser's back button. Also makes returning from an
+// artist's page (tapped from a deck search result) reopen that same
+// search instead of landing on a bare, closed deck (search.js's new
+// saveSearchState/takeSearchState, wired into index.html).
+const CACHE_NAME = 'wavelengthz-shell-v30';
 const APP_SHELL = [
   '/',
   '/app.js',

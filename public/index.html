@@ -262,7 +262,7 @@
     import { attachSwipeDeck } from '/swipe.js';
     import { mountHeader, mountNav } from '/nav.js';
     import { getAuthedUser } from '/auth.js';
-    import { shouldSearch, debounce } from '/search.js';
+    import { shouldSearch, debounce, loadStoredMode, storeMode, saveSearchState, takeSearchState } from '/search.js';
     import { checkPlayerAvailability, playTrack, pausePlayback, resumePlayback, onStateChange } from '/wavelengthzPlayer.js';
     import { showErrorToast } from '/toast.js';
     mountHeader();
@@ -270,7 +270,12 @@
 
     window.deckApp = function () {
       return {
-        mode: 'people',
+        // Restored from localStorage (see search.js's own comment) rather
+        // than always starting on 'people' -- switching to Music mode used
+        // to never stick across a fresh page load (including the browser's
+        // back button after tapping into a search result), forcing a
+        // manual re-toggle back to Music every single time.
+        mode: loadStoredMode(localStorage),
         queue: [],
         current: null,
         detachSwipe: null,
@@ -312,6 +317,20 @@
                 this.playerState = { paused: state.paused, position: state.position, duration: state.duration };
               });
             }
+            // Reopens the search modal with its previous query/results if
+            // this load is the return trip from tapping into a search
+            // result (selectArtist saves it right before navigating away,
+            // below) -- otherwise search.js's takeSearchState finds
+            // nothing and this is a no-op, same as any other ordinary
+            // visit to the deck.
+            if (this.mode === 'music') {
+              const saved = takeSearchState(sessionStorage);
+              if (saved) {
+                this.searchQuery = saved.query;
+                this.searchResults = saved.results;
+                this.showSearch = true;
+              }
+            }
           }
           this.debouncedSearch = debounce(() => this.runSearch(), 300);
         },
@@ -329,6 +348,7 @@
 
         async setMode(mode) {
           this.mode = mode;
+          storeMode(localStorage, mode);
           this.queue = [];
           this.current = null;
           await this.closeAnthem();
@@ -449,6 +469,14 @@
         },
 
         async selectArtist(result) {
+          // Saved right before leaving the deck entirely (this is a real
+          // navigation, not an SPA route change) so init()'s own
+          // takeSearchState call can reopen this same search on the way
+          // back -- see search.js's own comment on why this landed the
+          // user somewhere unhelpful (defaulting back to People mode, with
+          // no memory of what they'd searched) instead.
+          saveSearchState(sessionStorage, { query: this.searchQuery, results: this.searchResults });
+
           // Already cataloged -- result.id is our internal artist UUID.
           if (result.inCatalog) {
             window.location.href = `/artist?id=${result.id}`;
