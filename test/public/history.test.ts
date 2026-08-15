@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createHistoryApp, PAGE_SIZE } from '../../public/history.js';
+import { createHistoryApp, loadStoredHistoryMode, PAGE_SIZE } from '../../public/history.js';
 import { showErrorToast } from '../../public/toast.js';
 
 vi.mock('../../public/toast.js', () => ({ showErrorToast: vi.fn() }));
@@ -7,6 +7,16 @@ vi.mock('../../public/toast.js', () => ({ showErrorToast: vi.fn() }));
 beforeEach(() => {
   vi.mocked(showErrorToast).mockClear();
 });
+
+function fakeStorage(initial: Record<string, string> = {}) {
+  const store = new Map(Object.entries(initial));
+  return {
+    getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+    setItem: (key: string, value: string) => {
+      store.set(key, value);
+    },
+  };
+}
 
 function stubSwipeHistoryPages(pages: Record<string, any[]>) {
   const calls: string[] = [];
@@ -322,5 +332,42 @@ describe('history page blocked view', () => {
     await app.setMode('artist');
 
     expect(app.directionFilter).toBeNull();
+  });
+});
+
+describe('loadStoredHistoryMode', () => {
+  it('defaults to people when nothing is stored', () => {
+    expect(loadStoredHistoryMode(fakeStorage())).toBe('people');
+  });
+
+  it('accepts a previously stored artist or track mode', () => {
+    expect(loadStoredHistoryMode(fakeStorage({ wl_history_mode: 'artist' }))).toBe('artist');
+    expect(loadStoredHistoryMode(fakeStorage({ wl_history_mode: 'track' }))).toBe('track');
+  });
+
+  it('falls back to people for any unexpected stored value', () => {
+    expect(loadStoredHistoryMode(fakeStorage({ wl_history_mode: 'garbage' }))).toBe('people');
+  });
+});
+
+describe('history mode persistence', () => {
+  // Regression: this page used to hardcode `mode: 'people'` on every fresh
+  // load, so a previously-selected Artists/Tracks tab never stuck across a
+  // page reload or a link back into History.
+  it('starts on a previously-stored mode instead of always defaulting to people', () => {
+    const app = createHistoryApp(fakeStorage({ wl_history_mode: 'artist' }));
+    expect(app.mode).toBe('artist');
+  });
+
+  it('persists the mode across instances once switched', async () => {
+    stubSwipeHistoryPages({ 'people:0': page(1, 0), 'artist:0': page(1, 0) });
+    const storage = fakeStorage();
+    const app = createHistoryApp(storage);
+    expect(app.mode).toBe('people'); // nothing stored yet
+
+    await app.setMode('artist');
+
+    const reloaded = createHistoryApp(storage);
+    expect(reloaded.mode).toBe('artist');
   });
 });
