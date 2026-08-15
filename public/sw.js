@@ -89,8 +89,31 @@
 // touches index.html/artist.html/profile.html's own markup/scripts and
 // every other precached page's bottom padding (pb-24/mb-20 -> the new
 // .pb-app/.mb-app utility classes in tailwind.css, which react to whether
-// the bar is currently showing).
-const CACHE_NAME = 'wavelengthz-shell-v31';
+// the bar is currently showing). v32 adds public/router.js: internal link
+// clicks between any two of the 16 non-onboarding routes now swap
+// #wl-app-root's content in place instead of doing a full page reload, so
+// the player bar (and everything else outside #wl-app-root) survives
+// navigating around the app -- the actual "keeps playing" behavior the
+// fixed bar was originally built for. Every page's inline Alpine app moved
+// off <body> onto <div id="wl-app-root"> and was extracted to its own
+// module (index.js, artist.js, personProfile.js, matches.js, match.js,
+// groups.js, notifications.js, messages.js, group.js -- all new, all added
+// to this precache list, alongside router.js itself); messages.js/group.js
+// additionally gained a destroy() that clears their 3s poll interval and
+// audio-unlock listeners, a leak that was harmless under the old
+// full-reload-per-navigation model but wouldn't have been under this one
+// without it. Also fixes two long-standing gaps in this precache list
+// itself -- /toast.js (used by nearly every page, never precached) and
+// /wavelengthzPlayer.js (already fixed in v31, kept here since this list
+// needed a full pass anyway) -- and a genuine bug on /profile: the photo
+// lightbox's prev/next buttons read profile.photoUrls outside the x-if=
+// "profile" guard the rest of the page uses, throwing "Cannot read
+// properties of null" in the console on every load before the profile
+// fetch resolved (Alpine's x-show evaluates its expression continuously
+// regardless of visibility, unlike x-if). /onboarding is deliberately not
+// on the router (see router.js's ROUTES) -- it's a one-time gate reached by
+// redirect, not a destination anyone links to or navigates back into.
+const CACHE_NAME = 'wavelengthz-shell-v32';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -101,9 +124,20 @@ const APP_SHELL = [
   '/history.js',
   '/search.js',
   '/photos.js',
+  '/toast.js',
   '/alpine.js',
   '/playerBar.js',
   '/wavelengthzPlayer.js',
+  '/router.js',
+  '/index.js',
+  '/artist.js',
+  '/personProfile.js',
+  '/matches.js',
+  '/match.js',
+  '/groups.js',
+  '/notifications.js',
+  '/messages.js',
+  '/group.js',
   '/tailwind.css',
   '/manifest.json',
   '/onboarding',

@@ -9,8 +9,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/tailwind.css" />
 </head>
-<body class="min-h-screen bg-base text-neutral-50 p-4 pb-app" x-data="profileApp()">
+<body class="min-h-screen bg-base text-neutral-50 p-4 pb-app">
   <div id="wl-header-root"></div>
+  <div id="wl-app-root" x-data="pageApp()">
   <a href="/settings" class="mx-auto mb-2 block max-w-md text-sm text-neutral-400">&larr; Settings</a>
   <h1 class="mx-auto mb-4 max-w-md text-2xl font-bold">Profile</h1>
 
@@ -72,16 +73,27 @@
       </div>
     </div>
   </div>
+  </div>
 
   <script type="module">
     import { createProfileApp } from '/settings/profile.js';
     import { mountHeader, mountNav } from '/nav.js';
+    import { mountPlayerBar } from '/playerBar.js';
+    import '/router.js';
     mountHeader();
     mountNav();
+    mountPlayerBar();
 
-    window.profileApp = createProfileApp;
+    window.pageApp = createProfileApp;
   </script>
   <script defer src="/alpine.js"></script>
+  <!-- Fixed above the bottom nav, filled in by playerBar.js's mountPlayerBar()
+       -- see its own comment for why the two sub-containers are split and
+       never innerHTML'd together. Empty (0-height) until something plays. -->
+  <div id="wl-player-root" class="fixed inset-x-0 z-10" style="bottom: calc(var(--wl-nav-h) + env(safe-area-inset-bottom))">
+    <div id="wl-player-chrome" class="border-t border-white/10 bg-surface/90 backdrop-blur-lg"></div>
+    <div id="wl-player-iframe-host" class="hidden border-t border-white/10 bg-surface/90 backdrop-blur-lg"></div>
+  </div>
   <div id="wl-nav-root"></div>
 </body>
 </html>

@@ -9,8 +9,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/tailwind.css" />
 </head>
-<body class="min-h-screen bg-base text-neutral-50 p-4 pb-app" x-data="profileApp()" x-init="init()">
+<body class="min-h-screen bg-base text-neutral-50 p-4 pb-app">
   <div id="wl-header-root"></div>
+  <div id="wl-app-root" x-data="pageApp()" x-init="init()">
 
   <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
 
@@ -266,114 +267,30 @@
     <button
       type="button"
       class="btn-ghost absolute left-4 text-white"
-      x-show="profile.photoUrls.length > 1"
+      x-show="profile && profile.photoUrls.length > 1"
       @click.stop="prevPhoto()"
       aria-label="Previous photo"
     >‹</button>
     <button
       type="button"
       class="btn-ghost absolute right-4 text-white"
-      x-show="profile.photoUrls.length > 1"
+      x-show="profile && profile.photoUrls.length > 1"
       @click.stop="nextPhoto()"
       aria-label="Next photo"
     >›</button>
   </div>
+  </div>
 
   <script type="module">
-    import { api } from '/app.js';
     import { mountHeader, mountNav } from '/nav.js';
-    import { requireAuth } from '/auth.js';
-    import { play, togglePlayPause, isCurrentTrack, mountPlayerBar } from '/playerBar.js';
-    import { showErrorToast } from '/toast.js';
+    import { createPersonProfileApp } from '/personProfile.js';
+    import { mountPlayerBar } from '/playerBar.js';
+    import '/router.js';
     mountHeader();
     mountNav();
     mountPlayerBar();
 
-    const PAGE_SIZE = 6;
-
-    window.profileApp = function () {
-      return {
-        userId: new URLSearchParams(window.location.search).get('id'),
-        profile: null,
-        overlap: { sharedArtists: [], sharedTracks: [], sharedGenres: [] },
-        error: null,
-        PAGE_SIZE,
-        visibleArtistsCount: PAGE_SIZE,
-        visibleTracksCount: PAGE_SIZE,
-        // Shared by the inline carousel and the full-screen lightbox -- both
-        // just show profile.photoUrls[carouselIndex], so paging through one
-        // keeps the other in sync whichever gets opened.
-        carouselIndex: 0,
-        lightboxOpen: false,
-        isCurrentTrack,
-
-        async init() {
-          if (!(await requireAuth())) return;
-          try {
-            const res = await api.personProfile(this.userId);
-            this.profile = res.profile;
-            this.overlap = res.overlap;
-          } catch (e) {
-            this.error = 'Could not load this profile. Please try again.';
-          }
-        },
-
-        // Playback happens in the fixed player bar (public/playerBar.js)
-        // above the bottom nav, shared across all three track lists on this
-        // page (top/shared/recent) the same way it's shared across every
-        // other page that shows tracks.
-        async togglePlayer(track) {
-          if (isCurrentTrack(track.spotifyId)) {
-            await togglePlayPause();
-            return;
-          }
-          await play({ spotifyId: track.spotifyId, name: track.name, imageUrl: track.imageUrl });
-        },
-
-        // Clicking the currently-set anthem again clears it (trackId: null) --
-        // there's no separate "remove" affordance, same toggle either way.
-        async toggleAnthem(track) {
-          const next = this.profile.anthemTrack?.id === track.id ? null : track.id;
-          try {
-            await api.setAnthem(next);
-            this.profile.anthemTrack = next ? track : null;
-          } catch (e) {
-            showErrorToast('Could not update your anthem. Please try again.');
-          }
-        },
-
-        openLightbox() {
-          this.lightboxOpen = true;
-        },
-
-        closeLightbox() {
-          this.lightboxOpen = false;
-        },
-
-        nextPhoto() {
-          this.carouselIndex = (this.carouselIndex + 1) % this.profile.photoUrls.length;
-        },
-
-        prevPhoto() {
-          this.carouselIndex = (this.carouselIndex - 1 + this.profile.photoUrls.length) % this.profile.photoUrls.length;
-        },
-
-        // Same crude prompt-based flow as match.html's report() -- there's no
-        // report UI anywhere in the app yet beyond this, so this matches
-        // rather than reinvents it. Reports here can cover anything on the
-        // profile (photos, bio) since the report itself just targets the
-        // user, same as everywhere else reporting exists.
-        async report() {
-          const reason = prompt('Reason (inappropriate_photos, harassment, fake_profile, spam, underage, other):');
-          if (!reason) return;
-          try {
-            await api.report(this.userId, reason);
-          } catch (e) {
-            showErrorToast('Could not submit that report. Please try again.');
-          }
-        },
-      };
-    };
+    window.pageApp = createPersonProfileApp;
   </script>
   <script defer src="/alpine.js"></script>
   <!-- Fixed above the bottom nav, filled in by playerBar.js's mountPlayerBar()

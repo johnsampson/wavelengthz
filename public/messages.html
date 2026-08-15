@@ -9,8 +9,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/tailwind.css" />
 </head>
-<body class="min-h-screen bg-base text-neutral-50 p-4 flex flex-col" x-data="messagesApp()" x-init="init()">
+<body class="min-h-screen bg-base text-neutral-50 p-4 flex flex-col">
   <div id="wl-header-root"></div>
+  <div id="wl-app-root" x-data="pageApp()" x-init="init()" class="flex flex-1 flex-col min-h-0">
   <p x-show="error" x-text="error" class="text-red-400 max-w-md w-full mx-auto mb-2" role="alert"></p>
   <ul id="message-list" class="flex-1 flex flex-col gap-2 overflow-y-auto max-w-md w-full mx-auto">
     <template x-for="message in messages" :key="message.id">
@@ -37,190 +38,27 @@
     <input id="message-input" class="field flex-1" x-model="draft" maxlength="2000" required />
     <button type="submit" class="btn-primary px-5">Send</button>
   </form>
+  </div>
 
   <script type="module">
-    import { api } from '/app.js';
     import { mountHeader, mountNav } from '/nav.js';
-    import { requireAuth } from '/auth.js';
-    import { showErrorToast } from '/toast.js';
+    import { createMessagesApp } from '/messages.js';
+    import { mountPlayerBar } from '/playerBar.js';
+    import '/router.js';
     mountHeader();
     mountNav();
+    mountPlayerBar();
 
-    window.messagesApp = function () {
-      return {
-        matchId: new URLSearchParams(window.location.search).get('matchId'),
-        messages: [],
-        draft: '',
-        error: null,
-        myId: null,
-        otherName: '',
-        pollTimer: null,
-        audioCtx: null,
-        // Client-side mirror of src/lib/messageRecall.ts's RECALL_WINDOW_MS
-        // -- only governs whether the Recall button shows; the server is
-        // still the authority (a stale button click just surfaces an error).
-        recallWindowMs: 15000,
-        now: Date.now(),
-        async init() {
-          if (!(await requireAuth())) return;
-          try {
-            const [me, matchRes] = await Promise.all([api.me(), api.matchDetail(this.matchId)]);
-            this.myId = me.user.id;
-            this.otherName = matchRes.match.otherDisplayName || 'Wavelengthz user';
-          } catch (e) {
-            // Non-fatal -- messages themselves still load and render (just
-            // without the sender label/alignment) even if this fails.
-          }
-          await this.load();
-          this.scrollToBottom();
-          // No WebSocket/Durable-Object infrastructure in this app -- short
-          // polling is the simplest way to approximate "live" without a
-          // bigger architecture change. 3s feels responsive while staying
-          // well under the general API rate limit (120 req/min/IP; this
-          // is 20). Paused while the tab isn't visible (see poll()).
-          this.pollTimer = setInterval(() => this.poll(), 3000);
-          // Browsers suspend a fresh AudioContext until a real user gesture
-          // happens -- unlock it on the first tap/keypress on this page so a
-          // later poll-triggered sound (with no gesture of its own) can
-          // actually play. Harmless if the user never interacts before a
-          // notification would fire; it just stays silent that once.
-          const unlockAudio = () => this.ensureAudioContext()?.resume();
-          document.addEventListener('pointerdown', unlockAudio, { once: true });
-          document.addEventListener('keydown', unlockAudio, { once: true });
-        },
-        async load() {
-          this.error = null;
-          try {
-            const res = await api.messages(this.matchId);
-            this.messages = res.messages;
-          } catch (e) {
-            this.error = 'Could not load messages. Please try again.';
-          }
-        },
-        async poll() {
-          // Silent on failure, and skipped while the tab is hidden -- a
-          // background refresh shouldn't interrupt an active conversation
-          // with an error banner over a transient blip, or waste requests
-          // on a tab nobody's looking at.
-          if (document.hidden) return;
-          this.now = Date.now(); // re-evaluates canRecall()'s x-show each tick
-          try {
-            const res = await api.messages(this.matchId);
-            const grew = res.messages.length > this.messages.length;
-            // A recall doesn't change the message count -- it flips
-            // recalledAt on an already-known row -- so length alone missed
-            // it entirely for the other participant (the sender already
-            // sees their own recall optimistically, in recall() below).
-            const recalledChanged = res.messages.some((m) => {
-              const existing = this.messages.find((x) => x.id === m.id);
-              return existing && existing.recalledAt !== m.recalledAt;
-            });
-            if (grew) {
-              const arrived = res.messages.slice(this.messages.length);
-              this.messages = res.messages;
-              this.$nextTick(() => this.scrollToBottom());
-              // Only for messages from the other person -- never alert on
-              // one's own message showing up (e.g. sent from another tab).
-              if (arrived.some((m) => m.sender_id !== this.myId)) this.notifyNewMessage();
-            } else if (recalledChanged || res.messages.length !== this.messages.length) {
-              this.messages = res.messages;
-            }
-          } catch (e) {
-            // Ignore -- the next tick retries.
-          }
-        },
-        // Always-on for now -- good candidates for a future notification
-        // settings toggle (sound/vibrate on or off) once one exists.
-        notifyNewMessage() {
-          this.playNotificationSound();
-          // No-op on browsers/platforms without the Vibration API --
-          // notably iOS Safari, which has never implemented it.
-          if (navigator.vibrate) navigator.vibrate(200);
-        },
-        ensureAudioContext() {
-          if (!this.audioCtx) {
-            const AudioCtx = window.AudioContext || window.webkitAudioContext;
-            if (AudioCtx) this.audioCtx = new AudioCtx();
-          }
-          return this.audioCtx;
-        },
-        playNotificationSound() {
-          // Synthesized rather than a shipped audio file -- a short two-tone
-          // beep needs no asset, no CSP media-src change, and no network
-          // request.
-          const ctx = this.ensureAudioContext();
-          if (!ctx) return;
-          try {
-            if (ctx.state === 'suspended') ctx.resume();
-            const now = ctx.currentTime;
-            [880, 1174.66].forEach((freq, i) => {
-              const oscillator = ctx.createOscillator();
-              const gain = ctx.createGain();
-              oscillator.connect(gain);
-              gain.connect(ctx.destination);
-              oscillator.type = 'sine';
-              oscillator.frequency.value = freq;
-              const start = now + i * 0.12;
-              gain.gain.setValueAtTime(0.001, start);
-              gain.gain.exponentialRampToValueAtTime(0.15, start + 0.02);
-              gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.22);
-              oscillator.start(start);
-              oscillator.stop(start + 0.22);
-            });
-          } catch (e) {
-            // Sound is a nice-to-have -- an autoplay restriction or an
-            // unsupported browser must not break message polling.
-          }
-        },
-        scrollToBottom() {
-          const list = document.getElementById('message-list');
-          if (list) list.scrollTop = list.scrollHeight;
-        },
-        canRecall(message) {
-          return message.sender_id === this.myId && !message.recalledAt && this.now - message.created_at < this.recallWindowMs;
-        },
-        async recall(message) {
-          this.error = null;
-          try {
-            await api.recallMessage(this.matchId, message.id);
-            message.recalledAt = Date.now();
-          } catch (e) {
-            showErrorToast('Could not recall that message. Please try again.');
-          }
-        },
-        async send() {
-          const trimmed = this.draft.trim();
-          if (!trimmed) return;
-          this.error = null;
-          // Cheap client-side charset pre-check for instant feedback -- the
-          // profanity blocklist only lives server-side (src/lib/messageFilter.ts
-          // isn't importable from a static asset page), so the server call
-          // below is still the authoritative check either way. Must stay in
-          // sync with src/lib/messageFilter.ts's ALLOWED_CHARS_RE.
-          if (!/^[-A-Za-z0-9 .,!?']*$/.test(trimmed)) {
-            showErrorToast('Messages can only contain letters, numbers, spaces, and basic punctuation ( . , ! ? \' ).');
-            return;
-          }
-          try {
-            await api.sendMessage(this.matchId, trimmed);
-            this.draft = '';
-            this.now = Date.now();
-            await this.load();
-            this.$nextTick(() => this.scrollToBottom());
-          } catch (e) {
-            if (e.status === 400 && e.body?.error === 'invalid_message') {
-              showErrorToast('That message isn\'t allowed. Please rephrase it.');
-            } else if (e.status === 403 && e.body?.error === 'profile_incomplete') {
-              showErrorToast('Finish setting up messaging in Settings → Messaging before sending.');
-            } else {
-              showErrorToast('Could not send that message. Please try again.');
-            }
-          }
-        },
-      };
-    };
+    window.pageApp = createMessagesApp;
   </script>
   <script defer src="/alpine.js"></script>
+  <!-- Fixed above the bottom nav, filled in by playerBar.js's mountPlayerBar()
+       -- see its own comment for why the two sub-containers are split and
+       never innerHTML'd together. Empty (0-height) until something plays. -->
+  <div id="wl-player-root" class="fixed inset-x-0 z-10" style="bottom: calc(var(--wl-nav-h) + env(safe-area-inset-bottom))">
+    <div id="wl-player-chrome" class="border-t border-white/10 bg-surface/90 backdrop-blur-lg"></div>
+    <div id="wl-player-iframe-host" class="hidden border-t border-white/10 bg-surface/90 backdrop-blur-lg"></div>
+  </div>
   <div id="wl-nav-root"></div>
 </body>
 </html>
