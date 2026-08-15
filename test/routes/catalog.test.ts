@@ -783,11 +783,32 @@ describe('POST /api/artists', () => {
       );
 
     await post();
-    await post(); // second POST hits INSERT OR IGNORE's no-op path -- must not double-count
+    await post(); // second POST hits the DB-first short-circuit below -- must not double-count
 
     const genreRow = await env.DB.prepare('SELECT * FROM genres WHERE genre = ?').bind('indie').first<any>();
     expect(genreRow.artist_count).toBe(1);
 
+    vi.unstubAllGlobals();
+  });
+
+  it('does not call Spotify at all when the artist is already cataloged (DB-first)', async () => {
+    // local-1 is already seeded (beforeEach) -- any fetch at all here means
+    // the DB-first short-circuit didn't fire.
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo) => {
+      throw new Error(`Spotify should not have been called: ${input.toString()}`);
+    }));
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/artists', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ spotifyArtistId: 'spotify-local-1' }),
+    });
+
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(res.status).toBe(200);
+    expect(body.artistId).toBe('local-1');
     vi.unstubAllGlobals();
   });
 });
@@ -840,6 +861,29 @@ describe('POST /api/tracks', () => {
     const genreRow = await env.DB.prepare('SELECT * FROM genres WHERE genre = ?').bind('pop').first<any>();
     expect(genreRow.track_count).toBe(1);
 
+    vi.unstubAllGlobals();
+  });
+
+  it('does not call Spotify at all when the track is already cataloged (DB-first)', async () => {
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, source, approved, created_at, updated_at) VALUES ('existing-trk', 'trk1', 'Track One', 'local-1', 'seed', 1, 1000, 1000)`
+    ).run();
+    // Any fetch at all here means the DB-first short-circuit didn't fire.
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo) => {
+      throw new Error(`Spotify should not have been called: ${input.toString()}`);
+    }));
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/tracks', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ spotifyTrackId: 'trk1', artistId: 'local-1' }),
+    });
+
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(res.status).toBe(200);
+    expect(body.trackId).toBe('existing-trk');
     vi.unstubAllGlobals();
   });
 });
