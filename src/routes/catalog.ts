@@ -343,6 +343,18 @@ export function registerCatalogRoutes(router: RouterType) {
     if (!user) return new Response('Unauthorized', { status: 401 });
 
     const { spotifyArtistId } = await request.json<{ spotifyArtistId: string }>();
+
+    // DB-first, same reasoning as GET /api/artists/:id: this artist may
+    // already be cataloged -- a race with another user adding the same
+    // search result, or it landed via some other path (seedCatalog,
+    // artistTopUp, a weekly catalogRefresh run) since this client's search
+    // results were fetched. upsertArtist's own ON CONFLICT(spotify_id) DO
+    // NOTHING already makes a redundant call here harmless, but only after
+    // paying for a live Spotify fetch (and the token needed to make it)
+    // first -- checking here skips both entirely.
+    const existingArtist = await env.DB.prepare('SELECT id FROM artists WHERE spotify_id = ?').bind(spotifyArtistId).first<{ id: string }>();
+    if (existingArtist) return Response.json({ ok: true, artistId: existingArtist.id });
+
     const token = await getValidAccessToken(user, env, env.DB).catch(() => getClientCredentialsToken(env));
     const artist = await fetchArtistById(token, spotifyArtistId);
 
@@ -396,6 +408,10 @@ export function registerCatalogRoutes(router: RouterType) {
 
     const artist = await env.DB.prepare('SELECT genres FROM artists WHERE id = ?').bind(artistId).first<{ genres: string }>();
     if (!artist) return Response.json({ error: 'unknown artist_id' }, { status: 400 });
+
+    // DB-first, same reasoning as POST /api/artists above.
+    const existingTrack = await env.DB.prepare('SELECT id FROM tracks WHERE spotify_id = ?').bind(spotifyTrackId).first<{ id: string }>();
+    if (existingTrack) return Response.json({ ok: true, trackId: existingTrack.id });
 
     const token = await getValidAccessToken(user, env, env.DB).catch(() => getClientCredentialsToken(env));
     const track = await fetchTrackById(token, spotifyTrackId, env.RATE_LIMIT_KV);
