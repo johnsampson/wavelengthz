@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/tailwind.css" />
 </head>
-<body class="min-h-screen bg-base text-neutral-50 p-4 pb-24" x-data="artistApp()" x-init="init()">
+<body class="min-h-screen bg-base text-neutral-50 p-4 pb-app" x-data="artistApp()" x-init="init()">
   <div id="wl-header-root"></div>
 
   <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
@@ -38,15 +38,19 @@
             <div class="flex items-center gap-3">
               <img :src="track.imageUrl" :alt="track.name" class="h-12 w-12 rounded object-cover ring-1 ring-white/10" />
               <p class="min-w-0 flex-1 truncate text-sm text-neutral-100" x-text="track.name"></p>
+              <!-- Playback happens in the fixed player bar
+                   (public/playerBar.js) above the bottom nav, not inline
+                   here -- this button just hands off to it and reflects
+                   whether this row is the one currently playing there. -->
               <button
                 class="btn-ghost h-9 w-9 rounded-full"
                 @click="togglePlayer(track)"
-                :aria-label="openTrackId === track.id ? 'Hide player' : 'Show player'"
+                :aria-label="isCurrentTrack(track.spotifyId) ? 'Pause' : 'Play'"
               >
-                <svg x-show="openTrackId !== track.id" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-5 w-5">
+                <svg x-show="!isCurrentTrack(track.spotifyId)" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-5 w-5">
                   <path d="M8 5v14l11-7z" />
                 </svg>
-                <svg x-show="openTrackId === track.id" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-5 w-5">
+                <svg x-show="isCurrentTrack(track.spotifyId)" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-5 w-5">
                   <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
                 </svg>
               </button>
@@ -63,50 +67,6 @@
                 aria-label="Like"
               >♥</button>
             </div>
-            <template x-if="openTrackId === track.id && customPlayerAvailable">
-              <div class="flex items-center gap-3 rounded-xl bg-gradient-to-r from-brand-500/10 to-accent-500/10 p-3 ring-1 ring-brand-500/30">
-                <button
-                  type="button"
-                  class="btn-primary h-9 w-9 shrink-0 rounded-full p-0"
-                  @click="togglePlayPause()"
-                  :aria-label="playerState && !playerState.paused ? 'Pause' : 'Play'"
-                >
-                  <svg x-show="!playerState || playerState.paused" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
-                    <path d="M8 5v14l11-7z" />
-                  </svg>
-                  <svg x-show="playerState && !playerState.paused" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
-                    <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
-                  </svg>
-                </button>
-                <div class="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-white/10">
-                  <div class="h-full rounded-full bg-gradient-to-r from-brand-500 to-accent-500" :style="`width:${progressPct}%`"></div>
-                </div>
-                <span class="wordmark shrink-0 text-[10px]">Wavelengthz Player</span>
-              </div>
-            </template>
-            <!-- Fallback path: no Premium/streaming-eligible Wavelengthz
-                 Player this page load, so this track plays the same way it
-                 always has. x-if (not x-show): x-show only toggles CSS
-                 display, so a closed iframe stayed mounted and kept playing.
-                 x-if actually removes the element from the DOM, which stops
-                 Spotify's embedded player. autoplay=1 only takes effect
-                 because the iframe is mounted from a click handler
-                 (openTrackId is set by @click above) -- that user gesture is
-                 what lets the browser's autoplay policy allow it. -->
-            <template x-if="openTrackId === track.id && !customPlayerAvailable">
-              <div class="flex flex-col gap-1">
-                <span class="self-start text-[10px] font-semibold tracking-wide text-amber-400 uppercase">Basic player</span>
-                <iframe
-                  :src="`https://open.spotify.com/embed/track/${track.spotifyId}?theme=0&autoplay=1`"
-                  width="100%"
-                  height="80"
-                  frameborder="0"
-                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                  loading="lazy"
-                  class="rounded-xl"
-                ></iframe>
-              </div>
-            </template>
           </li>
         </template>
       </ul>
@@ -128,10 +88,11 @@
     import { api } from '/app.js';
     import { mountHeader, mountNav } from '/nav.js';
     import { requireAuth } from '/auth.js';
-    import { checkPlayerAvailability, playTrack, pausePlayback, resumePlayback, onStateChange } from '/wavelengthzPlayer.js';
+    import { play, togglePlayPause, isCurrentTrack, mountPlayerBar } from '/playerBar.js';
     import { showErrorToast } from '/toast.js';
     mountHeader();
     mountNav();
+    mountPlayerBar();
 
     // Matches src/routes/catalog.ts's ARTIST_PROFILE_TRACK_LIMIT -- the
     // server default this page starts at, and the increment each "Load
@@ -144,28 +105,10 @@
         artist: null,
         tracks: [],
         error: null,
-        // Which track's player row is expanded, custom or iframe either way
-        // -- see customPlayerAvailable below for which one actually renders.
-        openTrackId: null,
         trackLimit: TRACKS_PAGE_SIZE,
         hasMoreTracks: false,
         loadingMore: false,
-        // Set once at init from wavelengthzPlayer.js's own Premium +
-        // `streaming`-scope check. False (Free tier, or not yet re-
-        // authorized since that scope was added) means every track on this
-        // page falls back to the same open.spotify.com/embed iframe it
-        // always used -- see src/index.ts's CSP comment for why this can't
-        // just always be attempted.
-        customPlayerAvailable: false,
-        // The open track's live position/duration/paused state, from the
-        // Wavelengthz Player's own player_state_changed event. Only
-        // meaningful while customPlayerAvailable is true.
-        playerState: null,
-
-        get progressPct() {
-          if (!this.playerState || !this.playerState.duration) return 0;
-          return (this.playerState.position / this.playerState.duration) * 100;
-        },
+        isCurrentTrack,
 
         async init() {
           if (!(await requireAuth())) return;
@@ -186,26 +129,6 @@
                 ? "Spotify's a little busy right now. Please try again in a moment."
                 : 'Could not load this artist. Please try again.';
           }
-
-          const availability = await checkPlayerAvailability();
-          this.customPlayerAvailable = availability.available;
-          if (this.customPlayerAvailable) {
-            onStateChange((state) => {
-              // Ignore state for a track other than the one actually open on
-              // this page -- state comes from the page's one shared Connect
-              // device, so a stale event for whatever played previously
-              // shouldn't reopen/repopulate a since-closed row.
-              const openTrack = this.tracks.find((t) => t.id === this.openTrackId);
-              if (!openTrack || !state || state.track_window?.current_track?.id !== openTrack.spotifyId) return;
-              this.playerState = { paused: state.paused, position: state.position, duration: state.duration };
-            });
-          }
-        },
-
-        async togglePlayPause() {
-          if (!this.playerState) return;
-          if (this.playerState.paused) await resumePlayback();
-          else await pausePlayback();
         },
 
         // GET /api/artists/:id has no offset/cursor to resume from
@@ -229,24 +152,11 @@
         },
 
         async togglePlayer(track) {
-          if (this.openTrackId === track.id) {
-            if (this.customPlayerAvailable) await pausePlayback();
-            this.openTrackId = null;
-            this.playerState = null;
+          if (isCurrentTrack(track.spotifyId)) {
+            await togglePlayPause();
             return;
           }
-          this.openTrackId = track.id;
-          this.playerState = null;
-          if (!this.customPlayerAvailable) return; // the iframe template handles itself
-          const started = await playTrack(track.spotifyId);
-          if (!started) {
-            // Failed at the actual play call despite passing the earlier
-            // availability check (a transient Spotify/network hiccup, most
-            // likely) -- degrade to the iframe for the rest of this page
-            // view instead of leaving the row stuck on a player that never
-            // starts.
-            this.customPlayerAvailable = false;
-          }
+          await play({ spotifyId: track.spotifyId, name: track.name, imageUrl: track.imageUrl });
         },
 
         async swipeTrack(track, direction) {
@@ -263,6 +173,13 @@
     };
   </script>
   <script defer src="/alpine.js"></script>
+  <!-- Fixed above the bottom nav, filled in by playerBar.js's mountPlayerBar()
+       -- see its own comment for why the two sub-containers are split and
+       never innerHTML'd together. Empty (0-height) until something plays. -->
+  <div id="wl-player-root" class="fixed inset-x-0 z-10" style="bottom: calc(var(--wl-nav-h) + env(safe-area-inset-bottom))">
+    <div id="wl-player-chrome" class="border-t border-white/10 bg-surface/90 backdrop-blur-lg"></div>
+    <div id="wl-player-iframe-host" class="hidden border-t border-white/10 bg-surface/90 backdrop-blur-lg"></div>
+  </div>
   <div id="wl-nav-root"></div>
 </body>
 </html>

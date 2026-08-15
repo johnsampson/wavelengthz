@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="/tailwind.css" />
   <link rel="manifest" href="/manifest.json" />
 </head>
-<body class="min-h-screen bg-base text-neutral-50 pb-24" x-data="deckApp()" x-init="init()">
+<body class="min-h-screen bg-base text-neutral-50 pb-app" x-data="deckApp()" x-init="init()">
   <div id="wl-header-root"></div>
   <header class="flex flex-col items-center gap-3 pb-3">
     <div class="flex items-center gap-2 rounded-full bg-surface2 p-1" x-show="authed === true">
@@ -49,66 +49,24 @@
              attachSwipeDeck's own pointerdown listener starts a drag capture,
              which swallows the button's click entirely. Deliberately
              tap-to-play, not autoplay-on-card-appear: most mobile browsers
-             block unmuted autoplay without a gesture on this exact iframe
-             anyway, and firing sound on every card swiped past would be
-             disruptive regardless. -->
+             block unmuted autoplay without a gesture anyway, and firing
+             sound on every card swiped past would be disruptive regardless.
+             Playback itself now happens in the fixed player bar
+             (public/playerBar.js) above the bottom nav, not inline here --
+             this chip just hands off to it and reflects whether this
+             track is the one currently playing there. -->
         <button
           type="button"
           x-show="current?.anthemTrack"
           class="absolute right-3 top-3 z-10 flex max-w-[75%] items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm"
           @pointerdown.stop
           @click.stop="toggleAnthem()"
-          :aria-label="anthemOpen ? 'Hide anthem player' : `Play ${current?.anthemTrack?.name}`"
+          :aria-label="isCurrentAnthem() ? 'Pause' : `Play ${current?.anthemTrack?.name}`"
         >
-          <span aria-hidden="true">🎵</span>
+          <span aria-hidden="true" x-text="isCurrentAnthem() ? '⏸' : '🎵'"></span>
           <span class="truncate" x-text="current?.anthemTrack?.name"></span>
         </button>
         <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-5 pt-16">
-          <template x-if="anthemOpen && current?.anthemTrack && customPlayerAvailable">
-            <div
-              class="mb-3 flex items-center gap-3 rounded-xl bg-gradient-to-r from-brand-500/20 to-accent-500/20 p-3 ring-1 ring-brand-500/40 backdrop-blur-sm"
-              @pointerdown.stop
-            >
-              <button
-                type="button"
-                class="btn-primary h-9 w-9 shrink-0 rounded-full p-0"
-                @click.stop="togglePlayPause()"
-                :aria-label="playerState && !playerState.paused ? 'Pause' : 'Play'"
-              >
-                <svg x-show="!playerState || playerState.paused" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-                <svg x-show="playerState && !playerState.paused" viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">
-                  <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
-                </svg>
-              </button>
-              <div class="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-white/10">
-                <div class="h-full rounded-full bg-gradient-to-r from-brand-500 to-accent-500" :style="`width:${progressPct}%`"></div>
-              </div>
-              <span class="wordmark shrink-0 text-[10px]">Wavelengthz Player</span>
-            </div>
-          </template>
-          <!-- Fallback path: no Premium/streaming-eligible Wavelengthz
-               Player this page load. x-if (not x-show): actually unmounts
-               the iframe so the track stops -- same reasoning as
-               public/artist.html/profile.html. autoplay=1 is safe here
-               because the iframe only mounts from the chip's own click
-               handler above, so the browser's autoplay policy sees the
-               required user gesture. -->
-          <template x-if="anthemOpen && current?.anthemTrack && !customPlayerAvailable">
-            <div class="mb-3 flex flex-col gap-1" @pointerdown.stop>
-              <span class="self-start text-[10px] font-semibold tracking-wide text-amber-400 uppercase">Basic player</span>
-              <iframe
-                :src="`https://open.spotify.com/embed/track/${current.anthemTrack.spotifyId}?theme=0&autoplay=1`"
-                width="100%"
-                height="80"
-                frameborder="0"
-                allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                loading="lazy"
-                class="rounded-xl"
-              ></iframe>
-            </div>
-          </template>
           <h2 class="text-2xl font-bold" x-text="current?.name || current?.displayName"></h2>
           <p class="text-neutral-200" x-text="current?.bio || current?.distanceLabel"></p>
           <div x-show="mode === 'people' && current?.topGenres?.length > 0" class="mt-2 flex flex-wrap gap-1.5">
@@ -263,10 +221,11 @@
     import { mountHeader, mountNav } from '/nav.js';
     import { getAuthedUser } from '/auth.js';
     import { shouldSearch, debounce, loadStoredMode, storeMode, saveSearchState, takeSearchState } from '/search.js';
-    import { checkPlayerAvailability, playTrack, pausePlayback, resumePlayback, onStateChange } from '/wavelengthzPlayer.js';
+    import { play, togglePlayPause, isCurrentTrack, mountPlayerBar } from '/playerBar.js';
     import { showErrorToast } from '/toast.js';
     mountHeader();
     mountNav();
+    mountPlayerBar();
 
     window.deckApp = function () {
       return {
@@ -290,17 +249,12 @@
         // pass count just crossed the threshold (src/routes/musicSwipes.ts);
         // null the rest of the time.
         genrePrompt: null,
-        // Whether the current card's anthem player is expanded -- reset
-        // wherever `current` changes (showNext, decide) so a track never
-        // keeps playing into the next card.
-        anthemOpen: false,
-        // See public/artist.html's identical fields for the full explanation.
-        customPlayerAvailable: false,
-        playerState: null,
 
-        get progressPct() {
-          if (!this.playerState || !this.playerState.duration) return 0;
-          return (this.playerState.position / this.playerState.duration) * 100;
+        // Reads playerBar.js's own module state rather than keeping a local
+        // copy -- true exactly when the current card's anthem is the track
+        // actually playing in the fixed bar.
+        isCurrentAnthem() {
+          return !!this.current?.anthemTrack && isCurrentTrack(this.current.anthemTrack.spotifyId);
         },
 
         async init() {
@@ -308,15 +262,6 @@
           this.authed = !!user;
           if (this.authed) {
             await this.loadQueue();
-            const availability = await checkPlayerAvailability();
-            this.customPlayerAvailable = availability.available;
-            if (this.customPlayerAvailable) {
-              onStateChange((state) => {
-                if (!this.anthemOpen || !this.current?.anthemTrack || !state) return;
-                if (state.track_window?.current_track?.id !== this.current.anthemTrack.spotifyId) return;
-                this.playerState = { paused: state.paused, position: state.position, duration: state.duration };
-              });
-            }
             // Reopens the search modal with its previous query/results if
             // this load is the return trip from tapping into a search
             // result (selectArtist saves it right before navigating away,
@@ -335,23 +280,16 @@
           this.debouncedSearch = debounce(() => this.runSearch(), 300);
         },
 
-        // Closes the anthem panel AND actually stops playback -- unlike the
-        // iframe path (unmounting via x-if stops Spotify's embedded player
-        // on its own), the Wavelengthz Player is driven entirely by JS calls,
-        // so hiding the panel alone would leave a track playing, unheard, in
-        // the background after the card it belongs to is gone.
-        async closeAnthem() {
-          if (this.anthemOpen && this.customPlayerAvailable) await pausePlayback();
-          this.anthemOpen = false;
-          this.playerState = null;
-        },
-
         async setMode(mode) {
           this.mode = mode;
           storeMode(localStorage, mode);
           this.queue = [];
           this.current = null;
-          await this.closeAnthem();
+          // Deliberately does not stop whatever's playing in the fixed
+          // player bar -- switching mode (or swiping to the next card,
+          // below) is not an explicit "stop" action, matching this app's
+          // "only an explicit tap changes the active track" rule for the
+          // bar everywhere else.
           await this.loadQueue();
         },
 
@@ -363,7 +301,6 @@
 
         async showNext() {
           if (this.detachSwipe) this.detachSwipe();
-          await this.closeAnthem();
           this.current = this.queue.shift() ?? null;
           this.$nextTick(() => {
             const card = document.getElementById('card');
@@ -376,11 +313,6 @@
         async decide(direction) {
           if (!this.current) return;
           const swiped = this.current;
-          // Stop any playing anthem the instant the swipe is decided, not
-          // 250ms later when the card's fling animation finishes and
-          // showNext() actually runs -- otherwise it keeps playing, unheard,
-          // through the transition.
-          await this.closeAnthem();
           try {
             if (this.mode === 'people') {
               const res = await api.swipe('people', { target_id: swiped.id, direction });
@@ -499,23 +431,13 @@
         },
 
         async toggleAnthem() {
-          if (this.anthemOpen) {
-            if (this.customPlayerAvailable) await pausePlayback();
-            this.anthemOpen = false;
-            this.playerState = null;
+          if (!this.current?.anthemTrack) return;
+          if (this.isCurrentAnthem()) {
+            await togglePlayPause();
             return;
           }
-          this.anthemOpen = true;
-          this.playerState = null;
-          if (!this.customPlayerAvailable || !this.current?.anthemTrack) return; // the iframe template handles itself
-          const started = await playTrack(this.current.anthemTrack.spotifyId);
-          if (!started) this.customPlayerAvailable = false; // degrade for the rest of this page view
-        },
-
-        async togglePlayPause() {
-          if (!this.playerState) return;
-          if (this.playerState.paused) await resumePlayback();
-          else await pausePlayback();
+          const { spotifyId, name, imageUrl } = this.current.anthemTrack;
+          await play({ spotifyId, name, imageUrl });
         },
       };
     };
@@ -525,6 +447,13 @@
     }
   </script>
   <script defer src="/alpine.js"></script>
+  <!-- Fixed above the bottom nav, filled in by playerBar.js's mountPlayerBar()
+       -- see its own comment for why the two sub-containers are split and
+       never innerHTML'd together. Empty (0-height) until something plays. -->
+  <div id="wl-player-root" class="fixed inset-x-0 z-10" style="bottom: calc(var(--wl-nav-h) + env(safe-area-inset-bottom))">
+    <div id="wl-player-chrome" class="border-t border-white/10 bg-surface/90 backdrop-blur-lg"></div>
+    <div id="wl-player-iframe-host" class="hidden border-t border-white/10 bg-surface/90 backdrop-blur-lg"></div>
+  </div>
   <div id="wl-nav-root"></div>
 </body>
 </html>

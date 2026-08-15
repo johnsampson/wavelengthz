@@ -19,8 +19,42 @@
 @source "./swipe.js";
 @source "./settings.html";
 @source "./settings.js";
+@source "./playerBar.js";
+
+/*
+ * --wl-nav-h is a manually-verified estimate of the bottom nav's actual
+ * rendered height (nav.js's renderNavHtml -- py-2.5 + a 24px icon + a
+ * text-xs label), not a value Tailwind derives -- re-check it if that
+ * markup's spacing ever changes. --wl-player-h is set/cleared entirely by
+ * playerBar.js (0px when nothing is playing, 64px for the Wavelengthz
+ * Player chrome, 96px for the taller Basic player iframe+badge) -- see its
+ * own comment on renderChrome. Kept as :root custom properties (not
+ * Tailwind theme values) specifically so .pb-app/.mb-app below react to
+ * playerBar.js's changes with zero JS coordination on every page's part.
+ */
+:root {
+  --wl-nav-h: 64px;
+  --wl-player-h: 0px;
+}
 
 @layer components {
+  /*
+   * Replaces every page's hardcoded pb-24/mb-20 bottom clearance above the
+   * fixed nav bar (public/nav.js) -- both now account for the persistent
+   * player bar's variable height too (public/playerBar.js), so content
+   * never sits behind either one regardless of whether something's
+   * currently playing. The trailing rem term preserves roughly the same
+   * breathing room the original fixed values had beyond bare clearance
+   * (pb-24 = 6rem vs. an ~64px nav; mb-20 = 5rem, same nav, on
+   * messages.html/group.html's compose form specifically).
+   */
+  .pb-app {
+    padding-bottom: calc(var(--wl-nav-h) + var(--wl-player-h) + env(safe-area-inset-bottom) + 2rem);
+  }
+  .mb-app {
+    margin-bottom: calc(var(--wl-nav-h) + var(--wl-player-h) + env(safe-area-inset-bottom) + 1rem);
+  }
+
   .wordmark {
     @apply bg-gradient-to-r from-brand-400 to-accent-400 bg-clip-text font-extrabold tracking-tight text-transparent;
   }
