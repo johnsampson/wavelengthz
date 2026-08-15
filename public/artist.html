@@ -9,8 +9,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/tailwind.css" />
 </head>
-<body class="min-h-screen bg-base text-neutral-50 p-4 pb-app" x-data="artistApp()" x-init="init()">
+<body class="min-h-screen bg-base text-neutral-50 p-4 pb-app">
   <div id="wl-header-root"></div>
+  <div id="wl-app-root" x-data="pageApp()" x-init="init()">
 
   <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
 
@@ -83,94 +84,18 @@
       ></button>
     </div>
   </template>
+  </div>
 
   <script type="module">
-    import { api } from '/app.js';
     import { mountHeader, mountNav } from '/nav.js';
-    import { requireAuth } from '/auth.js';
-    import { play, togglePlayPause, isCurrentTrack, mountPlayerBar } from '/playerBar.js';
-    import { showErrorToast } from '/toast.js';
+    import { createArtistApp } from '/artist.js';
+    import { mountPlayerBar } from '/playerBar.js';
+    import '/router.js';
     mountHeader();
     mountNav();
     mountPlayerBar();
 
-    // Matches src/routes/catalog.ts's ARTIST_PROFILE_TRACK_LIMIT -- the
-    // server default this page starts at, and the increment each "Load
-    // more" tap adds on top of it.
-    const TRACKS_PAGE_SIZE = 30;
-
-    window.artistApp = function () {
-      return {
-        artistId: new URLSearchParams(window.location.search).get('id'),
-        artist: null,
-        tracks: [],
-        error: null,
-        trackLimit: TRACKS_PAGE_SIZE,
-        hasMoreTracks: false,
-        loadingMore: false,
-        isCurrentTrack,
-
-        async init() {
-          if (!(await requireAuth())) return;
-          try {
-            const res = await api.artistProfile(this.artistId);
-            this.artist = res.artist;
-            this.tracks = res.tracks;
-            this.hasMoreTracks = res.hasMore;
-          } catch (e) {
-            // Spotify's own rate limit (src/lib/spotify.ts's spotifyFetch),
-            // not this app's -- distinguished so this doesn't read as the
-            // same opaque failure as everything else. This artist likely has
-            // a large catalog (loading one can fan out to dozens of Spotify
-            // calls); it's worth telling the user that's specifically why,
-            // rather than leaving them to guess whether retrying is pointless.
-            this.error =
-              e.body?.error === 'spotify_rate_limited'
-                ? "Spotify's a little busy right now. Please try again in a moment."
-                : 'Could not load this artist. Please try again.';
-          }
-        },
-
-        // GET /api/artists/:id has no offset/cursor to resume from
-        // (fetchArtistTracks re-derives the list from scratch each call), so
-        // this re-fetches the whole thing at a higher limit rather than
-        // appending an incremental page.
-        async loadMoreTracks() {
-          if (this.loadingMore || !this.hasMoreTracks) return;
-          this.loadingMore = true;
-          const nextLimit = this.trackLimit + TRACKS_PAGE_SIZE;
-          try {
-            const res = await api.artistProfile(this.artistId, nextLimit);
-            this.trackLimit = nextLimit;
-            this.tracks = res.tracks;
-            this.hasMoreTracks = res.hasMore;
-          } catch (e) {
-            showErrorToast('Could not load more songs. Please try again.');
-          } finally {
-            this.loadingMore = false;
-          }
-        },
-
-        async togglePlayer(track) {
-          if (isCurrentTrack(track.spotifyId)) {
-            await togglePlayPause();
-            return;
-          }
-          await play({ spotifyId: track.spotifyId, name: track.name, imageUrl: track.imageUrl });
-        },
-
-        async swipeTrack(track, direction) {
-          const previous = track.direction;
-          track.direction = direction; // optimistic
-          try {
-            await api.swipe('music', { item_type: 'track', item_id: track.id, direction });
-          } catch (e) {
-            track.direction = previous;
-            showErrorToast('Could not save that. Please try again.');
-          }
-        },
-      };
-    };
+    window.pageApp = createArtistApp;
   </script>
   <script defer src="/alpine.js"></script>
   <!-- Fixed above the bottom nav, filled in by playerBar.js's mountPlayerBar()
