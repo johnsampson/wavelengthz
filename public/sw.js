@@ -82,8 +82,15 @@
 // reload or the browser's back button. Also makes returning from an
 // artist's page (tapped from a deck search result) reopen that same
 // search instead of landing on a bare, closed deck (search.js's new
-// saveSearchState/takeSearchState, wired into index.html).
-const CACHE_NAME = 'wavelengthz-shell-v30';
+// saveSearchState/takeSearchState, wired into index.html). v31 replaces the
+// 5 duplicated inline "Wavelengthz Player vs. Basic player" blocks on /,
+// /artist, and /profile with one shared fixed player bar above the bottom
+// nav (public/playerBar.js, new -- added to this precache list) -- also
+// touches index.html/artist.html/profile.html's own markup/scripts and
+// every other precached page's bottom padding (pb-24/mb-20 -> the new
+// .pb-app/.mb-app utility classes in tailwind.css, which react to whether
+// the bar is currently showing).
+const CACHE_NAME = 'wavelengthz-shell-v31';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -95,6 +102,8 @@ const APP_SHELL = [
   '/search.js',
   '/photos.js',
   '/alpine.js',
+  '/playerBar.js',
+  '/wavelengthzPlayer.js',
   '/tailwind.css',
   '/manifest.json',
   '/onboarding',
