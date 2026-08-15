@@ -45,14 +45,18 @@ export class SpotifyCooldownActiveError extends Error {
 
 // Spotify enforces its own app-wide rate limit, entirely independent of
 // anything this app's own limiter (src/index.ts) does. GET /api/artists/:id
-// in particular fans out to dozens of parallel Spotify calls for a single
-// page load -- one albums-list call, one call per album (up to 10), one call
-// per track (up to ARTIST_PROFILE_TRACK_MAX_LIMIT, since Spotify's batch
-// tracks endpoint 403s for this app -- see fetchTracksByIds below) -- which
-// is exactly the kind of burst that trips it. GET /api/artists/search, by
-// contrast, makes exactly one Spotify call, which is why "search works but
-// loading an artist doesn't" was the reported symptom rather than a general
-// outage.
+// used to fan out to dozens of parallel Spotify calls for a single page
+// load -- one albums-list call, one call per album (up to 10), then one
+// call per track (up to ARTIST_PROFILE_TRACK_MAX_LIMIT) just to get each
+// track's album art. That per-track phase is gone now (see fetchArtistTracks
+// below) -- an album's own `images` (returned free by the albums-list call)
+// is exactly the same data a track's own `album.images` field would have
+// held, so there was never a real need to ask Spotify for it twice. The
+// remaining fan-out (one albums-list call, one call per album, up to 10) is
+// still enough to trip Spotify's own limit, which is why this retry/backoff
+// machinery still exists. GET /api/artists/search, by contrast, makes
+// exactly one Spotify call, which is why "search works but loading an
+// artist doesn't" was the reported symptom rather than a general outage.
 //
 // Every Spotify call in this file goes through this instead of a raw
 // fetch(): a 429 gets a few bounded retries with exponential backoff,
@@ -169,22 +173,13 @@ async function spotifyFetch(url: string, options: RequestInit = {}, kv?: KVNames
   return res;
 }
 
-// Caps how many individual GET /v1/tracks/{id} calls (fetchTracksByIds,
-// below) are ever in flight at once. Firing all of them -- up to
-// ARTIST_PROFILE_TRACK_MAX_LIMIT (90, src/routes/catalog.ts) -- as one
-// simultaneous Promise.all was the single biggest contributor to tripping
-// Spotify's own rate limit: a burst far beyond anything a normal page load
-// should need to send at once. Batching keeps the peak burst size bounded
-// without falling back to a fully sequential (much slower) loop.
-const TRACK_FETCH_CONCURRENCY = 5;
-
-// Same reasoning as TRACK_FETCH_CONCURRENCY, applied to fetchArtistTracks'
-// other fan-out: fetchAlbumTrackIds (below) used to fire once per album --
-// up to ARTIST_ALBUMS_PAGE_SIZE (10) -- as one simultaneous Promise.all.
-// Smaller than TRACK_FETCH_CONCURRENCY only because it never has as many
-// items to bound in the first place (max 10 vs. up to 90); the point is the
-// same, keep every phase of the pipeline's peak burst bounded, not just the
-// track-detail phase.
+// Caps how many GET /v1/albums/{id}/tracks calls (fetchAlbumTracks, below)
+// are ever in flight at once. Firing all of them -- up to
+// ARTIST_ALBUMS_PAGE_SIZE (10) -- as one simultaneous Promise.all was a
+// real contributor to tripping Spotify's own rate limit (alongside the
+// former per-track detail fan-out, now removed entirely -- see
+// fetchArtistTracks' own comment). Batching keeps the peak burst size
+// bounded without falling back to a fully sequential (much slower) loop.
 const ALBUM_TRACKS_FETCH_CONCURRENCY = 5;
 
 async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>, delayMs = 0): Promise<R[]> {
@@ -407,7 +402,17 @@ const ARTIST_ALBUMS_PAGE_SIZE = 10;
 // Spotify's real max for this endpoint's `limit` is 50.
 const ALBUM_TRACKS_PAGE_SIZE = 50;
 
-async function fetchArtistAlbumIds(token: string, artistId: string, limit: number, kv?: KVNamespace): Promise<string[]> {
+interface SpotifyAlbumRef {
+  id: string;
+  // A Simplified Album Object's own `images` -- identical to what a full
+  // track object's `album.images` field would hold for any track on that
+  // album (a track's `album` IS this same object). Capturing it here means
+  // fetchAlbumTracks (below) never needs a separate per-track call just to
+  // learn the album art it already knows.
+  images: Array<{ url: string }>;
+}
+
+async function fetchArtistAlbums(token: string, artistId: string, limit: number, kv?: KVNamespace): Promise<SpotifyAlbumRef[]> {
   const res = await spotifyFetch(
     // include_groups excludes "compilation" and "appears_on" -- releases
     // where this artist isn't the actual album artist, which is exactly the
@@ -417,42 +422,27 @@ async function fetchArtistAlbumIds(token: string, artistId: string, limit: numbe
     kv
   );
   if (!res.ok) throw new Error(`Spotify artist albums fetch failed: ${res.status} ${await res.text()}`);
-  const data = await res.json<{ items: Array<{ id: string }> }>();
-  return data.items.map((album) => album.id);
+  const data = await res.json<{ items: Array<{ id: string; images?: Array<{ url: string }> }> }>();
+  return data.items.map((album) => ({ id: album.id, images: album.images ?? [] }));
 }
 
-async function fetchAlbumTrackIds(token: string, albumId: string, limit: number, kv?: KVNamespace): Promise<string[]> {
+// Returns Spotify's own Simplified Track Objects as-is (id, name,
+// preview_url, artists, ...) -- everything this app needs from a track
+// except album art, which the caller (fetchArtistTracks/
+// fetchArtistTracksQuick, below) attaches from the SpotifyAlbumRef this
+// album's tracks came from. No separate per-track GET /v1/tracks/{id} call
+// needed: this simplified object already carries preview_url and name, the
+// only two fields (besides art) that upsertTrack (src/lib/catalogUpsert.ts)
+// actually reads off a track.
+async function fetchAlbumTracks(token: string, albumId: string, limit: number, kv?: KVNamespace): Promise<any[]> {
   const res = await spotifyFetch(
     `https://api.spotify.com/v1/albums/${albumId}/tracks?limit=${Math.min(limit, ALBUM_TRACKS_PAGE_SIZE)}`,
     { headers: { Authorization: `Bearer ${token}` } },
     kv
   );
   if (!res.ok) throw new Error(`Spotify album tracks fetch failed: ${res.status} ${await res.text()}`);
-  const data = await res.json<{ items: Array<{ id: string }> }>();
-  return data.items.map((track) => track.id);
-}
-
-async function fetchTracksByIds(token: string, trackIds: string[], kv?: KVNamespace, delayMs = 0) {
-  // GET /v1/albums/{id}/tracks returns simplified track objects with no
-  // `album` field, so no album art -- full details come from fetchTrackById
-  // instead. The batch form of this lookup (GET /v1/tracks?ids=, plural)
-  // also 403s in Development Mode -- confirmed live, even with a single id
-  // -- while the singular GET /v1/tracks/{id} used here works fine, so this
-  // is one request per track rather than one batch request. Bounded by
-  // TRACK_FETCH_CONCURRENCY (see its own comment) rather than one giant
-  // Promise.all -- with no batch endpoint available, a large track count
-  // (up to ARTIST_PROFILE_TRACK_MAX_LIMIT) firing every request at once was
-  // the single biggest contributor to tripping Spotify's own rate limit.
-  // One id failing (removed/region-locked track) shouldn't drop the rest of
-  // the artist's tracks, so each fetch is isolated via .catch rather than
-  // one throw wiping out the whole batch.
-  const results = await mapWithConcurrency(
-    trackIds,
-    TRACK_FETCH_CONCURRENCY,
-    (id) => fetchTrackById(token, id, kv).catch(() => null),
-    delayMs
-  );
-  return results.filter((track): track is NonNullable<typeof track> => track != null);
+  const data = await res.json<{ items: any[] }>();
+  return data.items;
 }
 
 // Conservative starting guess for spacing out a background-priority
@@ -463,27 +453,40 @@ async function fetchTracksByIds(token: string, trackIds: string[], kv?: KVNamesp
 // never use this -- a real user is waiting on those.
 const SPOTIFY_BACKGROUND_PACING_DELAY_MS = 250;
 
+// Fetches one album's worth of tracks and stamps each with that album's own
+// `images` (see SpotifyAlbumRef above) so every caller downstream gets a
+// track shaped exactly like the old per-track-fetched objects (id, name,
+// preview_url, artists, album: {images}) without ever calling
+// GET /v1/tracks/{id}.
+async function fetchAlbumTracksWithArt(token: string, album: SpotifyAlbumRef, limit: number, kv?: KVNamespace): Promise<any[]> {
+  const tracks = await fetchAlbumTracks(token, album.id, limit, kv);
+  return tracks.map((track) => ({ ...track, album: { images: album.images } }));
+}
+
 // Only used for 'background'-priority fetchArtistTracks calls (the backfill
-// queue consumer, the deck's candidate top-up) -- fetches albums' track-ID
-// lists in ALBUM_TRACKS_FETCH_CONCURRENCY-sized chunks instead of one
+// queue consumer, the deck's candidate top-up) -- fetches albums' tracks in
+// ALBUM_TRACKS_FETCH_CONCURRENCY-sized chunks instead of one
 // mapWithConcurrency call across all (up to 10) albums, stopping as soon as
-// `limit` track ids have been gathered. The interactive branch below
+// `limit` tracks have been gathered. The interactive branch below
 // deliberately keeps fetching everything up front (see its own comment) --
 // this early-stop only makes sense once nothing is waiting on the result.
-async function gatherAlbumTrackIdsForBackground(
+async function gatherAlbumTracksForBackground(
   token: string,
-  albumIds: string[],
+  albums: SpotifyAlbumRef[],
   limit: number,
   kv: KVNamespace | undefined
-): Promise<string[]> {
-  const collected: string[] = [];
-  for (let i = 0; i < albumIds.length && collected.length < limit; i += ALBUM_TRACKS_FETCH_CONCURRENCY) {
-    const chunk = albumIds.slice(i, i + ALBUM_TRACKS_FETCH_CONCURRENCY);
-    const chunkResults = await mapWithConcurrency(chunk, ALBUM_TRACKS_FETCH_CONCURRENCY, (albumId) =>
-      fetchAlbumTrackIds(token, albumId, limit, kv)
+): Promise<any[]> {
+  const collected: any[] = [];
+  for (let i = 0; i < albums.length && collected.length < limit; i += ALBUM_TRACKS_FETCH_CONCURRENCY) {
+    const chunk = albums.slice(i, i + ALBUM_TRACKS_FETCH_CONCURRENCY);
+    const chunkResults = await mapWithConcurrency(
+      chunk,
+      ALBUM_TRACKS_FETCH_CONCURRENCY,
+      (album) => fetchAlbumTracksWithArt(token, album, limit, kv),
+      SPOTIFY_BACKGROUND_PACING_DELAY_MS
     );
     collected.push(...chunkResults.flat());
-    const hasMoreAlbums = i + ALBUM_TRACKS_FETCH_CONCURRENCY < albumIds.length;
+    const hasMoreAlbums = i + ALBUM_TRACKS_FETCH_CONCURRENCY < albums.length;
     if (collected.length < limit && hasMoreAlbums) {
       await new Promise((resolve) => setTimeout(resolve, SPOTIFY_BACKGROUND_PACING_DELAY_MS));
     }
@@ -508,27 +511,26 @@ export async function fetchArtistTracks(
   // earlier albums -- a handful of extra album-tracks calls (bounded by
   // ARTIST_ALBUMS_PAGE_SIZE, at most 10) is a better trade than sequential
   // round trips directly adding to page load latency. Still capped by the
-  // caller's own `limit` too (via fetchArtistAlbumIds's Math.min), so a
-  // small target -- e.g. artistTopUp.ts's TRACKS_PER_ARTIST -- doesn't fan
-  // out to 10 albums' worth of calls just to keep 2 tracks. Album order
-  // (most recent release first -- see the module comment above) is
-  // preserved via .flat(), so the truncation below still favors newer
-  // releases. This trade-off (fetch everything up front) is interactive-only
-  // -- 'background' priority uses gatherAlbumTrackIdsForBackground instead,
-  // since nothing is waiting on a background job's latency.
-  const albumIds = await fetchArtistAlbumIds(token, artistId, limit, kv);
+  // caller's own `limit` too (via fetchArtistAlbums's Math.min), so a small
+  // target -- e.g. artistTopUp.ts's TRACKS_PER_ARTIST -- doesn't fan out to
+  // 10 albums' worth of calls just to keep 2 tracks. Album order (most
+  // recent release first -- see the module comment above) is preserved via
+  // .flat(), so the truncation below still favors newer releases. This
+  // trade-off (fetch everything up front) is interactive-only -- 'background'
+  // priority uses gatherAlbumTracksForBackground instead, since nothing is
+  // waiting on a background job's latency.
+  const albums = await fetchArtistAlbums(token, artistId, limit, kv);
 
-  let trackIds: string[];
+  let tracks: any[];
   if (priority === 'background') {
-    trackIds = (await gatherAlbumTrackIdsForBackground(token, albumIds, limit, kv)).slice(0, limit);
+    tracks = (await gatherAlbumTracksForBackground(token, albums, limit, kv)).slice(0, limit);
   } else {
-    const albumTrackIdLists = await mapWithConcurrency(albumIds, ALBUM_TRACKS_FETCH_CONCURRENCY, (albumId) =>
-      fetchAlbumTrackIds(token, albumId, limit, kv)
+    const albumTrackLists = await mapWithConcurrency(albums, ALBUM_TRACKS_FETCH_CONCURRENCY, (album) =>
+      fetchAlbumTracksWithArt(token, album, limit, kv)
     );
-    trackIds = albumTrackIdLists.flat().slice(0, limit);
+    tracks = albumTrackLists.flat().slice(0, limit);
   }
 
-  const tracks = await fetchTracksByIds(token, trackIds, kv, priority === 'background' ? SPOTIFY_BACKGROUND_PACING_DELAY_MS : 0);
   // Belt-and-suspenders: a release where this artist is the album artist
   // should credit them on every track, but this costs nothing and matches
   // the same defensive check the old search-based path needed for real.
@@ -536,11 +538,11 @@ export async function fetchArtistTracks(
 }
 
 // Only the single most recent release, and only enough tracks from it to
-// show something -- not fetchArtistTracks' full ~10-album/~40-call fan-out.
-// Exists for GET /api/artists/:id's first (no ?limit=) view of a brand-new
-// artist specifically: the full fan-out was what tripped Spotify's own rate
-// limit under real load even after retries/concurrency-capping/caching
-// (see fetchArtistTracks' own comment above, and src/lib/artistTrackBackfill.ts,
+// show something -- not fetchArtistTracks' full ~10-album fan-out. Exists
+// for GET /api/artists/:id's first (no ?limit=) view of a brand-new artist
+// specifically: the full fan-out was what tripped Spotify's own rate limit
+// under real load even after retries/concurrency-capping/caching (see
+// fetchArtistTracks' own comment above, and src/lib/artistTrackBackfill.ts,
 // which fetches the rest of this same artist's discography off the request
 // path once this quick response has already gone out).
 const QUICK_ALBUM_LIMIT = 1;
@@ -552,16 +554,15 @@ export async function fetchArtistTracksQuick(
   kv?: KVNamespace,
   trackCount: number = QUICK_TRACK_LIMIT
 ) {
-  const albumIds = await fetchArtistAlbumIds(token, artistId, QUICK_ALBUM_LIMIT, kv);
-  if (albumIds.length === 0) return [];
+  const albums = await fetchArtistAlbums(token, artistId, QUICK_ALBUM_LIMIT, kv);
+  if (albums.length === 0) return [];
 
   // Sliced client-side after the call, not just trusted to the endpoint's
-  // own `?limit=` (which fetchAlbumTrackIds does pass) -- keeps this
+  // own `?limit=` (which fetchAlbumTracks does pass) -- keeps this
   // function's actual Spotify-call count deterministic regardless of how
   // many tracks come back, the same defense-in-depth reasoning as
   // fetchArtistTracks' own `.slice(0, limit)` above.
-  const trackIds = (await fetchAlbumTrackIds(token, albumIds[0], trackCount, kv)).slice(0, trackCount);
-  const tracks = await fetchTracksByIds(token, trackIds, kv);
+  const tracks = (await fetchAlbumTracksWithArt(token, albums[0], trackCount, kv)).slice(0, trackCount);
   return tracks.filter((track) => track.artists?.some((a: any) => a.id === artistId));
 }
 

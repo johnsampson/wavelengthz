@@ -34,17 +34,16 @@ function stubSpotify(tracks: Array<{ id: string; name: string }>) {
       const url = input.toString();
       if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
       if (url.includes('/artists/') && url.includes('/albums')) {
-        return new Response(JSON.stringify({ items: tracks.length > 0 ? [{ id: 'album-1' }] : [] }), { status: 200 });
+        return new Response(JSON.stringify({ items: tracks.length > 0 ? [{ id: 'album-1', images: [] }] : [] }), { status: 200 });
       }
       if (url.includes('/albums/album-1/tracks')) {
-        return new Response(JSON.stringify({ items: tracks.map((t) => ({ id: t.id })) }), { status: 200 });
-      }
-      const trackByIdMatch = url.match(/\/v1\/tracks\/([^/?]+)$/);
-      if (trackByIdMatch) {
-        const track = tracks.find((t) => t.id === trackByIdMatch[1]);
-        return track
-          ? new Response(JSON.stringify({ ...track, artists: [{ id: 'sp1' }] }), { status: 200 })
-          : new Response('not found', { status: 404 });
+        // No separate per-track detail fetch -- the album-tracks response
+        // already carries everything fetchArtistTracks needs (name,
+        // preview_url, artists); see spotify.ts's fetchAlbumTracks.
+        return new Response(
+          JSON.stringify({ items: tracks.map((t) => ({ id: t.id, name: t.name, preview_url: null, artists: [{ id: 'sp1' }] })) }),
+          { status: 200 }
+        );
       }
       throw new Error(`unexpected ${url}`);
     })

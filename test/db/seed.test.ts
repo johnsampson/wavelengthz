@@ -34,20 +34,20 @@ describe('seedCatalog', () => {
           );
         }
         if (url.includes('/artists/artist-1/albums')) {
-          return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+          return new Response(JSON.stringify({ items: [{ id: 'album-1', images: [{ url: 'http://img/t1' }] }] }), { status: 200 });
         }
         if (url.includes('/albums/album-1/tracks')) {
-          return new Response(JSON.stringify({ items: [{ id: 'track-1' }, { id: 'track-2' }] }), { status: 200 });
-        }
-        if (url.includes('/v1/tracks/track-1')) {
+          // No separate per-track detail fetch -- the album-tracks response
+          // already carries name/preview_url/artists directly (see
+          // spotify.ts's fetchAlbumTracks); album art comes from the
+          // album's own `images` above, not a per-track object.
           return new Response(
-            JSON.stringify({ id: 'track-1', name: 'Song One', artists: [{ id: 'artist-1', name: 'Shared Artist' }], album: { images: [{ url: 'http://img/t1' }] }, preview_url: 'http://preview/1' }),
-            { status: 200 }
-          );
-        }
-        if (url.includes('/v1/tracks/track-2')) {
-          return new Response(
-            JSON.stringify({ id: 'track-2', name: 'Song Two', artists: [{ id: 'artist-1', name: 'Shared Artist' }], album: { images: [{ url: 'http://img/t2' }] }, preview_url: null }),
+            JSON.stringify({
+              items: [
+                { id: 'track-1', name: 'Song One', preview_url: 'http://preview/1', artists: [{ id: 'artist-1', name: 'Shared Artist' }] },
+                { id: 'track-2', name: 'Song Two', preview_url: null, artists: [{ id: 'artist-1', name: 'Shared Artist' }] },
+              ],
+            }),
             { status: 200 }
           );
         }
@@ -112,20 +112,16 @@ describe('seedCatalog', () => {
           return new Response('server error', { status: 500 });
         }
         if (url.includes('/artists/artist-ok/albums')) {
-          return new Response(JSON.stringify({ items: [{ id: 'album-ok' }] }), { status: 200 });
+          return new Response(JSON.stringify({ items: [{ id: 'album-ok', images: [{ url: 'http://img/t1' }] }] }), { status: 200 });
         }
         if (url.includes('/albums/album-ok/tracks')) {
-          return new Response(JSON.stringify({ items: [{ id: 'track-1' }, { id: 'track-2' }] }), { status: 200 });
-        }
-        if (url.includes('/v1/tracks/track-1')) {
           return new Response(
-            JSON.stringify({ id: 'track-1', name: 'Song One', artists: [{ id: 'artist-ok', name: 'Reliable Artist' }], album: { images: [{ url: 'http://img/t1' }] }, preview_url: 'http://preview/1' }),
-            { status: 200 }
-          );
-        }
-        if (url.includes('/v1/tracks/track-2')) {
-          return new Response(
-            JSON.stringify({ id: 'track-2', name: 'Song Two', artists: [{ id: 'artist-ok', name: 'Reliable Artist' }], album: { images: [{ url: 'http://img/t2' }] }, preview_url: null }),
+            JSON.stringify({
+              items: [
+                { id: 'track-1', name: 'Song One', preview_url: 'http://preview/1', artists: [{ id: 'artist-ok', name: 'Reliable Artist' }] },
+                { id: 'track-2', name: 'Song Two', preview_url: null, artists: [{ id: 'artist-ok', name: 'Reliable Artist' }] },
+              ],
+            }),
             { status: 200 }
           );
         }
@@ -171,20 +167,16 @@ describe('seedCatalog', () => {
         );
       }
       if (url.includes('/artists/artist-1/albums')) {
-        return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+        return new Response(JSON.stringify({ items: [{ id: 'album-1', images: [{ url: 'http://img/t1' }] }] }), { status: 200 });
       }
       if (url.includes('/albums/album-1/tracks')) {
-        return new Response(JSON.stringify({ items: [{ id: 'track-1' }, { id: 'track-2' }] }), { status: 200 });
-      }
-      if (url.includes('/v1/tracks/track-1')) {
         return new Response(
-          JSON.stringify({ id: 'track-1', name: 'Song One', artists: [{ id: 'artist-1', name: 'Shared Artist' }], album: { images: [{ url: 'http://img/t1' }] }, preview_url: 'http://preview/1' }),
-          { status: 200 }
-        );
-      }
-      if (url.includes('/v1/tracks/track-2')) {
-        return new Response(
-          JSON.stringify({ id: 'track-2', name: 'Song Two', artists: [{ id: 'artist-1', name: 'Shared Artist' }], album: { images: [{ url: 'http://img/t2' }] }, preview_url: null }),
+          JSON.stringify({
+            items: [
+              { id: 'track-1', name: 'Song One', preview_url: 'http://preview/1', artists: [{ id: 'artist-1', name: 'Shared Artist' }] },
+              { id: 'track-2', name: 'Song Two', preview_url: null, artists: [{ id: 'artist-1', name: 'Shared Artist' }] },
+            ],
+          }),
           { status: 200 }
         );
       }

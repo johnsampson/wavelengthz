@@ -18,12 +18,14 @@ const SPOTIFY_MAX_OFFSET = 950; // Spotify caps offset+limit at 1000 for search
 
 // Cloudflare Workers cap outbound calls (fetch + D1 queries share the same
 // budget) per request at 1000 (Paid) / 50 (Free). Fully processing one new
-// artist costs up to 9 subrequests (existence check + artist insert, an
-// artist-albums fetch, up to 2 album-tracks fetches, a batch track-details
-// fetch, up to 2 track inserts, plus one GENRE_ENRICHMENT_QUEUE.send on
-// insert -- fetchArtistTracks's albums-based lookup costs more round trips
-// than the single search call it replaced, but is actually reliable; see
-// spotify.ts), on top of periodic search-page calls and the initial
+// artist costs up to 7 subrequests (existence check + artist insert, an
+// artist-albums fetch, up to 2 album-tracks fetches -- each already
+// carrying its own album art, no separate per-track detail fetch needed,
+// see spotify.ts -- up to 2 track inserts, plus one
+// GENRE_ENRICHMENT_QUEUE.send on insert -- fetchArtistTracks's albums-based
+// lookup costs more round trips than the single search call it replaced,
+// but is actually reliable; see spotify.ts), on top of periodic
+// search-page calls and the initial
 // client-credentials call. Whether a queue send draws against this exact
 // same budget or a separate Queues-specific quota isn't confirmed -- folded
 // into the same worst-case count here since assuming the less generous case

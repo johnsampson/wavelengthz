@@ -24,6 +24,12 @@ beforeEach(async () => {
   // track list for that same artist/limit pair.
   const cachedKeys = await env.RATE_LIMIT_KV.list({ prefix: 'artist-tracks-cache:' });
   await Promise.all(cachedKeys.keys.map((k) => env.RATE_LIMIT_KV.delete(k.name)));
+  // enqueueArtistTrackBackfill (src/lib/artistTrackBackfill.ts) sets a
+  // pending-lock key per spotify_id -- since most tests below reuse the
+  // same seeded 'local-1'/'spotify-local-1' artist, a lock an earlier test
+  // left behind would silently no-op a later test's own enqueue attempt.
+  const pendingBackfillKeys = await env.RATE_LIMIT_KV.list({ prefix: 'artist-backfill-pending:' });
+  await Promise.all(pendingBackfillKeys.keys.map((k) => env.RATE_LIMIT_KV.delete(k.name)));
   await env.RATE_LIMIT_KV.delete('spotify-cooldown');
   await insertTestUser(env.DB, { id: 'u1', spotifyId: 'sp1', createdAt: 1000, updatedAt: 1000 });
   await env.DB.prepare(
@@ -110,27 +116,28 @@ describe('GET /api/artists/search', () => {
 describe('GET /api/artists/:id', () => {
   // The dedicated "top tracks" endpoint is 403'd for this app (see
   // fetchArtistTracks's comment block in spotify.ts), so the artist-profile
-  // route goes via GET /v1/artists/{id}/albums -> GET /v1/albums/{id}/tracks
-  // -> individual GET /v1/tracks/{id} calls for full details (the batch
-  // GET /v1/tracks?ids= form 403s too, even for one id). Simplified here to
-  // a single fake album containing every requested track.
+  // route goes via GET /v1/artists/{id}/albums -> GET /v1/albums/{id}/tracks.
+  // No separate per-track detail fetch: the album-tracks response already
+  // carries name/preview_url/artists, and album art comes from the album's
+  // own `images` (captured once, from the albums-list call above) rather
+  // than a track object. Simplified here to a single fake album containing
+  // every requested track, all sharing that one album's art.
   function stubTrackSearch(trackSearchResponse: any, extra?: (url: string) => Response | null) {
     const tracks = trackSearchResponse.tracks;
+    const albumImages = tracks[0]?.album?.images ?? [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo) => {
         const url = input.toString();
         if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
         if (url.includes('/artists/') && url.includes('/albums')) {
-          return new Response(JSON.stringify({ items: tracks.length > 0 ? [{ id: 'album-1' }] : [] }), { status: 200 });
+          return new Response(JSON.stringify({ items: tracks.length > 0 ? [{ id: 'album-1', images: albumImages }] : [] }), { status: 200 });
         }
         if (url.includes('/albums/album-1/tracks')) {
-          return new Response(JSON.stringify({ items: tracks.map((t: any) => ({ id: t.id })) }), { status: 200 });
-        }
-        const trackByIdMatch = url.match(/\/v1\/tracks\/([^/?]+)$/);
-        if (trackByIdMatch) {
-          const track = tracks.find((t: any) => t.id === trackByIdMatch[1]);
-          return track ? new Response(JSON.stringify(track), { status: 200 }) : new Response('not found', { status: 404 });
+          return new Response(
+            JSON.stringify({ items: tracks.map((t: any) => ({ id: t.id, name: t.name, preview_url: t.preview_url ?? null, artists: t.artists })) }),
+            { status: 200 }
+          );
         }
         if (extra) {
           const res = extra(url);
@@ -354,15 +361,13 @@ describe('GET /api/artists/:id', () => {
           if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
           if (url.includes('/artists/') && url.includes('/albums')) {
             albumsCalls += 1;
-            return new Response(JSON.stringify({ items: tracks.length > 0 ? [{ id: 'album-1' }] : [] }), { status: 200 });
+            return new Response(JSON.stringify({ items: tracks.length > 0 ? [{ id: 'album-1', images: [] }] : [] }), { status: 200 });
           }
           if (url.includes('/albums/album-1/tracks')) {
-            return new Response(JSON.stringify({ items: tracks.map((t) => ({ id: t.id })) }), { status: 200 });
-          }
-          const trackByIdMatch = url.match(/\/v1\/tracks\/([^/?]+)$/);
-          if (trackByIdMatch) {
-            const track = tracks.find((t) => t.id === trackByIdMatch[1]);
-            return track ? new Response(JSON.stringify(track), { status: 200 }) : new Response('not found', { status: 404 });
+            return new Response(
+              JSON.stringify({ items: tracks.map((t) => ({ id: t.id, name: t.name, preview_url: t.preview_url ?? null, artists: t.artists })) }),
+              { status: 200 }
+            );
           }
           throw new Error(`unexpected ${url}`);
         })
@@ -439,6 +444,116 @@ describe('GET /api/artists/:id', () => {
     });
   });
 
+  describe('DB-first resolution -- tracks already in D1 are served without touching Spotify at all', () => {
+    // Directly seeds `tracks` rows for local-1, bypassing Spotify entirely --
+    // simulates an artist whose catalog was already populated by a prior
+    // view or backfill (src/lib/artistTrackBackfill.ts).
+    async function insertTracks(count: number) {
+      for (let i = 0; i < count; i++) {
+        await env.DB.prepare(
+          `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, preview_url, source, approved, created_at, updated_at)
+           VALUES (?, ?, ?, 'local-1', ?, NULL, 'seed', 1, 1000, 1000)`
+        )
+          .bind(`internal-trk${i}`, `trk${i}`, `Track ${i}`, i === 0 ? 'https://img.example/trk0.jpg' : null)
+          .run();
+      }
+    }
+
+    function throwingFetch() {
+      // No branch returns successfully -- any Spotify call at all fails the
+      // test outright rather than silently returning a plausible-looking
+      // empty response that could mask a regression.
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo) => {
+        throw new Error(`Spotify should not have been called: ${input.toString()}`);
+      }));
+    }
+
+    it('serves the default view entirely from D1, with zero Spotify calls, once the artist already has at least the default limit stored', async () => {
+      await insertTracks(30); // ARTIST_PROFILE_TRACK_LIMIT
+      throwingFetch();
+      const cookie = await cookieFor('u1');
+      const req = new Request('http://localhost/api/artists/local-1', { headers: { Cookie: cookie } });
+
+      const res = await worker.fetch(req, env, {} as ExecutionContext);
+      const body = await res.json<any>();
+
+      expect(res.status).toBe(200);
+      expect(body.tracks).toHaveLength(30);
+      expect(body.tracks.map((t: any) => t.spotifyId)).toEqual(Array.from({ length: 30 }, (_, i) => `trk${i}`));
+      expect(body.tracks[0].imageUrl).toBe('https://img.example/trk0.jpg');
+      expect(body.hasMore).toBe(true);
+      vi.unstubAllGlobals();
+    });
+
+    it('serves an explicit ?limit= entirely from D1, with zero Spotify calls, once D1 already covers it', async () => {
+      await insertTracks(40);
+      throwingFetch();
+      const cookie = await cookieFor('u1');
+      const req = new Request('http://localhost/api/artists/local-1?limit=30', { headers: { Cookie: cookie } });
+
+      const res = await worker.fetch(req, env, {} as ExecutionContext);
+      const body = await res.json<any>();
+
+      expect(res.status).toBe(200);
+      expect(body.tracks).toHaveLength(30); // capped to the requested limit, not all 40
+      vi.unstubAllGlobals();
+    });
+
+    it('serves the default view\'s partial local coverage immediately without calling Spotify, and enqueues a backfill for the rest', async () => {
+      await insertTracks(5); // fewer than ARTIST_PROFILE_TRACK_LIMIT
+      throwingFetch();
+      const sendSpy = vi.spyOn(env.ARTIST_TRACK_BACKFILL_QUEUE, 'send');
+      const cookie = await cookieFor('u1');
+      const req = new Request('http://localhost/api/artists/local-1', { headers: { Cookie: cookie } });
+
+      const res = await worker.fetch(req, env, {} as ExecutionContext);
+      const body = await res.json<any>();
+
+      expect(res.status).toBe(200);
+      expect(body.tracks).toHaveLength(5);
+      expect(body.hasMore).toBe(true);
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+      sendSpy.mockRestore();
+      vi.unstubAllGlobals();
+    });
+
+    it('still fetches live from Spotify to satisfy an explicit ?limit= that D1 does not yet cover, growing D1 for next time', async () => {
+      await insertTracks(5);
+      const makeTracks = (count: number) =>
+        Array.from({ length: count }, (_, i) => ({
+          id: `sp-trk${i}`,
+          name: `Spotify Track ${i}`,
+          preview_url: null,
+          artists: [{ id: 'spotify-local-1', name: 'Local Artist' }],
+        }));
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo) => {
+          const url = input.toString();
+          if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+          if (url.includes('/artists/') && url.includes('/albums')) {
+            return new Response(JSON.stringify({ items: [{ id: 'album-1', images: [] }] }), { status: 200 });
+          }
+          if (url.includes('/albums/album-1/tracks')) {
+            return new Response(JSON.stringify({ items: makeTracks(30) }), { status: 200 });
+          }
+          throw new Error(`unexpected ${url}`);
+        })
+      );
+      const cookie = await cookieFor('u1');
+      const req = new Request('http://localhost/api/artists/local-1?limit=30', { headers: { Cookie: cookie } });
+
+      const res = await worker.fetch(req, env, {} as ExecutionContext);
+      const body = await res.json<any>();
+
+      expect(res.status).toBe(200);
+      expect(body.tracks).toHaveLength(30);
+      const rows = await env.DB.prepare('SELECT COUNT(*) as c FROM tracks WHERE artist_id = ?').bind('local-1').first<{ c: number }>();
+      expect(rows!.c).toBe(35); // the original 5 plus 30 newly-upserted (all distinct spotify_ids)
+      vi.unstubAllGlobals();
+    });
+  });
+
   describe('quick path on a first (no ?limit=) view of an uncached artist', () => {
     function makeTracks(count: number) {
       return Array.from({ length: count }, (_, i) => ({
@@ -462,15 +577,13 @@ describe('GET /api/artists/:id', () => {
           if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
           if (url.includes('/artists/') && url.includes('/albums')) {
             albumsCalls += 1;
-            return new Response(JSON.stringify({ items: tracks.length > 0 ? [{ id: 'album-1' }] : [] }), { status: 200 });
+            return new Response(JSON.stringify({ items: tracks.length > 0 ? [{ id: 'album-1', images: [] }] : [] }), { status: 200 });
           }
           if (url.includes('/albums/album-1/tracks')) {
-            return new Response(JSON.stringify({ items: tracks.map((t) => ({ id: t.id })) }), { status: 200 });
-          }
-          const trackByIdMatch = url.match(/\/v1\/tracks\/([^/?]+)$/);
-          if (trackByIdMatch) {
-            const track = tracks.find((t) => t.id === trackByIdMatch[1]);
-            return track ? new Response(JSON.stringify(track), { status: 200 }) : new Response('not found', { status: 404 });
+            return new Response(
+              JSON.stringify({ items: tracks.map((t) => ({ id: t.id, name: t.name, preview_url: t.preview_url ?? null, artists: t.artists })) }),
+              { status: 200 }
+            );
           }
           throw new Error(`unexpected ${url}`);
         })
@@ -608,17 +721,13 @@ describe('GET /api/artists/:id', () => {
           const url = input.toString();
           if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
           if (url.includes('/artists/') && url.includes('/albums')) {
-            return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+            return new Response(JSON.stringify({ items: [{ id: 'album-1', images: [] }] }), { status: 200 });
           }
           if (url.includes('/albums/album-1/tracks')) {
             albumTracksCalls += 1;
             if (albumTracksCalls === 1) return new Response('rate limited', { status: 429, headers: { 'Retry-After': '1' } });
-            return new Response(JSON.stringify({ items: [{ id: 'trk0' }] }), { status: 200 });
-          }
-          if (url.includes('/v1/tracks/')) {
-            const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
             return new Response(
-              JSON.stringify({ id, name: 'Track', artists: [{ id: 'spotify-local-1', name: 'Local Artist' }], album: { images: [] }, preview_url: null }),
+              JSON.stringify({ items: [{ id: 'trk0', name: 'Track', preview_url: null, artists: [{ id: 'spotify-local-1', name: 'Local Artist' }] }] }),
               { status: 200 }
             );
           }
