@@ -35,15 +35,16 @@ const ARTIST_PROFILE_TRACK_LIMIT = 30;
 // subrequest limit PR #18 was written to avoid re-hitting.
 const ARTIST_PROFILE_TRACK_MAX_LIMIT = 90;
 
-// fetchArtistTracks is the expensive part of this route -- up to ~40
-// Spotify calls (see spotifyFetch's own comment in lib/spotify.ts) -- and
-// nothing about its result is viewer-specific (unlike totalLikes/direction
-// below, computed fresh per request from D1). Reloading the same artist
-// repeatedly, which is exactly what happens while someone is actively
-// testing/debugging a broken page, re-ran that entire fan-out from scratch
-// every single time, hammering Spotify's own rate limit with fully
-// redundant traffic. A short cache absorbs that without going stale enough
-// to matter for a discography that doesn't change minute to minute.
+// fetchArtistTracks is the expensive part of this route -- up to ~11
+// Spotify calls, one albums-list call plus one per album (see spotifyFetch's
+// own comment in lib/spotify.ts) -- and nothing about its result is
+// viewer-specific (unlike totalLikes/direction below, computed fresh per
+// request from D1). This is now only reached at all once the DB-first check
+// below (GET /api/artists/:id's own comment) finds D1 doesn't already have
+// enough of this artist's tracks -- but reloading the same under-covered
+// artist repeatedly, e.g. while someone is actively testing/debugging a
+// broken page, would still re-run this fan-out from scratch every time
+// without this cache.
 async function fetchArtistTracksCached(env: Env, token: string, spotifyArtistId: string, limit: number) {
   const cached = await readArtistTracksCache(env.RATE_LIMIT_KV, spotifyArtistId, limit);
   if (cached) return cached;
@@ -51,6 +52,52 @@ async function fetchArtistTracksCached(env: Env, token: string, spotifyArtistId:
   const tracks = await fetchArtistTracks(token, spotifyArtistId, limit, 'interactive', env.RATE_LIMIT_KV);
   await writeArtistTracksCache(env.RATE_LIMIT_KV, spotifyArtistId, limit, tracks);
   return tracks;
+}
+
+// Shape the route's response, upsert loop, and swipe-direction lookup all
+// actually need -- built either straight from a `tracks` row (DB-first hit,
+// no Spotify object to begin with) or from a live Spotify track object
+// (post-upsert), so the rest of the route doesn't have to care which one
+// produced it.
+interface ResolvedTrack {
+  internalId: string;
+  spotifyId: string;
+  name: string;
+  imageUrl: string | null;
+  previewUrl: string | null;
+}
+
+function rowToResolvedTrack(row: any): ResolvedTrack {
+  return {
+    internalId: row.id,
+    spotifyId: row.spotify_id,
+    name: row.name,
+    imageUrl: row.album_image_url,
+    previewUrl: row.preview_url,
+  };
+}
+
+async function upsertResolvedTracks(
+  db: D1Database,
+  tracks: any[],
+  artistInternalId: string,
+  artistGenres: string[],
+  userId: string,
+  now: number
+): Promise<ResolvedTrack[]> {
+  const resolved: ResolvedTrack[] = [];
+  for (const track of tracks) {
+    const trackResult = await upsertTrack(db, track, artistInternalId, 'spotify_search', userId, now);
+    if (trackResult.inserted) await recordCatalogGenres(db, artistGenres, 'track', now);
+    resolved.push({
+      internalId: trackResult.id,
+      spotifyId: track.id,
+      name: track.name,
+      imageUrl: track.album?.images?.[0]?.url ?? null,
+      previewUrl: track.preview_url ?? null,
+    });
+  }
+  return resolved;
 }
 
 export function registerCatalogRoutes(router: RouterType) {
@@ -97,7 +144,17 @@ export function registerCatalogRoutes(router: RouterType) {
     // catalog" capability for GET /api/artists/search's `spotifyArtistId`
     // results, even though nothing in the current frontend calls it that way.
     const requestedId = request.params.id;
-    const token = await getValidAccessToken(user, env, env.DB).catch(() => getClientCredentialsToken(env));
+    // Lazy and memoized: resolving a token is itself a live Spotify call
+    // (getClientCredentialsToken, the fallback path) that DB-first
+    // resolution (below) is meant to avoid paying for entirely once an
+    // artist's tracks are already in D1 -- fetching it unconditionally up
+    // front would undercut that even when nothing downstream ends up
+    // needing it.
+    let tokenPromise: Promise<string> | null = null;
+    const getToken = () => {
+      if (!tokenPromise) tokenPromise = getValidAccessToken(user, env, env.DB).catch(() => getClientCredentialsToken(env));
+      return tokenPromise;
+    };
 
     // ?limit= drives "Load more songs" (public/artist.html): each tap
     // re-requests the full list at a higher limit rather than an incremental
@@ -112,7 +169,7 @@ export function registerCatalogRoutes(router: RouterType) {
     let artistRow = await env.DB.prepare('SELECT * FROM artists WHERE id = ?').bind(requestedId).first<any>();
     if (!artistRow) artistRow = await env.DB.prepare('SELECT * FROM artists WHERE spotify_id = ?').bind(requestedId).first<any>();
     if (!artistRow) {
-      const artist = await fetchArtistById(token, requestedId);
+      const artist = await fetchArtistById(await getToken(), requestedId);
       const upserted = await upsertArtist(env.DB, artist, 'spotify_search', user.id, Date.now());
       if (upserted.inserted) {
         await recordCatalogGenres(env.DB, artist.genres ?? [], 'artist', Date.now());
@@ -122,25 +179,61 @@ export function registerCatalogRoutes(router: RouterType) {
     }
 
     const artistGenres = genresFromRow(artistRow.genres);
+    const now = Date.now();
 
-    // No ?limit= means this is the very first view of this artist page --
-    // the common, hot-path case, and previously always ran the full ~40-call
-    // fetchArtistTracks fan-out synchronously, which is what was tripping
-    // Spotify's own rate limit under real load. If a prior visitor's
-    // backfill (src/lib/artistTrackBackfill.ts) already completed, the cache
-    // has the full list and this is a plain cache hit like any other. Only
-    // on a genuine cache miss does this fall back to fetchArtistTracksQuick
-    // (a handful of calls, just enough to render something) and hand the
-    // rest off to the backfill queue instead of fetching it inline.
-    // ?limit= (an explicit "Load more" tap) always goes through the full,
-    // already-hardened fetchArtistTracksCached path unchanged -- it's a
-    // deliberate, less-frequent user action, not the page's hot path.
-    let topTracks: any[];
+    // DB-first: this artist's tracks may already be fully or partially
+    // stored in D1 from a previous view or backfill
+    // (src/lib/artistTrackBackfill.ts). A track's own catalog data
+    // (name/art/preview) never changes once fetched, so once it's in our
+    // own database there's no reason to prefer a live Spotify call -- or
+    // even the KV cache below -- over what's already sitting right here.
+    // Ordered by rowid (SQLite's implicit insertion order), not created_at:
+    // every track upserted from one fetchArtistTracks fan-out shares the
+    // same `now` timestamp, so created_at alone can't recover the original
+    // (most-recent-release-first) ordering the way insertion order does.
+    const dbTracks = await env.DB.prepare('SELECT * FROM tracks WHERE artist_id = ? ORDER BY rowid ASC LIMIT ?')
+      .bind(artistRow.id, trackLimit)
+      .all<any>();
+    const dbSatisfiesLimit = dbTracks.results.length >= trackLimit;
+
+    let resolvedTracks: ResolvedTrack[];
     let quickPath = false;
-    if (hasExplicitLimit) {
-      topTracks = await fetchArtistTracksCached(env, token, artistRow.spotify_id, trackLimit);
+
+    if (dbSatisfiesLimit) {
+      resolvedTracks = dbTracks.results.map(rowToResolvedTrack);
+    } else if (hasExplicitLimit) {
+      // An explicit "Load more" tap wants more than D1 currently has --
+      // a deliberate, less-frequent user action, so paying for the full,
+      // already-hardened live-fetch path (which then upserts and grows D1's
+      // stock for next time) is an acceptable trade here, unlike the
+      // default view below.
+      const topTracks = await fetchArtistTracksCached(env, await getToken(), artistRow.spotify_id, trackLimit);
+      resolvedTracks = await upsertResolvedTracks(env.DB, topTracks, artistRow.id, artistGenres, user.id, now);
+    } else if (dbTracks.results.length > 0) {
+      // Partial local coverage for the default (no ?limit=) view: serve what
+      // D1 already has immediately, and top up the rest in the background
+      // rather than blocking this response on Spotify -- same "show
+      // something now" trade-off as the quick-fetch path below, just
+      // sourced from our own database instead of a fresh live call.
+      resolvedTracks = dbTracks.results.map(rowToResolvedTrack);
+      quickPath = true;
+      await enqueueArtistTrackBackfill(env, {
+        artistId: artistRow.id,
+        spotifyArtistId: artistRow.spotify_id,
+        limit: trackLimit,
+      });
     } else {
+      // Nothing in D1 for this artist at all -- the common case only for a
+      // genuinely brand-new artist. Previously always ran the full ~10-album
+      // fetchArtistTracks fan-out synchronously, which is what was tripping
+      // Spotify's own rate limit under real load. If a prior visitor's
+      // backfill already completed between requests, the cache has the full
+      // list and this is a plain cache hit like any other. Only on a
+      // genuine cache miss does this fall back to fetchArtistTracksQuick (a
+      // couple of calls, just enough to render something) and hand the rest
+      // off to the backfill queue instead of fetching it inline.
       const cached = await readArtistTracksCache(env.RATE_LIMIT_KV, artistRow.spotify_id, trackLimit);
+      let topTracks: any[];
       if (cached) {
         topTracks = cached;
       } else {
@@ -156,7 +249,7 @@ export function registerCatalogRoutes(router: RouterType) {
         if (quickCached) {
           topTracks = quickCached;
         } else {
-          topTracks = await fetchArtistTracksQuick(token, artistRow.spotify_id, env.RATE_LIMIT_KV);
+          topTracks = await fetchArtistTracksQuick(await getToken(), artistRow.spotify_id, env.RATE_LIMIT_KV);
           await writeArtistTracksCache(env.RATE_LIMIT_KV, artistRow.spotify_id, QUICK_TRACK_LIMIT, topTracks);
         }
         await enqueueArtistTrackBackfill(env, {
@@ -165,20 +258,10 @@ export function registerCatalogRoutes(router: RouterType) {
           limit: trackLimit,
         });
       }
-    }
-    const now = Date.now();
-    // Pairs each live Spotify track with its resolved internal id -- needed
-    // because everything downstream (swipe direction lookup, totalLikes,
-    // the response's own `id` field) operates on internal ids, while the
-    // embed player (public/artist.html) still needs the real Spotify id.
-    const enrichedTracks: Array<{ track: any; internalId: string }> = [];
-    for (const track of topTracks) {
-      const trackResult = await upsertTrack(env.DB, track, artistRow.id, 'spotify_search', user.id, now);
-      if (trackResult.inserted) await recordCatalogGenres(env.DB, artistGenres, 'track', now);
-      enrichedTracks.push({ track, internalId: trackResult.id });
+      resolvedTracks = await upsertResolvedTracks(env.DB, topTracks, artistRow.id, artistGenres, user.id, now);
     }
 
-    const trackInternalIds = enrichedTracks.map((e) => e.internalId);
+    const trackInternalIds = resolvedTracks.map((t) => t.internalId);
     const directions = new Map<string, string>();
     if (trackInternalIds.length > 0) {
       const placeholders = trackInternalIds.map(() => '?').join(', ');
@@ -225,17 +308,17 @@ export function registerCatalogRoutes(router: RouterType) {
         totalLikes,
         totalLikesInArea,
       },
-      tracks: enrichedTracks.map(({ track: t, internalId }) => ({
-        id: internalId,
+      tracks: resolvedTracks.map((t) => ({
+        id: t.internalId,
         // The one deliberate exception to obfuscating everywhere: the
         // Spotify embed iframe (public/artist.html) can only play a real
         // Spotify track, so it needs the actual id alongside the internal
         // one used for swiping/history/links.
-        spotifyId: t.id,
+        spotifyId: t.spotifyId,
         name: t.name,
-        imageUrl: t.album?.images?.[0]?.url ?? null,
-        previewUrl: t.preview_url ?? null,
-        direction: directions.get(internalId) ?? null,
+        imageUrl: t.imageUrl,
+        previewUrl: t.previewUrl,
+        direction: directions.get(t.internalId) ?? null,
       })),
       // Heuristic, not an exact count: getting back exactly as many tracks as
       // requested means the artist likely has more beyond this cut (a higher
@@ -244,14 +327,14 @@ export function registerCatalogRoutes(router: RouterType) {
       // wouldn't turn up anything new. False once trackLimit has hit the
       // ceiling regardless, since this endpoint won't fetch any deeper.
       // The length===trackLimit comparison doesn't apply on the quick path
-      // (enrichedTracks is deliberately much shorter than trackLimit there,
+      // (resolvedTracks is deliberately much shorter than trackLimit there,
       // by design, not because the artist ran out) -- any nonzero quick
       // result means there's more the backfill queue is already fetching,
       // so "Load more" tapping into this same route again is always worth
       // offering, short of a genuinely empty (no releases at all) artist.
       hasMore: quickPath
-        ? enrichedTracks.length > 0
-        : enrichedTracks.length === trackLimit && trackLimit < ARTIST_PROFILE_TRACK_MAX_LIMIT,
+        ? resolvedTracks.length > 0
+        : resolvedTracks.length === trackLimit && trackLimit < ARTIST_PROFILE_TRACK_MAX_LIMIT,
     });
   });
 

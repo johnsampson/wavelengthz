@@ -69,7 +69,12 @@ describe('fetchSpotifyProfile', () => {
 });
 
 describe('fetchArtistTracks', () => {
-  function stubSpotify({ albums = [], albumTracks = {}, tracksById = {} }: { albums?: any[]; albumTracks?: Record<string, any[]>; tracksById?: Record<string, any> }) {
+  // Track objects come straight from GET /v1/albums/{id}/tracks's own
+  // response now -- id, name, preview_url, artists are all already there.
+  // Album art comes from the *album's* own `images` (captured once, when
+  // the album is listed), attached onto each of its tracks -- not from a
+  // separate per-track detail fetch.
+  function stubSpotify({ albums = [], albumTracks = {} }: { albums?: any[]; albumTracks?: Record<string, any[]> }) {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo) => {
@@ -81,35 +86,34 @@ describe('fetchArtistTracks', () => {
         if (albumTracksMatch) {
           return new Response(JSON.stringify({ items: albumTracks[albumTracksMatch[1]] ?? [] }), { status: 200 });
         }
-        const trackByIdMatch = url.match(/\/v1\/tracks\/([^/?]+)$/);
-        if (trackByIdMatch) {
-          const track = tracksById[trackByIdMatch[1]];
-          return track ? new Response(JSON.stringify(track), { status: 200 }) : new Response('not found', { status: 404 });
-        }
         throw new Error(`unexpected ${url}`);
       })
     );
   }
 
-  it("fetches an artist's own tracks via their albums, with full track details", async () => {
+  it("fetches an artist's own tracks via their albums, with full track details, using the album's own art", async () => {
     // GET /v1/artists/{id}/top-tracks is 403'd in Development Mode (see the
-    // comment above fetchArtistAlbumIds in spotify.ts), and the previous
+    // comment above fetchArtistAlbums in spotify.ts), and the previous
     // name-search fallback could come back completely empty for a real
     // artist whose name overlaps a more famous identity (verified live for
     // "Cirez D", Eric Prydz's alias). Going via albums -> album tracks is
     // id-scoped end to end, so there's no name ambiguity to get wrong.
     stubSpotify({
-      albums: [{ id: 'album-1' }],
-      albumTracks: { 'album-1': [{ id: 't1' }, { id: 't2' }] },
-      tracksById: {
-        t1: { id: 't1', name: 'Valborg', artists: [{ id: 'artist-1', name: 'Cirez D' }] },
-        t2: { id: 't2', name: 'The Raid', artists: [{ id: 'artist-1', name: 'Cirez D' }] },
+      albums: [{ id: 'album-1', images: [{ url: 'https://img.example/album-1.jpg' }] }],
+      albumTracks: {
+        'album-1': [
+          { id: 't1', name: 'Valborg', preview_url: null, artists: [{ id: 'artist-1', name: 'Cirez D' }] },
+          { id: 't2', name: 'The Raid', preview_url: null, artists: [{ id: 'artist-1', name: 'Cirez D' }] },
+        ],
       },
     });
 
     const tracks = await fetchArtistTracks('token', 'artist-1', 10);
 
     expect(tracks.map((t: any) => t.name)).toEqual(['Valborg', 'The Raid']);
+    // The album's own images, attached to every one of its tracks -- not a
+    // separate per-track fetch. See the module comment above fetchArtistAlbums.
+    expect(tracks.every((t: any) => t.album.images[0].url === 'https://img.example/album-1.jpg')).toBe(true);
     vi.unstubAllGlobals();
   });
 
@@ -226,33 +230,30 @@ describe('fetchArtistTracks', () => {
     vi.unstubAllGlobals();
   });
 
-  it('bounds individual track-detail fetches to TRACK_FETCH_CONCURRENCY instead of firing them all at once', async () => {
-    // Regression: this was the single biggest contributor to tripping
-    // Spotify's own app-wide rate limit -- a full artist load (up to
-    // ARTIST_PROFILE_TRACK_MAX_LIMIT tracks) used to fire every individual
-    // GET /v1/tracks/{id} call in one simultaneous Promise.all. 8 tracks
-    // here (more than TRACK_FETCH_CONCURRENCY's 5) is enough to prove the
-    // cap is real without a slow test.
+  it('never calls Spotify per-track for album art or preview data -- everything comes from the album-tracks response itself', async () => {
+    // Regression guard: this fan-out used to fire an individual GET
+    // /v1/tracks/{id} call per track (up to ARTIST_PROFILE_TRACK_MAX_LIMIT),
+    // the single biggest contributor to tripping Spotify's own rate limit.
+    // 8 tracks (more than the old TRACK_FETCH_CONCURRENCY cap of 5) proves
+    // that phase is gone, not just batched smaller.
     const trackIds = Array.from({ length: 8 }, (_, i) => `t${i}`);
-    let inFlight = 0;
-    let maxConcurrent = 0;
+    const perTrackCalls: string[] = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo) => {
         const url = input.toString();
         if (url.includes('/artists/') && url.includes('/albums')) {
-          return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+          return new Response(JSON.stringify({ items: [{ id: 'album-1', images: [] }] }), { status: 200 });
         }
         if (url.includes('/albums/album-1/tracks')) {
-          return new Response(JSON.stringify({ items: trackIds.map((id) => ({ id })) }), { status: 200 });
+          return new Response(
+            JSON.stringify({ items: trackIds.map((id) => ({ id, name: id, preview_url: null, artists: [{ id: 'artist-1' }] })) }),
+            { status: 200 }
+          );
         }
         if (url.includes('/v1/tracks/')) {
-          inFlight += 1;
-          maxConcurrent = Math.max(maxConcurrent, inFlight);
-          await new Promise((resolve) => setTimeout(resolve, 5));
-          inFlight -= 1;
-          const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
-          return new Response(JSON.stringify({ id, name: id, artists: [{ id: 'artist-1' }] }), { status: 200 });
+          perTrackCalls.push(url);
+          return new Response(JSON.stringify({ id: 'should-not-be-called' }), { status: 200 });
         }
         throw new Error(`unexpected ${url}`);
       })
@@ -261,17 +262,18 @@ describe('fetchArtistTracks', () => {
     const tracks = await fetchArtistTracks('token', 'artist-1', 8);
 
     expect(tracks).toHaveLength(8);
-    expect(maxConcurrent).toBe(5);
+    expect(perTrackCalls).toEqual([]);
     vi.unstubAllGlobals();
   });
 
   it('excludes any track that does not actually credit the requested artist id', async () => {
     stubSpotify({
-      albums: [{ id: 'album-1' }],
-      albumTracks: { 'album-1': [{ id: 't1' }, { id: 't2' }] },
-      tracksById: {
-        t1: { id: 't1', name: 'Right Song', artists: [{ id: 'artist-1', name: 'Real Artist' }] },
-        t2: { id: 't2', name: 'Wrong Song', artists: [{ id: 'artist-2', name: 'Someone Else' }] },
+      albums: [{ id: 'album-1', images: [] }],
+      albumTracks: {
+        'album-1': [
+          { id: 't1', name: 'Right Song', preview_url: null, artists: [{ id: 'artist-1', name: 'Real Artist' }] },
+          { id: 't2', name: 'Wrong Song', preview_url: null, artists: [{ id: 'artist-2', name: 'Someone Else' }] },
+        ],
       },
     });
 
@@ -281,39 +283,24 @@ describe('fetchArtistTracks', () => {
     vi.unstubAllGlobals();
   });
 
-  it('truncates to the requested limit, preferring earlier (more recent) albums, without fetching full details for truncated-away tracks', async () => {
-    // Album-tracks lookups now fan out in parallel across every returned
-    // album rather than stopping early -- fewer sequential round trips is
-    // worth a few tracks' worth of ids fetched and then discarded. Full
-    // per-track detail lookups (the expensive, one-request-per-track step)
-    // only ever happen for tracks that survive the limit=1 truncation, so
-    // t2's own detail endpoint should never be called.
-    const trackDetailCalls: string[] = [];
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo) => {
-        const url = input.toString();
-        if (url.includes('/artists/') && url.includes('/albums')) {
-          return new Response(JSON.stringify({ items: [{ id: 'album-1' }, { id: 'album-2' }] }), { status: 200 });
-        }
-        if (url.includes('/albums/album-1/tracks')) {
-          return new Response(JSON.stringify({ items: [{ id: 't1' }] }), { status: 200 });
-        }
-        if (url.includes('/albums/album-2/tracks')) {
-          return new Response(JSON.stringify({ items: [{ id: 't2' }] }), { status: 200 });
-        }
-        if (url.includes('/v1/tracks/')) {
-          trackDetailCalls.push(url);
-          return new Response(JSON.stringify({ id: 't1', name: 'Track One', artists: [{ id: 'artist-1', name: 'X' }] }), { status: 200 });
-        }
-        throw new Error(`unexpected ${url}`);
-      })
-    );
+  it('truncates to the requested limit, preferring earlier (more recent) albums', async () => {
+    // Album-tracks lookups fan out in parallel across every returned album
+    // rather than stopping early -- fewer sequential round trips is worth a
+    // few tracks' worth of data fetched and then discarded.
+    stubSpotify({
+      albums: [
+        { id: 'album-1', images: [] },
+        { id: 'album-2', images: [] },
+      ],
+      albumTracks: {
+        'album-1': [{ id: 't1', name: 'Track One', preview_url: null, artists: [{ id: 'artist-1', name: 'X' }] }],
+        'album-2': [{ id: 't2', name: 'Track Two', preview_url: null, artists: [{ id: 'artist-1', name: 'X' }] }],
+      },
+    });
 
     const tracks = await fetchArtistTracks('token', 'artist-1', 1);
 
-    expect(tracks).toHaveLength(1);
-    expect(trackDetailCalls).toEqual([expect.stringContaining('/v1/tracks/t1')]);
+    expect(tracks.map((t: any) => t.id)).toEqual(['t1']);
     vi.unstubAllGlobals();
   });
 
@@ -339,9 +326,8 @@ describe('fetchArtistTracks', () => {
 
   it('proceeds normally with background priority when there is no active cooldown', async () => {
     stubSpotify({
-      albums: [{ id: 'album-1' }],
-      albumTracks: { 'album-1': [{ id: 't1' }] },
-      tracksById: { t1: { id: 't1', name: 'Track One', artists: [{ id: 'artist-1' }] } },
+      albums: [{ id: 'album-1', images: [] }],
+      albumTracks: { 'album-1': [{ id: 't1', name: 'Track One', preview_url: null, artists: [{ id: 'artist-1' }] }] },
     });
     const kv = fakeKv();
 
@@ -353,9 +339,8 @@ describe('fetchArtistTracks', () => {
 
   it('interactive priority ignores an active cooldown entirely and still fetches', async () => {
     stubSpotify({
-      albums: [{ id: 'album-1' }],
-      albumTracks: { 'album-1': [{ id: 't1' }] },
-      tracksById: { t1: { id: 't1', name: 'Track One', artists: [{ id: 'artist-1' }] } },
+      albums: [{ id: 'album-1', images: [] }],
+      albumTracks: { 'album-1': [{ id: 't1', name: 'Track One', preview_url: null, artists: [{ id: 'artist-1' }] }] },
     });
     const kv = fakeKv({ 'spotify-cooldown': String(Date.now() + 10000) });
 
@@ -365,10 +350,10 @@ describe('fetchArtistTracks', () => {
     vi.unstubAllGlobals();
   });
 
-  it('background priority stops fetching further albums once enough track ids are already gathered', async () => {
+  it('background priority stops fetching further albums once enough tracks are already gathered', async () => {
     // 8 albums, each with 10 tracks -- the first ALBUM_TRACKS_FETCH_CONCURRENCY
-    // (5) albums alone already yield 50 track ids, well past a limit of 30,
-    // so the remaining 3 albums' track-lists should never be requested.
+    // (5) albums alone already yield 50 tracks, well past a limit of 30, so
+    // the remaining 3 albums' track-lists should never be requested.
     const albumIds = Array.from({ length: 8 }, (_, i) => `album-${i}`);
     const albumTrackCalls = new Set<string>();
     vi.stubGlobal(
@@ -376,17 +361,18 @@ describe('fetchArtistTracks', () => {
       vi.fn(async (input: RequestInfo) => {
         const url = input.toString();
         if (url.includes('/artists/') && url.includes('/albums')) {
-          return new Response(JSON.stringify({ items: albumIds.map((id) => ({ id })) }), { status: 200 });
+          return new Response(JSON.stringify({ items: albumIds.map((id) => ({ id, images: [] })) }), { status: 200 });
         }
         const albumMatch = url.match(/\/albums\/([^/?]+)\/tracks/);
         if (albumMatch) {
           albumTrackCalls.add(albumMatch[1]);
-          const tracks = Array.from({ length: 10 }, (_, i) => ({ id: `${albumMatch[1]}-t${i}` }));
+          const tracks = Array.from({ length: 10 }, (_, i) => ({
+            id: `${albumMatch[1]}-t${i}`,
+            name: `t${i}`,
+            preview_url: null,
+            artists: [{ id: 'artist-1' }],
+          }));
           return new Response(JSON.stringify({ items: tracks }), { status: 200 });
-        }
-        if (url.includes('/v1/tracks/')) {
-          const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
-          return new Response(JSON.stringify({ id, name: id, artists: [{ id: 'artist-1' }] }), { status: 200 });
         }
         throw new Error(`unexpected ${url}`);
       })
@@ -407,17 +393,18 @@ describe('fetchArtistTracks', () => {
       vi.fn(async (input: RequestInfo) => {
         const url = input.toString();
         if (url.includes('/artists/') && url.includes('/albums')) {
-          return new Response(JSON.stringify({ items: albumIds.map((id) => ({ id })) }), { status: 200 });
+          return new Response(JSON.stringify({ items: albumIds.map((id) => ({ id, images: [] })) }), { status: 200 });
         }
         const albumMatch = url.match(/\/albums\/([^/?]+)\/tracks/);
         if (albumMatch) {
           albumTrackCalls.add(albumMatch[1]);
-          const tracks = Array.from({ length: 10 }, (_, i) => ({ id: `${albumMatch[1]}-t${i}` }));
+          const tracks = Array.from({ length: 10 }, (_, i) => ({
+            id: `${albumMatch[1]}-t${i}`,
+            name: `t${i}`,
+            preview_url: null,
+            artists: [{ id: 'artist-1' }],
+          }));
           return new Response(JSON.stringify({ items: tracks }), { status: 200 });
-        }
-        if (url.includes('/v1/tracks/')) {
-          const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
-          return new Response(JSON.stringify({ id, name: id, artists: [{ id: 'artist-1' }] }), { status: 200 });
         }
         throw new Error(`unexpected ${url}`);
       })
@@ -436,18 +423,17 @@ describe('fetchArtistTracks', () => {
       vi.fn(async (input: RequestInfo) => {
         const url = input.toString();
         if (url.includes('/artists/') && url.includes('/albums')) {
-          return new Response(JSON.stringify({ items: albumIds.map((id) => ({ id })) }), { status: 200 });
+          return new Response(JSON.stringify({ items: albumIds.map((id) => ({ id, images: [] })) }), { status: 200 });
         }
         if (url.includes('/albums/')) {
           // Each album has just 1 track, so even the first 5-album chunk
           // alone (5 tracks) doesn't satisfy a limit of 10 -- forces a
           // second chunk, which is where the pacing delay applies.
           const albumMatch = url.match(/\/albums\/([^/?]+)\/tracks/)!;
-          return new Response(JSON.stringify({ items: [{ id: `${albumMatch[1]}-t1` }] }), { status: 200 });
-        }
-        if (url.includes('/v1/tracks/')) {
-          const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
-          return new Response(JSON.stringify({ id, name: id, artists: [{ id: 'artist-1' }] }), { status: 200 });
+          return new Response(
+            JSON.stringify({ items: [{ id: `${albumMatch[1]}-t1`, name: 't1', preview_url: null, artists: [{ id: 'artist-1' }] }] }),
+            { status: 200 }
+          );
         }
         throw new Error(`unexpected ${url}`);
       })
@@ -459,17 +445,16 @@ describe('fetchArtistTracks', () => {
     const elapsed = Date.now() - start;
 
     // SPOTIFY_BACKGROUND_PACING_DELAY_MS = 250 -- at least one pacing wait
-    // fires (between the two album-list chunks, and/or in the track-detail
-    // phase), so elapsed time should clear a meaningful fraction of one delay.
+    // fires between the two album-tracks chunks, so elapsed time should
+    // clear a meaningful fraction of one delay.
     expect(elapsed).toBeGreaterThanOrEqual(240);
     vi.unstubAllGlobals();
   }, 10000);
 
   it('applies no pacing delay for interactive priority', async () => {
     stubSpotify({
-      albums: [{ id: 'album-1' }],
-      albumTracks: { 'album-1': [{ id: 't1' }] },
-      tracksById: { t1: { id: 't1', name: 'Track One', artists: [{ id: 'artist-1' }] } },
+      albums: [{ id: 'album-1', images: [] }],
+      albumTracks: { 'album-1': [{ id: 't1', name: 'Track One', preview_url: null, artists: [{ id: 'artist-1' }] }] },
     });
 
     const start = Date.now();
@@ -482,24 +467,30 @@ describe('fetchArtistTracks', () => {
 });
 
 describe('fetchArtistTracksQuick', () => {
-  it('only asks for the single most recent album, and only up to QUICK_TRACK_LIMIT tracks from it -- not the full ~40-call fan-out', async () => {
+  it('only asks for the single most recent album, and only up to QUICK_TRACK_LIMIT tracks from it -- no per-track detail calls', async () => {
     const albumsCalls: string[] = [];
     let albumTracksCallUrl = '';
+    const perTrackCalls: string[] = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo) => {
         const url = input.toString();
         if (url.includes('/artists/') && url.includes('/albums')) {
           albumsCalls.push(url);
-          return new Response(JSON.stringify({ items: [{ id: 'album-1' }, { id: 'album-2' }] }), { status: 200 });
+          return new Response(JSON.stringify({ items: [{ id: 'album-1', images: [] }, { id: 'album-2', images: [] }] }), { status: 200 });
         }
         if (url.includes('/albums/album-1/tracks')) {
           albumTracksCallUrl = url;
-          return new Response(JSON.stringify({ items: Array.from({ length: 20 }, (_, i) => ({ id: `t${i}` })) }), { status: 200 });
+          return new Response(
+            JSON.stringify({
+              items: Array.from({ length: 20 }, (_, i) => ({ id: `t${i}`, name: `t${i}`, preview_url: null, artists: [{ id: 'artist-1', name: 'X' }] })),
+            }),
+            { status: 200 }
+          );
         }
         if (url.includes('/v1/tracks/')) {
-          const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
-          return new Response(JSON.stringify({ id, name: id, artists: [{ id: 'artist-1', name: 'X' }] }), { status: 200 });
+          perTrackCalls.push(url);
+          return new Response('{}', { status: 200 });
         }
         throw new Error(`unexpected ${url}`);
       })
@@ -509,12 +500,13 @@ describe('fetchArtistTracksQuick', () => {
 
     // Only the albums endpoint's own ?limit= reflects the single-album
     // request; the actual returned array length is what matters for call
-    // count -- fetchAlbumTrackIds is only ever called once (for album-1),
+    // count -- fetchAlbumTracks is only ever called once (for album-1),
     // never album-2.
     expect(albumsCalls).toHaveLength(1);
     expect(new URL(albumsCalls[0]).searchParams.get('limit')).toBe('1');
     expect(new URL(albumTracksCallUrl).searchParams.get('limit')).toBe(String(QUICK_TRACK_LIMIT));
     expect(tracks).toHaveLength(QUICK_TRACK_LIMIT);
+    expect(perTrackCalls).toEqual([]);
     vi.unstubAllGlobals();
   });
 
@@ -524,16 +516,17 @@ describe('fetchArtistTracksQuick', () => {
       vi.fn(async (input: RequestInfo) => {
         const url = input.toString();
         if (url.includes('/artists/') && url.includes('/albums')) {
-          return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+          return new Response(JSON.stringify({ items: [{ id: 'album-1', images: [] }] }), { status: 200 });
         }
         if (url.includes('/albums/album-1/tracks')) {
           // Deliberately ignores the requested limit, like a naive test
           // double (or a misbehaving real response) might.
-          return new Response(JSON.stringify({ items: Array.from({ length: 50 }, (_, i) => ({ id: `t${i}` })) }), { status: 200 });
-        }
-        if (url.includes('/v1/tracks/')) {
-          const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
-          return new Response(JSON.stringify({ id, name: id, artists: [{ id: 'artist-1', name: 'X' }] }), { status: 200 });
+          return new Response(
+            JSON.stringify({
+              items: Array.from({ length: 50 }, (_, i) => ({ id: `t${i}`, name: `t${i}`, preview_url: null, artists: [{ id: 'artist-1', name: 'X' }] })),
+            }),
+            { status: 200 }
+          );
         }
         throw new Error(`unexpected ${url}`);
       })
@@ -551,14 +544,18 @@ describe('fetchArtistTracksQuick', () => {
       vi.fn(async (input: RequestInfo) => {
         const url = input.toString();
         if (url.includes('/artists/') && url.includes('/albums')) {
-          return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+          return new Response(JSON.stringify({ items: [{ id: 'album-1', images: [] }] }), { status: 200 });
         }
         if (url.includes('/albums/album-1/tracks')) {
-          return new Response(JSON.stringify({ items: [{ id: 't1' }, { id: 't2' }] }), { status: 200 });
-        }
-        if (url.includes('/v1/tracks/')) {
-          const id = url.match(/\/v1\/tracks\/([^/?]+)$/)![1];
-          return new Response(JSON.stringify({ id, name: id, artists: [{ id: 'artist-1', name: 'X' }] }), { status: 200 });
+          return new Response(
+            JSON.stringify({
+              items: [
+                { id: 't1', name: 't1', preview_url: null, artists: [{ id: 'artist-1', name: 'X' }] },
+                { id: 't2', name: 't2', preview_url: null, artists: [{ id: 'artist-1', name: 'X' }] },
+              ],
+            }),
+            { status: 200 }
+          );
         }
         throw new Error(`unexpected ${url}`);
       })
@@ -593,13 +590,13 @@ describe('fetchArtistTracksQuick', () => {
       vi.fn(async (input: RequestInfo) => {
         const url = input.toString();
         if (url.includes('/artists/') && url.includes('/albums')) {
-          return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+          return new Response(JSON.stringify({ items: [{ id: 'album-1', images: [] }] }), { status: 200 });
         }
         if (url.includes('/albums/album-1/tracks')) {
-          return new Response(JSON.stringify({ items: [{ id: 't1' }] }), { status: 200 });
-        }
-        if (url.includes('/v1/tracks/t1')) {
-          return new Response(JSON.stringify({ id: 't1', name: 'Wrong Credit', artists: [{ id: 'someone-else' }] }), { status: 200 });
+          return new Response(
+            JSON.stringify({ items: [{ id: 't1', name: 'Wrong Credit', preview_url: null, artists: [{ id: 'someone-else' }] }] }),
+            { status: 200 }
+          );
         }
         throw new Error(`unexpected ${url}`);
       })
@@ -642,13 +639,13 @@ describe('fetchArtistTracksQuick', () => {
       vi.fn(async (input: RequestInfo) => {
         const url = input.toString();
         if (url.includes('/artists/') && url.includes('/albums')) {
-          return new Response(JSON.stringify({ items: [{ id: 'album-1' }] }), { status: 200 });
+          return new Response(JSON.stringify({ items: [{ id: 'album-1', images: [] }] }), { status: 200 });
         }
         if (url.includes('/albums/album-1/tracks')) {
-          return new Response(JSON.stringify({ items: [{ id: 't1' }] }), { status: 200 });
-        }
-        if (url.includes('/v1/tracks/t1')) {
-          return new Response(JSON.stringify({ id: 't1', name: 'Track One', artists: [{ id: 'artist-1' }] }), { status: 200 });
+          return new Response(
+            JSON.stringify({ items: [{ id: 't1', name: 'Track One', preview_url: null, artists: [{ id: 'artist-1' }] }] }),
+            { status: 200 }
+          );
         }
         throw new Error(`unexpected ${url}`);
       })
