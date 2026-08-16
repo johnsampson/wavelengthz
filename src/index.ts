@@ -139,13 +139,28 @@ function withSecurityHeaders(response: Response): Response {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
+// Paths exempt from the password gate below -- iOS/Android's "Add to Home
+// Screen" fetches manifest.json and the apple-touch-icon/manifest icon
+// files as unauthenticated, OS-level background requests that never carry
+// Safari's cached Basic Auth credentials (those live in the browser tab,
+// not the installer process). Gating these meant every icon fetch 401'd
+// during pre-launch, silently failing closed into iOS's default letter-
+// avatar icon instead of ever showing the real logo -- confirmed as the
+// root cause of the app's home-screen icon showing a plain "W". None of
+// these paths expose anything sensitive (just a logo and static app
+// metadata), so exempting them doesn't weaken the gate's actual purpose of
+// keeping app content/API access closed pre-launch.
+const SITE_BASIC_AUTH_EXEMPT_PATHS = new Set(['/manifest.json', '/icons/icon-180.png', '/icons/icon-192.png', '/icons/icon-512.png']);
+
 // Pre-launch site-wide password gate -- a no-op unless both
 // SITE_BASIC_AUTH_USER/PASSWORD are set (see src/env.d.ts). Checked first,
 // before rate limiting/routing/anything else, and ahead of ASSETS too (once
 // [assets].run_worker_first is on, every request -- API and static alike --
-// reaches this handler), so nothing about the app is reachable without it.
+// reaches this handler), so nothing about the app is reachable without it,
+// except the PWA-install-critical paths above.
 function checkSiteBasicAuth(request: Request, env: Env): Response | null {
   if (!env.SITE_BASIC_AUTH_USER || !env.SITE_BASIC_AUTH_PASSWORD) return null;
+  if (SITE_BASIC_AUTH_EXEMPT_PATHS.has(new URL(request.url).pathname)) return null;
 
   const expected = 'Basic ' + btoa(`${env.SITE_BASIC_AUTH_USER}:${env.SITE_BASIC_AUTH_PASSWORD}`);
   const provided = request.headers.get('Authorization') ?? '';
