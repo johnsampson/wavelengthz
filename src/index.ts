@@ -18,6 +18,7 @@ import { registerGenreBlockRoutes } from './routes/genreBlocks';
 import { registerPhoneRoutes } from './routes/phone';
 import { purgeExpiredDeletions } from './lib/accountDeletion';
 import { refreshCatalogFromProfiles } from './db/catalogRefresh';
+import { discoverArtistsByGenre } from './lib/catalogDiscovery';
 import { sendDelayedMatchNotificationEmails } from './lib/notifications';
 import { runHourlyGenreEnrichment, processGenreEnrichmentQueueBatch, type GenreEnrichmentQueueMessage } from './lib/genreEnrichment';
 import { processArtistTrackBackfillBatch, type ArtistTrackBackfillMessage } from './lib/artistTrackBackfill';
@@ -322,6 +323,19 @@ export default {
         runHourlyGenreEnrichment(env.DB, env.RATE_LIMIT_KV)
           .then(() => undefined)
           .catch(report('scheduled:runHourlyGenreEnrichment'))
+      );
+    } else if (event.cron === '30 */6 * * *') {
+      // runIndex rotates which slice of SEED_GENRES this run advances (see
+      // nextDiscoveryTargets). Derived from the wall clock rather than stored
+      // state: at one run every 6 hours this increments by exactly 1 each
+      // time, so successive runs walk successive genre slices, and a missed
+      // or replayed run just skips/repeats a slice rather than corrupting
+      // anything -- the per-genre offsets that actually matter live in KV.
+      const runIndex = Math.floor(event.scheduledTime / (6 * 60 * 60 * 1000));
+      ctx.waitUntil(
+        discoverArtistsByGenre(env, runIndex)
+          .then(() => undefined)
+          .catch(report('scheduled:discoverArtistsByGenre'))
       );
     } else {
       ctx.waitUntil(

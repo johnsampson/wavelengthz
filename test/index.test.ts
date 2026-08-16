@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { applySchema } from './apply-schema';
 import worker from '../src/index';
 
@@ -123,5 +123,61 @@ describe('pre-launch site-wide password gate', () => {
 
     const callbackRes = await worker.fetch(new Request('http://localhost/callback/google'), gatedEnv, {} as ExecutionContext);
     expect(callbackRes.status).toBe(401);
+  });
+});
+
+// A cron string that doesn't exactly match its `else if` in the scheduled
+// handler silently falls through to the final `else` (purgeExpiredDeletions)
+// and the intended job simply never runs -- with nothing anywhere to notice.
+// These pin the string in wrangler.toml's `crons` to the branch it's meant
+// to reach.
+describe('scheduled() cron dispatch', () => {
+  function capturingCtx() {
+    const pending: Promise<unknown>[] = [];
+    return { ctx: { waitUntil: (p: Promise<unknown>) => pending.push(p) } as unknown as ExecutionContext, pending };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('routes "30 */6 * * *" to artist-only catalog discovery', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        calls.push(url);
+        if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+        if (url.includes('/v1/search')) return new Response(JSON.stringify({ artists: { items: [] } }), { status: 200 });
+        throw new Error(`unexpected fetch ${url}`);
+      })
+    );
+    const { ctx, pending } = capturingCtx();
+
+    await worker.scheduled({ cron: '30 */6 * * *', scheduledTime: Date.now() } as ScheduledEvent, env, ctx);
+    await Promise.all(pending);
+
+    expect(calls.some((c) => c.includes('/v1/search') && c.includes('type=artist'))).toBe(true);
+    // The whole point of this job: catalog growth that never spends a track call.
+    expect(calls.some((c) => c.includes('/tracks') || c.includes('/albums'))).toBe(false);
+  });
+
+  it('does not run discovery for a cron string it does not own', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        calls.push(input.toString());
+        return new Response('{}', { status: 200 });
+      })
+    );
+    const { ctx, pending } = capturingCtx();
+
+    // The nightly purge branch -- touches D1 only, never Spotify.
+    await worker.scheduled({ cron: '0 3 * * *', scheduledTime: Date.now() } as ScheduledEvent, env, ctx);
+    await Promise.all(pending);
+
+    expect(calls.some((c) => c.includes('/v1/search'))).toBe(false);
   });
 });
