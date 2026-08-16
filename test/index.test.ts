@@ -73,4 +73,28 @@ describe('pre-launch site-wide password gate', () => {
     const res = await worker.fetch(req, gatedEnv, {} as ExecutionContext);
     expect(res.status).toBe(401);
   });
+
+  // manifest.json and the touch-icon files are the exception: iOS/Android's
+  // "Add to Home Screen" fetches them as unauthenticated background requests
+  // that can never carry Basic Auth credentials, so gating them meant the
+  // install icon silently 401'd and fell back to a default letter avatar.
+  it('exempts manifest.json and the PWA icon files from the gate', async () => {
+    const gatedEnv = { ...env, SITE_BASIC_AUTH_USER: 'preview', SITE_BASIC_AUTH_PASSWORD: 'letmein' };
+    for (const path of ['/manifest.json', '/icons/icon-180.png', '/icons/icon-192.png', '/icons/icon-512.png']) {
+      const req = new Request(`http://localhost${path}`);
+      const res = await worker.fetch(req, gatedEnv, {} as ExecutionContext);
+      // Past the gate, into the real ASSETS binding (bound in the test
+      // harness too, unlike the plain-404 fallback the other tests here
+      // rely on) -- these files genuinely exist under public/, so a real
+      // 200 is the actual proof the gate let the request through.
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it('still gates a similarly-named path that is not on the exemption list', async () => {
+    const gatedEnv = { ...env, SITE_BASIC_AUTH_USER: 'preview', SITE_BASIC_AUTH_PASSWORD: 'letmein' };
+    const req = new Request('http://localhost/icons/some-other-file.png');
+    const res = await worker.fetch(req, gatedEnv, {} as ExecutionContext);
+    expect(res.status).toBe(401);
+  });
 });
