@@ -6,6 +6,8 @@ import { play, togglePlayPause, isCurrentTrack } from './playerBar.js';
 import { showErrorToast } from './toast.js';
 import { navigate } from './router.js';
 
+/** @typedef {{id?: string, itemType?: string, itemId?: string, name?: string, displayName?: string, imageUrl?: string, primaryPhotoUrl?: string, bio?: string, distanceLabel?: string, topGenres?: string[], anthemTrack?: {spotifyId: string, id?: string, name: string, artistName?: string | null, imageUrl?: string} | null, track?: {spotifyId: string, id: string, name: string, imageUrl?: string} | null}} Candidate */
+
 // Extracted from index.html's inline script -- see matches.js's comment for
 // why (same reasoning, same shape). Also adds destroy(), same new
 // requirement the router introduces as messages.js/group.js's poll timers:
@@ -22,8 +24,9 @@ export function createDeckApp() {
     // after tapping into a search result), forcing a manual re-toggle back
     // to Music every single time.
     mode: loadStoredMode(localStorage),
+    /** @type {Candidate[]} */
     queue: [],
-    /** @type {{id?: string, itemType?: string, itemId?: string, name?: string, displayName?: string, imageUrl?: string, primaryPhotoUrl?: string, bio?: string, distanceLabel?: string, topGenres?: string[], anthemTrack?: {spotifyId: string, id?: string, name: string, artistName?: string | null, imageUrl?: string} | null} | null} */
+    /** @type {Candidate | null} */
     current: null,
     detachSwipe: null,
     authed: null,
@@ -43,6 +46,14 @@ export function createDeckApp() {
     // actually playing in the fixed bar.
     isCurrentAnthem() {
       return !!this.current?.anthemTrack && isCurrentTrack(this.current.anthemTrack.spotifyId);
+    },
+
+    // Same pattern as isCurrentAnthem, for Music mode's own "play a song"
+    // chip below the artist name (current.track, from GET
+    // /api/candidates/music -- a representative catalog track for this
+    // artist, distinct from People mode's anthemTrack).
+    isCurrentPreviewTrack() {
+      return !!this.current?.track && isCurrentTrack(this.current.track.spotifyId);
     },
 
     async init() {
@@ -101,6 +112,37 @@ export function createDeckApp() {
           this.detachSwipe = attachSwipeDeck(card, { onSwipe: (dir) => this.decide(dir) });
         }
       });
+      // Music mode only: GET /api/artists/:id can be slow for a
+      // not-yet-fully-cataloged artist (src/routes/catalog.ts's
+      // quick-fetch/backfill path, itself a live Spotify round-trip).
+      // Firing it here, for the item about to become `current` on the NEXT
+      // swipe, means its DB-first check (or worst case its Spotify
+      // quick-fetch) has already happened well before the user actually
+      // taps into it -- whether via the clickable artist name below or by
+      // swiping again and tapping there. Every card except the very first
+      // of a session ends up warmed this way, since each one sits as
+      // queue[0] for one full swipe before becoming `current` itself.
+      // Fire-and-forget: a failure here has no visible effect, since the
+      // real navigation re-requests this same endpoint anyway and handles
+      // its own errors.
+      if (this.mode === 'music' && this.queue[0]) {
+        api.artistProfile(this.queue[0].itemId).catch(() => {});
+      }
+    },
+
+    viewArtist() {
+      if (!this.current || this.mode !== 'music') return;
+      navigate(`/artist?id=${this.current.itemId}`);
+    },
+
+    async togglePreviewTrack() {
+      if (!this.current?.track) return;
+      if (this.isCurrentPreviewTrack()) {
+        await togglePlayPause();
+        return;
+      }
+      const { spotifyId, id, name, imageUrl } = this.current.track;
+      await play({ spotifyId, id, name, artistName: this.current.name, imageUrl });
     },
 
     async decide(direction) {

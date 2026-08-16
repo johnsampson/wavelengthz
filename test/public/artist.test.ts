@@ -93,7 +93,7 @@ describe('artist page', () => {
     vi.stubGlobal('window', fakeWindow());
     vi.mocked(isCurrentTrack).mockReturnValue(false);
     const app = createArtistApp();
-    app.artist = { id: 'a1', name: 'Test Artist', genres: [], totalLikes: 0, totalLikesInArea: 0 };
+    app.artist = { id: 'a1', name: 'Test Artist', genres: [], totalLikes: 0, totalLikesInArea: 0, direction: null };
 
     await app.togglePlayer({ id: 't1', spotifyId: 'sp1', name: 'Song', imageUrl: 'img' });
 
@@ -111,6 +111,52 @@ describe('artist page', () => {
 
     expect(track.direction).toBeNull();
     expect(showErrorToast).toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('likeArtist optimistically marks the artist liked and posts an artist-level right swipe', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    const fetchMock = vi.fn(async (path: string, options: any) => {
+      if (path === '/api/swipe/music') {
+        expect(JSON.parse(options.body)).toEqual({ item_type: 'artist', item_id: 'a1', direction: 'right' });
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createArtistApp();
+    app.artist = { id: 'a1', name: 'Test Artist', genres: [], totalLikes: 0, totalLikesInArea: 0, direction: null };
+
+    await app.likeArtist();
+
+    expect(app.artist.direction).toBe('right');
+    expect(fetchMock).toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('likeArtist rolls back the optimistic update on failure', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
+    const app = createArtistApp();
+    app.artist = { id: 'a1', name: 'Test Artist', genres: [], totalLikes: 0, totalLikesInArea: 0, direction: null };
+
+    await app.likeArtist();
+
+    expect(app.artist.direction).toBeNull();
+    expect(showErrorToast).toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('likeArtist is a no-op when the artist is already liked', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createArtistApp();
+    app.artist = { id: 'a1', name: 'Test Artist', genres: [], totalLikes: 1, totalLikesInArea: 0, direction: 'right' };
+
+    await app.likeArtist();
+
+    expect(fetchMock).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 });

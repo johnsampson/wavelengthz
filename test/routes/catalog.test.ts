@@ -226,6 +226,29 @@ describe('GET /api/artists/:id', () => {
     vi.unstubAllGlobals();
   });
 
+  it('reports the current direction for the artist itself, distinct from any per-track direction', async () => {
+    stubTrackSearch({ tracks: [] });
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s1', 'u1', 'artist', 'local-1', 'right', 1000, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/artists/local-1', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.artist.direction).toBe('right');
+    vi.unstubAllGlobals();
+  });
+
+  it('reports null artist direction when the user has not swiped on the artist itself', async () => {
+    stubTrackSearch({ tracks: [] });
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/artists/local-1', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.artist.direction).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
   describe('pagination via ?limit=', () => {
     function makeTracks(count: number) {
       return Array.from({ length: count }, (_, i) => ({

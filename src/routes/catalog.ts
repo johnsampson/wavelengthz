@@ -280,6 +280,18 @@ export function registerCatalogRoutes(router: RouterType) {
       .first<{ c: number }>();
     const totalLikes = totalLikesRow?.c ?? 0;
 
+    // This viewer's own swipe on the artist as a whole (distinct from
+    // `directions` above, which is per-track) -- lets the profile page's
+    // like button reflect whether they've already liked this artist,
+    // whether that came from swiping right on it in the deck or from
+    // liking one of its tracks (likeArtistForTrack, src/routes/
+    // musicSwipes.ts, cascades a track like into an artist-level one).
+    const artistSwipe = await env.DB.prepare(
+      `SELECT direction FROM music_swipes WHERE user_id = ? AND item_type = 'artist' AND item_id = ?`
+    )
+      .bind(user.id, artistRow.id)
+      .first<{ direction: string }>();
+
     // Computed in JS, not SQL: haversine isn't expressible as a plain SQL
     // comparison, and this mirrors the same pattern already used for people
     // candidates (src/routes/peopleSwipes.ts). Only meaningful when the
@@ -307,6 +319,7 @@ export function registerCatalogRoutes(router: RouterType) {
         genres: genresFromRow(artistRow.genres),
         totalLikes,
         totalLikesInArea,
+        direction: artistSwipe?.direction ?? null,
       },
       tracks: resolvedTracks.map((t) => ({
         id: t.internalId,

@@ -134,16 +134,47 @@ export function registerMusicSwipeRoutes(router: RouterType) {
       WHERE je.key IN (SELECT genre FROM user_blocked_genres WHERE user_id = ?)
     )`;
 
+    // Artist candidates only: a representative track already in our own
+    // catalog for this artist, if one exists, so the deck can offer a
+    // "play a song" chip without a live per-candidate fetch just to
+    // discover whether one's available -- batched into this same query,
+    // same reasoning as every other batched-not-per-row lookup in this
+    // codebase. Picked by insertion order (rowid), matching the "oldest
+    // inserted = earliest release" convention GET /api/artists/:id's own
+    // track ordering already uses. The scalar subquery as the JOIN key
+    // (rather than a plain `rt.artist_id = artists.id` join) is required to
+    // keep exactly one row per artist candidate -- a plain join would
+    // multiply rows for any artist with more than one cataloged track,
+    // silently breaking this query's `LIMIT`. `artists`/`tracks` share
+    // several column names (id, name, approved, created_at, spotify_id) --
+    // every reference below is qualified with `${table}.`/`rt.` accordingly
+    // to avoid "ambiguous column name" once this join is present.
+    const trackPreviewJoin =
+      itemType === 'artist'
+        ? `LEFT JOIN tracks rt ON rt.id = (SELECT id FROM tracks WHERE artist_id = ${table}.id ORDER BY rowid ASC LIMIT 1)`
+        : '';
+    const trackPreviewSelect =
+      itemType === 'artist' ? `, rt.id as track_id, rt.spotify_id as track_spotify_id, rt.name as track_name, rt.album_image_url as track_image_url` : '';
+
     const queryCandidates = () =>
       env.DB.prepare(
-        `SELECT id, name, ${imageColumn} as image_url FROM ${table}
-         WHERE approved = 1 ${photoFilter} AND id NOT IN (
+        `SELECT ${table}.id, ${table}.name, ${table}.${imageColumn} as image_url${trackPreviewSelect} FROM ${table}
+         ${trackPreviewJoin}
+         WHERE ${table}.approved = 1 ${photoFilter} AND ${table}.id NOT IN (
            SELECT item_id FROM music_swipes WHERE user_id = ? AND item_type = ?
          )
          ${blockedGenreFilter}
-         ORDER BY created_at ASC
+         ORDER BY ${table}.created_at ASC
          LIMIT ?`
-      ).bind(user.id, itemType, user.id, limit).all<{ id: string; name: string; image_url: string | null }>();
+      ).bind(user.id, itemType, user.id, limit).all<{
+        id: string;
+        name: string;
+        image_url: string | null;
+        track_id?: string | null;
+        track_spotify_id?: string | null;
+        track_name?: string | null;
+        track_image_url?: string | null;
+      }>();
 
     let rows = await queryCandidates();
 
@@ -189,7 +220,18 @@ export function registerMusicSwipeRoutes(router: RouterType) {
     }
 
     return Response.json({
-      candidates: rows.results.map((r) => ({ itemType, itemId: r.id, name: r.name, imageUrl: r.image_url })),
+      candidates: rows.results.map((r) => ({
+        itemType,
+        itemId: r.id,
+        name: r.name,
+        imageUrl: r.image_url,
+        // Only ever set for artist candidates (see trackPreviewSelect
+        // above) -- catalog-backed (spotifyId + our own internal id), so
+        // liking it via the player bar cascades to likeArtistForTrack's
+        // artist-like/genre-affinity bonus, unlike a raw Spotify-sourced
+        // track id.
+        track: r.track_id ? { id: r.track_id, spotifyId: r.track_spotify_id, name: r.track_name, imageUrl: r.track_image_url } : null,
+      })),
     });
   });
 

@@ -148,8 +148,22 @@
 // white/black at the corners depending on system theme) -- swapping in a
 // proper opaque-background version later still needs its own CACHE_NAME
 // bump like any other precached file's content changing, same as
-// everywhere else in this list.
-const CACHE_NAME = 'wavelengthz-shell-v35';
+// everywhere else in this list. v36 makes the Music-mode deck card's
+// artist name clickable (routes to /artist?id=..., matching the "view full
+// profile" affordance People mode already had) and adds a "play a song"
+// chip below it when the artist already has a track in the catalog
+// (GET /api/candidates/music now batches one representative track per
+// artist candidate alongside the rest of the row, instead of a separate
+// per-card fetch). Also fires a background GET /api/artists/:id for the
+// next queued candidate on every showNext() in Music mode, so a
+// not-yet-fully-cataloged artist's slow first-load path (src/routes/
+// catalog.ts's quick-fetch/backfill, itself a live Spotify round-trip) has
+// already run by the time the user actually taps into it -- every card
+// except the first of a session ends up warmed this way. Also adds a
+// direct "like this artist" button to /artist's header (previously the
+// only way to like an artist was indirectly, via the deck or liking one of
+// its tracks).
+const CACHE_NAME = 'wavelengthz-shell-v36';
 const APP_SHELL = [
   '/',
   '/app.js',
