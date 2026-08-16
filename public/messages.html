@@ -16,16 +16,52 @@
   <div id="wl-header-root"></div>
   <div id="wl-app-root" x-data="pageApp()" x-init="init()" class="flex flex-1 flex-col min-h-0">
   <p x-show="error" x-text="error" class="text-red-400 max-w-md w-full mx-auto mb-2" role="alert"></p>
+  <button
+    type="button"
+    x-show="playlistCount > 0"
+    class="btn-ghost mx-auto mb-2 flex w-full max-w-md items-center justify-center gap-1.5 text-xs"
+    @click="togglePlaylist()"
+  >
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+      <path d="M9 18V5l12-2v13" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="16" r="3" />
+    </svg>
+    <span x-text="`${playlistCount} song${playlistCount === 1 ? '' : 's'} shared`"></span>
+  </button>
   <ul id="message-list" class="flex-1 flex flex-col gap-2 overflow-y-auto max-w-md w-full mx-auto">
     <template x-for="message in messages" :key="message.id">
       <li class="flex flex-col" :class="message.sender_id === myId ? 'items-end' : 'items-start'">
         <span class="mb-0.5 text-xs text-neutral-500" x-text="message.sender_id === myId ? 'You' : otherName"></span>
         <p
-          x-show="!message.recalledAt"
+          x-show="!message.recalledAt && !message.track"
           class="card max-w-[80%] px-3 py-2"
           :class="message.sender_id === myId ? 'bg-brand-500 text-white' : ''"
           x-text="message.body"
         ></p>
+        <!-- Shared song. Rendered instead of the plain text bubble, with the
+             caption (if any) underneath -- see migrations/0021 for why a
+             track is a real column rather than a URL in `body`. Playback goes
+             through the persistent player bar so it keeps going while you
+             scroll or navigate away. -->
+        <div
+          x-show="!message.recalledAt && message.track"
+          class="card max-w-[80%] overflow-hidden"
+          :class="message.sender_id === myId ? 'bg-brand-500 text-white' : ''"
+        >
+          <button type="button" class="flex w-full items-center gap-3 p-2 text-left" @click="playSharedTrack(message.track)">
+            <img :src="message.track?.imageUrl" :alt="message.track?.name" class="h-12 w-12 shrink-0 rounded object-cover ring-1 ring-white/10" />
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-sm font-semibold" x-text="message.track?.name"></span>
+              <span class="block truncate text-xs opacity-70" x-text="message.track?.artistName"></span>
+            </span>
+            <span class="shrink-0 pr-1" aria-hidden="true">
+              <svg x-show="!isCurrentTrack(message.track?.spotifyId)" viewBox="0 0 24 24" fill="currentColor" class="h-6 w-6"><path d="M8 5v14l11-7z" /></svg>
+              <svg x-show="isCurrentTrack(message.track?.spotifyId)" viewBox="0 0 24 24" fill="currentColor" class="h-6 w-6"><path d="M7 5h4v14H7zM13 5h4v14h-4z" /></svg>
+            </span>
+          </button>
+          <p x-show="message.body" class="px-3 pb-2 text-sm" x-text="message.body"></p>
+        </div>
         <p x-show="message.recalledAt" class="card max-w-[80%] px-3 py-2 italic text-neutral-500" x-text="message.sender_id === myId ? 'You recalled this message' : 'Message recalled'"></p>
         <button
           type="button"
@@ -39,8 +75,118 @@
   <form class="flex gap-2 max-w-md w-full mx-auto mt-4 mb-app" @submit.prevent="send()">
     <label class="sr-only" for="message-input">Message</label>
     <input id="message-input" class="field flex-1" x-model="draft" maxlength="2000" required />
+    <button
+      type="button"
+      class="btn-secondary shrink-0 px-3"
+      @click="openTrackPicker()"
+      aria-label="Share a song"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5">
+        <path d="M9 18V5l12-2v13" />
+        <circle cx="6" cy="18" r="3" />
+        <circle cx="18" cy="16" r="3" />
+      </svg>
+    </button>
     <button type="submit" class="btn-primary px-5">Send</button>
   </form>
+
+  <!-- Song picker. Opens over the thread rather than inline: the one-tap
+       "what I'm playing right now" option is the fast path (it uses
+       user-read-playback-state, already granted by every account), and
+       search is the fallback for a song you're only thinking of. -->
+  <div
+    x-show="showTrackPicker"
+    class="fixed inset-0 z-20 flex flex-col bg-base/95 p-4 backdrop-blur-sm"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Share a song"
+  >
+    <div class="mx-auto flex w-full max-w-md items-center gap-2">
+      <input
+        x-ref="trackSearchInput"
+        class="field flex-1"
+        type="search"
+        placeholder="Search for a song..."
+        x-model="trackQuery"
+        @input="onTrackQueryInput()"
+      />
+      <button class="btn-ghost" @click="closeTrackPicker()">Cancel</button>
+    </div>
+
+    <label class="mx-auto mt-2 w-full max-w-md">
+      <span class="sr-only">Add a note</span>
+      <input class="field w-full text-sm" placeholder="Say something about it (optional)" x-model="trackCaption" maxlength="2000" />
+    </label>
+
+    <button
+      type="button"
+      x-show="nowPlaying"
+      class="card mx-auto mt-3 flex w-full max-w-md items-center gap-3 p-3 text-left transition active:scale-[0.98]"
+      :disabled="sharingTrack"
+      @click="shareNowPlaying()"
+    >
+      <img :src="nowPlaying?.imageUrl" :alt="nowPlaying?.name" class="h-11 w-11 shrink-0 rounded object-cover ring-1 ring-white/10" />
+      <span class="min-w-0 flex-1">
+        <span class="block text-xs font-semibold tracking-wide text-brand-400 uppercase">Playing now &mdash; tap to send</span>
+        <span class="block truncate text-sm text-neutral-100" x-text="nowPlaying?.name"></span>
+        <span class="block truncate text-xs text-neutral-400" x-text="nowPlaying?.artistName"></span>
+      </span>
+    </button>
+
+    <ul class="mx-auto mt-3 flex w-full max-w-md flex-col gap-2 overflow-y-auto">
+      <template x-for="result in trackResults" :key="result.spotifyTrackId">
+        <li>
+          <button
+            class="card flex w-full items-center gap-3 p-3 text-left transition active:scale-[0.98] active:bg-white/5"
+            :disabled="sharingTrack"
+            @click="shareSearchResult(result)"
+          >
+            <img :src="result.imageUrl" :alt="result.name" class="h-10 w-10 shrink-0 rounded object-cover ring-1 ring-white/10" />
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-neutral-100" x-text="result.name"></span>
+              <span class="block truncate text-xs text-neutral-400" x-text="result.artistName"></span>
+            </span>
+          </button>
+        </li>
+      </template>
+    </ul>
+    <p x-show="trackQuery.trim().length > 1 && !trackSearching && trackResults.length === 0" class="mx-auto mt-4 w-full max-w-md text-center text-neutral-400">
+      No songs found.
+    </p>
+  </div>
+
+  <!-- The shared playlist: derived from every non-recalled track message in
+       this thread (see GET .../playlist), so it can never drift from what was
+       actually sent. -->
+  <div
+    x-show="showPlaylist"
+    class="fixed inset-0 z-20 flex flex-col bg-base/95 p-4 backdrop-blur-sm"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Shared songs"
+  >
+    <div class="mx-auto flex w-full max-w-md items-center justify-between">
+      <h2 class="text-lg font-bold">Shared songs <span class="text-neutral-500" x-text="`(${playlistCount})`"></span></h2>
+      <button class="btn-ghost" @click="togglePlaylist()">Close</button>
+    </div>
+    <ul class="mx-auto mt-3 flex w-full max-w-md flex-col gap-2 overflow-y-auto">
+      <template x-for="track in playlistTracks" :key="track.id">
+        <li>
+          <button class="card flex w-full items-center gap-3 p-3 text-left transition active:scale-[0.98]" @click="playSharedTrack(track)">
+            <img :src="track.imageUrl" :alt="track.name" class="h-10 w-10 shrink-0 rounded object-cover ring-1 ring-white/10" />
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-neutral-100" x-text="track.name"></span>
+              <span class="block truncate text-xs text-neutral-400" x-text="track.artistName"></span>
+            </span>
+            <span class="shrink-0 text-xs text-neutral-500" x-text="track.sharedBy === myId ? 'You' : 'Them'"></span>
+          </button>
+        </li>
+      </template>
+    </ul>
+    <p x-show="playlistCount === 0" class="mx-auto mt-6 w-full max-w-md text-center text-neutral-400">
+      No songs shared yet. Tap the music note to send one.
+    </p>
+  </div>
   </div>
 
   <script type="module">

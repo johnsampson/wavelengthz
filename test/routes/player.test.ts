@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
 import { encrypt } from '../../src/lib/crypto';
@@ -90,5 +90,96 @@ describe('GET /api/me/player-token', () => {
     const res = await worker.fetch(new Request('http://localhost/api/me/player-token', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
     const body = await res.json<any>();
     expect(body.available).toBe(false);
+  });
+});
+
+describe('GET /api/me/now-playing', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubNowPlaying(status: number, payload?: any) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+        if (url.includes('/v1/me/player/currently-playing')) {
+          return status === 204 ? new Response(null, { status: 204 }) : new Response(JSON.stringify(payload), { status });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+  }
+
+  it('returns 401 when not logged in', async () => {
+    const res = await worker.fetch(new Request('http://localhost/api/me/now-playing'), env, {} as ExecutionContext);
+    expect(res.status).toBe(401);
+  });
+
+  it('returns the current track in a shareable shape', async () => {
+    await makeUserWithSpotify('u1', { productTier: 'premium', grantedScope: 'user-read-playback-state' });
+    const cookie = await cookieFor('u1');
+    stubNowPlaying(200, {
+      item: {
+        type: 'track',
+        id: 'sp-t1',
+        name: 'Landslide',
+        artists: [{ id: 'sp-a', name: 'Fleetwood Mac' }],
+        album: { images: [{ url: 'https://i/t1.jpg' }] },
+        preview_url: null,
+      },
+    });
+
+    const res = await worker.fetch(new Request('http://localhost/api/me/now-playing', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.playing).toEqual({
+      spotifyTrackId: 'sp-t1',
+      name: 'Landslide',
+      artistName: 'Fleetwood Mac',
+      imageUrl: 'https://i/t1.jpg',
+    });
+    // The raw object rides along so the share call can resolve it into the
+    // catalog with no follow-up Spotify request.
+    expect(body.track.artists[0].id).toBe('sp-a');
+  });
+
+  it('reports nothing playing on a 204, rather than erroring', async () => {
+    await makeUserWithSpotify('u1', { productTier: 'premium', grantedScope: 'user-read-playback-state' });
+    const cookie = await cookieFor('u1');
+    stubNowPlaying(204);
+
+    const res = await worker.fetch(new Request('http://localhost/api/me/now-playing', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    expect((await res.json<any>()).playing).toBeNull();
+  });
+
+  it('ignores a podcast episode -- only tracks belong in a music thread', async () => {
+    await makeUserWithSpotify('u1', { productTier: 'premium', grantedScope: 'user-read-playback-state' });
+    const cookie = await cookieFor('u1');
+    stubNowPlaying(200, { item: { type: 'episode', id: 'ep-1', name: 'Some Podcast' } });
+
+    const res = await worker.fetch(new Request('http://localhost/api/me/now-playing', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect((await res.json<any>()).playing).toBeNull();
+  });
+
+  it('degrades to nothing-playing when the user has no Spotify connection at all', async () => {
+    await insertTestUser(env.DB, { id: 'u2', spotifyId: 'sp-u2', createdAt: 1000, updatedAt: 1000 });
+    const cookie = await cookieFor('u2');
+
+    const res = await worker.fetch(new Request('http://localhost/api/me/now-playing', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    expect((await res.json<any>()).playing).toBeNull();
+  });
+
+  it('degrades to nothing-playing on a Spotify failure rather than surfacing an error', async () => {
+    await makeUserWithSpotify('u1', { productTier: 'premium', grantedScope: 'user-read-playback-state' });
+    const cookie = await cookieFor('u1');
+    stubNowPlaying(500, {});
+
+    const res = await worker.fetch(new Request('http://localhost/api/me/now-playing', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    expect((await res.json<any>()).playing).toBeNull();
   });
 });

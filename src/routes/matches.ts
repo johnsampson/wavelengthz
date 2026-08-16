@@ -3,7 +3,8 @@ import { getSessionUser } from '../lib/session';
 import { notifyMessage, getMatchNotificationDelayMs } from '../lib/notifications';
 import { canRecall } from '../lib/messageRecall';
 import { computeMusicOverlap } from '../lib/musicOverlap';
-import { isValidMessageBody } from '../lib/messageFilter';
+import { isValidMessageBody, isValidTrackCaption } from '../lib/messageFilter';
+import { resolveSharedTrack, loadSharedTracks, type ShareableSpotifyTrack } from '../lib/trackSharing';
 import { hasCompleteProfile, photoCountFor, likedSongCountFor } from '../lib/messagingGate';
 
 // A soft-deleted account must disappear from matches and messaging
@@ -120,23 +121,70 @@ export function registerMatchRoutes(router: RouterType) {
     if (!match) return new Response('Forbidden', { status: 403 });
 
     const rows = await env.DB.prepare(
-      `SELECT id, sender_id, body, read_at, created_at, recalled_at FROM messages WHERE match_id = ? ORDER BY created_at ASC`
+      `SELECT id, sender_id, body, track_id, read_at, created_at, recalled_at FROM messages WHERE match_id = ? ORDER BY created_at ASC`
     ).bind(match.id).all<any>();
+
+    // Batched, not one lookup per message -- a long thread would otherwise
+    // blow past the Workers subrequest limit. Recalled messages are excluded
+    // from the load entirely, since their track is never surfaced anyway.
+    const tracks = await loadSharedTracks(
+      env.DB,
+      rows.results.filter((m) => !m.recalled_at).map((m) => m.track_id)
+    );
 
     // The row (and its real body) stays in D1 either way -- recalled_at is
     // only ever set via POST .../recall below. Nulling `body` here, rather
     // than trusting the client to hide it, is what actually keeps recalled
-    // content from reaching anyone once it's set.
+    // content from reaching anyone once it's set. `track` is nulled on the
+    // same condition, for the same reason: recalling a shared song has to
+    // actually un-share it, not just hide the caption.
     return Response.json({
       messages: rows.results.map((m) => ({
         id: m.id,
         sender_id: m.sender_id,
         body: m.recalled_at ? null : m.body,
+        track: m.recalled_at || !m.track_id ? null : tracks.get(m.track_id) ?? null,
         read_at: m.read_at,
         created_at: m.created_at,
         recalledAt: m.recalled_at,
       })),
     });
+  });
+
+  // The shared playlist: every non-recalled track ever sent in this thread,
+  // oldest first. Deliberately DERIVED from messages rather than stored in
+  // its own table (see migrations/0021) -- recall, unmatch, and account
+  // deletion all already cascade correctly through `messages`, so a second
+  // copy could only ever drift out of sync with them.
+  router.get('/api/matches/:id/playlist', async (request: IRequest, env: Env) => {
+    const user = await getSessionUser(request, env.DB);
+    if (!user) return new Response('Unauthorized', { status: 401 });
+
+    const match = await loadActiveMatchForParticipant(env.DB, request.params.id, user.id);
+    if (!match) return new Response('Forbidden', { status: 403 });
+
+    const rows = await env.DB.prepare(
+      `SELECT track_id, sender_id, created_at FROM messages
+       WHERE match_id = ? AND track_id IS NOT NULL AND recalled_at IS NULL
+       ORDER BY created_at ASC`
+    ).bind(match.id).all<{ track_id: string; sender_id: string; created_at: number }>();
+
+    const tracks = await loadSharedTracks(env.DB, rows.results.map((r) => r.track_id));
+
+    // Same song sent twice appears once, at its first appearance -- a
+    // playlist with duplicates reads as a bug, and the re-send is still
+    // visible in the thread itself where it carries meaning.
+    const seen = new Set<string>();
+    const items = [];
+    for (const row of rows.results) {
+      if (seen.has(row.track_id)) continue;
+      const track = tracks.get(row.track_id);
+      if (!track) continue; // track row deleted out from under us -- skip, don't 500
+      seen.add(row.track_id);
+      items.push({ ...track, sharedBy: row.sender_id, sharedAt: row.created_at });
+    }
+
+    return Response.json({ tracks: items, count: items.length });
   });
 
   router.post('/api/matches/:id/messages/:messageId/recall', async (request: IRequest, env: Env) => {
@@ -172,17 +220,37 @@ export function registerMatchRoutes(router: RouterType) {
       return Response.json({ error: 'profile_incomplete' }, { status: 403 });
     }
 
-    const { body } = await request.json<{ body: string }>();
-    if (!isValidMessageBody(body)) {
+    const { body, track } = await request.json<{ body?: string; track?: ShareableSpotifyTrack }>();
+
+    // Two shapes on one endpoint: a plain text message (body required, as
+    // before), or a shared track (body optional, as a caption). Reusing this
+    // route rather than adding a second one keeps the notification, push,
+    // messaging-gate, and recall paths identical for both -- a shared song
+    // IS a message, and every one of those behaviors should apply to it
+    // unchanged.
+    let trackId: string | null = null;
+    if (track) {
+      if (!isValidTrackCaption(body)) {
+        return Response.json({ error: 'invalid_message' }, { status: 400 });
+      }
+      const resolved = await resolveSharedTrack(env, track, user.id);
+      if ('error' in resolved) {
+        // artist_unavailable is a transient Spotify failure, not bad input --
+        // 503 so the client can say "try again" rather than "that's invalid".
+        return Response.json({ error: resolved.error }, { status: resolved.error === 'artist_unavailable' ? 503 : 400 });
+      }
+      trackId = resolved.trackId;
+    } else if (!isValidMessageBody(body ?? '')) {
       return Response.json({ error: 'invalid_message' }, { status: 400 });
     }
+
     const messageId = crypto.randomUUID();
     const now = Date.now();
     const recipientId = match.user_a_id === user.id ? match.user_b_id : match.user_a_id;
 
     await env.DB.prepare(
-      `INSERT INTO messages (id, match_id, sender_id, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
-    ).bind(messageId, match.id, user.id, body, now, now).run();
+      `INSERT INTO messages (id, match_id, sender_id, body, track_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(messageId, match.id, user.id, (body ?? '').trim(), trackId, now, now).run();
 
     await env.DB.prepare(
       `INSERT INTO notifications (id, user_id, type, related_id, created_at, updated_at) VALUES (?, ?, 'message', ?, ?, ?)`

@@ -910,3 +910,103 @@ describe('POST /api/tracks', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('GET /api/tracks/search without artist_id (one-step song search)', () => {
+  function stubTrackSearch(items: any[]) {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        calls.push(url);
+        if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+        if (url.includes('/v1/search') && url.includes('type=track')) {
+          return new Response(JSON.stringify({ tracks: { items } }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+    return calls;
+  }
+
+  const spotifyTrack = (id: string, name: string) => ({
+    id,
+    name,
+    artists: [{ id: 'sp-a', name: 'Some Artist' }],
+    album: { images: [{ url: `https://i/${id}.jpg` }] },
+  });
+
+  async function search(cookie: string, q: string) {
+    const res = await worker.fetch(
+      new Request(`http://localhost/api/tracks/search?q=${encodeURIComponent(q)}`, { headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    return res.json<any>();
+  }
+
+  it('searches all of Spotify without needing an artist first', async () => {
+    stubTrackSearch([spotifyTrack('sp-t1', 'Landslide')]);
+    const cookie = await cookieFor('u1');
+
+    const body = await search(cookie, 'landslide');
+
+    expect(body.results).toHaveLength(1);
+    expect(body.results[0]).toMatchObject({
+      spotifyTrackId: 'sp-t1',
+      name: 'Landslide',
+      artistName: 'Some Artist',
+      inCatalog: false,
+    });
+  });
+
+  it('surfaces already-cataloged matches, tagged, alongside live results', async () => {
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('t-local', 'sp-local', 'Landslide Local', 'local-1', 'https://i/l.jpg', 'seed', 1, 1000)`
+    ).run();
+    stubTrackSearch([spotifyTrack('sp-remote', 'Landslide Remote')]);
+    const cookie = await cookieFor('u1');
+
+    const body = await search(cookie, 'Landslide');
+
+    const local = body.results.find((r: any) => r.spotifyTrackId === 'sp-local');
+    expect(local).toMatchObject({ id: 't-local', inCatalog: true, artistName: 'Local Artist' });
+    expect(body.results.some((r: any) => r.spotifyTrackId === 'sp-remote')).toBe(true);
+  });
+
+  it('does not list the same song twice when it is both cataloged and in the live results', async () => {
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, source, approved, created_at) VALUES ('t-dup', 'sp-dup', 'Dup Song', 'local-1', 'seed', 1, 1000)`
+    ).run();
+    stubTrackSearch([spotifyTrack('sp-dup', 'Dup Song')]);
+    const cookie = await cookieFor('u1');
+
+    const body = await search(cookie, 'Dup');
+
+    expect(body.results.filter((r: any) => r.spotifyTrackId === 'sp-dup')).toHaveLength(1);
+    expect(body.results.find((r: any) => r.spotifyTrackId === 'sp-dup').inCatalog).toBe(true);
+  });
+
+  it('returns nothing for a blank query without calling Spotify at all', async () => {
+    const calls = stubTrackSearch([]);
+    const cookie = await cookieFor('u1');
+
+    const body = await search(cookie, '   ');
+
+    expect(body.results).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
+  it('still requires artist_id semantics for the artist-scoped form', async () => {
+    // Regression guard: the /artist page's own picker passes artist_id and
+    // must keep behaving exactly as before this endpoint gained a second mode.
+    stubTrackSearch([]);
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/tracks/search?q=x&artist_id=nope', { headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect((await res.json<any>()).error).toBe('unknown artist_id');
+  });
+});

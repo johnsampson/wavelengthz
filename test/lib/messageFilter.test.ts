@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { containsBlockedWord, isValidMessageBody, MAX_MESSAGE_LENGTH } from '../../src/lib/messageFilter';
+import { containsBlockedWord, isValidMessageBody, isValidTrackCaption, MAX_MESSAGE_LENGTH } from '../../src/lib/messageFilter';
 
 describe('isValidMessageBody', () => {
   it('accepts a normal sentence with common punctuation', () => {
@@ -55,5 +55,31 @@ describe('containsBlockedWord', () => {
   it('does not flag ordinary text or a word that merely contains a blocked substring', () => {
     expect(containsBlockedWord('I love live music and loud guitars')).toBe(false);
     expect(containsBlockedWord('that concert was a classic show')).toBe(false);
+  });
+});
+
+describe('isValidTrackCaption', () => {
+  it('allows an omitted or empty caption -- sending just the song is the common case', () => {
+    expect(isValidTrackCaption(undefined)).toBe(true);
+    expect(isValidTrackCaption(null)).toBe(true);
+    expect(isValidTrackCaption('')).toBe(true);
+    expect(isValidTrackCaption('   ')).toBe(true);
+  });
+
+  it('holds a non-empty caption to the same bar as any other message', () => {
+    expect(isValidTrackCaption('this one is you')).toBe(true);
+    expect(isValidTrackCaption('http://evil.example')).toBe(false); // charset blocks links
+    expect(isValidTrackCaption('you are a bitch')).toBe(false); // blocklist still applies
+    expect(isValidTrackCaption('x'.repeat(2001))).toBe(false);
+  });
+
+  it('rejects a non-string caption', () => {
+    expect(isValidTrackCaption(42 as any)).toBe(false);
+    expect(isValidTrackCaption({} as any)).toBe(false);
+  });
+
+  it('leaves isValidMessageBody itself unchanged -- empty is still invalid there', () => {
+    expect(isValidMessageBody('')).toBe(false);
+    expect(isValidMessageBody('   ')).toBe(false);
   });
 });

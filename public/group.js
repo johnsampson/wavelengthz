@@ -2,13 +2,21 @@ import { api } from './app.js';
 import { requireAuth } from './auth.js';
 import { showErrorToast } from './toast.js';
 import { navigate } from './router.js';
+import { createTrackPicker } from './trackPicker.js';
 
 // Extracted from group.html's inline script -- see messages.js's comment
 // for why this carries a destroy() too (same poll-interval/audio-unlock
 // leak risk, same fix).
 export function createGroupApp() {
+  const groupId = new URLSearchParams(window.location.search).get('id');
   return {
-    groupId: new URLSearchParams(window.location.search).get('id'),
+    // A group's collective crate -- same picker/playlist machinery the 1:1
+    // thread uses, pointed at the group endpoints. See public/trackPicker.js.
+    ...createTrackPicker({
+      share: (track, body) => api.shareTrackToGroup(groupId, track, body),
+      loadPlaylist: () => api.groupPlaylist(groupId),
+    }),
+    groupId,
     /** @type {{id: string, name: string, topic?: string, members: Array<{id: string, displayName?: string}>} | null} */
     group: null,
     messages: [],
@@ -33,6 +41,8 @@ export function createGroupApp() {
         return;
       }
       await this.load();
+      this.initTrackPicker();
+      await this.refreshPlaylist();
       this.scrollToBottom();
       // Same short-polling approach as public/messages.js -- no WebSocket/
       // Durable-Object infrastructure in this app. 3s stays well under the

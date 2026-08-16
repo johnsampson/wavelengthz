@@ -180,8 +180,20 @@
 // forces the element onto its own GPU compositing layer so the compositor
 // (which drives the toolbar animation) positions it directly, instead of
 // lagging behind a main-thread position update -- applied to nav.js's own
-// <nav> (renderNavHtml) and every page's #wl-player-root.
-const CACHE_NAME = 'wavelengthz-shell-v38';
+// <nav> (renderNavHtml) and every page's #wl-player-root. v39 makes
+// sharing a song a
+// first-class message type in both 1:1 match threads and group threads
+// (migrations/0021 adds messages.track_id / group_messages.track_id):
+// messages.html/group.html gain a song picker (public/trackPicker.js, new --
+// added to this precache list below, and shared by messages.js and group.js
+// rather than duplicated), a one-tap "send what I'm playing right now"
+// option, in-thread track bubbles that play through the persistent player
+// bar, and a shared-playlist panel derived from every non-recalled track
+// message in the thread. Also adds an unscoped one-step song search
+// (GET /api/tracks/search with no artist_id) -- previously finding a song
+// required picking its artist first, which is far too much friction for
+// something sent mid-conversation.
+const CACHE_NAME = 'wavelengthz-shell-v39';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -206,6 +218,7 @@ const APP_SHELL = [
   '/notifications.js',
   '/messages.js',
   '/group.js',
+  '/trackPicker.js',
   '/tailwind.css',
   '/manifest.json',
   '/icons/icon-180.png',
