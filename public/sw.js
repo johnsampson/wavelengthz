@@ -134,8 +134,22 @@
 // instead of installing a real app shortcut back to the deck. Anyone who
 // already installed from a non-deck page needs to remove that shortcut and
 // re-add it (a code fix alone can't retroactively repoint an icon that
-// already exists on a home screen).
-const CACHE_NAME = 'wavelengthz-shell-v34';
+// already exists on a home screen). v35 adds <link rel="apple-touch-icon">
+// and <meta name="apple-mobile-web-app-capable"> to every page's <head> --
+// iOS Safari's "Add to Home Screen" reads apple-touch-icon directly
+// (independent of the web app manifest), and had nothing to read anywhere
+// in this app before now, which is why the app logo never showed up on an
+// iPhone home screen. Also switches manifest.json's icons and the new
+// apple-touch-icon links from the external img.wavelengthz.com CDN to new
+// local files under public/icons/ (added to this precache list below) --
+// self-hosted, so an icon is available offline on first install instead of
+// depending on a live cross-origin fetch. Placeholder source image for now
+// (still has a transparent background, so iOS pre-16 will still fill it
+// white/black at the corners depending on system theme) -- swapping in a
+// proper opaque-background version later still needs its own CACHE_NAME
+// bump like any other precached file's content changing, same as
+// everywhere else in this list.
+const CACHE_NAME = 'wavelengthz-shell-v35';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -162,6 +176,9 @@ const APP_SHELL = [
   '/group.js',
   '/tailwind.css',
   '/manifest.json',
+  '/icons/icon-180.png',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
   '/onboarding',
   '/history',
   '/matches',
