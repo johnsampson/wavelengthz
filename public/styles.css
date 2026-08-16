@@ -59,6 +59,27 @@ html, body {
 }
 
 /*
+ * Follow-up to the fix above: that one only stops the elastic-bounce case
+ * (no real scrollable content, so the whole page rubber-bands). On a page
+ * that genuinely scrolls, the nav/player bar can still visibly lag behind
+ * mid-scroll and briefly show a gap -- a distinct, long-documented iOS
+ * Safari quirk where a plain `position: fixed` element isn't always kept
+ * perfectly glued to the visual viewport while the browser's toolbar is
+ * animating in/out during a scroll gesture (main-thread position updates
+ * lag the compositor-driven toolbar animation). Forcing the element onto
+ * its own GPU compositing layer (translateZ(0), an otherwise-inert 3D
+ * transform) hands its positioning to the compositor instead, which tracks
+ * the toolbar animation frame-for-frame. backface-visibility: hidden is
+ * the standard companion hint (avoids a flicker some WebKit versions show
+ * on a freshly-promoted layer). Applied to both fixed bottom bars --
+ * nav.js's own <nav> (renderNavHtml) and every page's #wl-player-root.
+ */
+.wl-gpu-layer {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/*
  * Scrolls a player-bar track/artist name left-to-right only when it doesn't
  * fit (see playerBar.js's applyMarquee) -- holds at the start and end so a
  * just-barely-overflowing title is still readable, not a nonstop scroll.

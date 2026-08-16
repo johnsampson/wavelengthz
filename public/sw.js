@@ -169,8 +169,19 @@
 // toolbar hiding/showing on scroll) to min-h-dvh (100dvh, which does), and
 // styles.css adds overscroll-behavior-y: none on html/body to stop the
 // elastic overscroll/rubber-band bounce itself from dragging fixed-position
-// elements along with it in the first place.
-const CACHE_NAME = 'wavelengthz-shell-v37';
+// elements along with it in the first place. v38 is a follow-up to v37:
+// that fix only covered a page with no genuinely scrollable content --
+// on a page long enough to actually scroll, the nav/player bar could still
+// visibly lag behind mid-scroll, a distinct iOS Safari quirk where a plain
+// `position: fixed` element isn't always kept perfectly glued to the
+// visual viewport while the browser's toolbar is animating in/out during a
+// real scroll gesture. Adds a new .wl-gpu-layer class (styles.css) --
+// translateZ(0) + backface-visibility: hidden, the standard fix that
+// forces the element onto its own GPU compositing layer so the compositor
+// (which drives the toolbar animation) positions it directly, instead of
+// lagging behind a main-thread position update -- applied to nav.js's own
+// <nav> (renderNavHtml) and every page's #wl-player-root.
+const CACHE_NAME = 'wavelengthz-shell-v38';
 const APP_SHELL = [
   '/',
   '/app.js',

@@ -79,7 +79,7 @@ export function renderNavHtml(pathname) {
     .join('');
   return `
     <nav
-      class="fixed inset-x-0 bottom-0 z-10 flex border-t border-white/10 bg-surface/90 backdrop-blur-lg"
+      class="wl-gpu-layer fixed inset-x-0 bottom-0 z-10 flex border-t border-white/10 bg-surface/90 backdrop-blur-lg"
       style="padding-bottom: env(safe-area-inset-bottom)"
       aria-label="Main navigation"
     >${links}</nav>`;
