@@ -1,6 +1,7 @@
 import { api } from './app.js';
 import { requireAuth } from './auth.js';
 import { showErrorToast } from './toast.js';
+import { createTrackPicker } from './trackPicker.js';
 
 // Extracted from messages.html's inline script -- see matches.js's comment
 // for why (same reasoning, same shape). Also adds destroy(), a NEW
@@ -14,8 +15,15 @@ import { showErrorToast } from './toast.js';
 // `Alpine.$data(oldRoot)?.destroy?.()` on the way out of any page that
 // defines it.
 export function createMessagesApp() {
+  const matchId = new URLSearchParams(window.location.search).get('matchId');
   return {
-    matchId: new URLSearchParams(window.location.search).get('matchId'),
+    // Song sharing + the running shared playlist, identical here and in
+    // group.js -- see public/trackPicker.js.
+    ...createTrackPicker({
+      share: (track, body) => api.shareTrack(matchId, track, body),
+      loadPlaylist: () => api.matchPlaylist(matchId),
+    }),
+    matchId,
     messages: [],
     draft: '',
     error: null,
@@ -44,6 +52,8 @@ export function createMessagesApp() {
         // without the sender label/alignment) even if this fails.
       }
       await this.load();
+      this.initTrackPicker();
+      await this.refreshPlaylist();
       this.scrollToBottom();
       // No WebSocket/Durable-Object infrastructure in this app -- short
       // polling is the simplest way to approximate "live" without a bigger

@@ -601,6 +601,46 @@ export async function searchTracksByArtist(token: string, artistName: string, tr
   return data.tracks.items;
 }
 
+// Unscoped "find any song by name" search, unlike searchTracksByArtist above
+// (which requires knowing the artist first). People think in songs -- "I want
+// to send Landslide" -- not artist-then-song, so sharing a track in a message
+// or answering a prompt needs this one-step form. Returns the album images and
+// artist name alongside each track, exactly as fetchTopTracks does, so a
+// result can be rendered and upserted without any follow-up call: no
+// GET /v1/tracks/{id}, ever (see this file's own notes on why that endpoint is
+// avoided in bulk).
+export async function searchTracks(token: string, query: string, limit: number, kv?: KVNamespace) {
+  const res = await spotifyFetch(
+    `https://api.spotify.com/v1/search?type=track&limit=${limit}&q=${encodeURIComponent(query)}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+    kv
+  );
+  if (!res.ok) throw new Error(`Spotify track search failed: ${res.status} ${await res.text()}`);
+  const data = await res.json<{ tracks: { items: any[] } }>();
+  return data.tracks.items;
+}
+
+// The one-tap "send what I'm listening to right now" path. Uses
+// user-read-playback-state, which is ALREADY in SCOPES above and therefore
+// already granted by every existing user -- no re-auth, unlike the
+// playlist-modify-* scopes a real Spotify playlist export would need.
+//
+// Returns null (rather than throwing) for the two entirely normal "nothing to
+// send" cases: 204 No Content when nothing is playing, and 200 with a non-
+// track item (a podcast episode) which has no place in a music thread.
+export async function fetchCurrentlyPlaying(token: string, kv?: KVNamespace): Promise<any | null> {
+  const res = await spotifyFetch(
+    'https://api.spotify.com/v1/me/player/currently-playing',
+    { headers: { Authorization: `Bearer ${token}` } },
+    kv
+  );
+  if (res.status === 204) return null;
+  if (!res.ok) throw new Error(`Spotify currently-playing fetch failed: ${res.status} ${await res.text()}`);
+  const data = await res.json<{ item?: { type?: string } | null }>();
+  if (!data.item || data.item.type !== 'track') return null;
+  return data.item;
+}
+
 export async function fetchTrackById(token: string, trackId: string, kv?: KVNamespace) {
   const res = await spotifyFetch(
     `https://api.spotify.com/v1/tracks/${trackId}`,

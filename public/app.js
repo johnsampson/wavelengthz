@@ -50,6 +50,29 @@ export const api = {
   createArtist: (spotifyArtistId) =>
     request('/api/artists', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ spotifyArtistId }) }),
   messages: (matchId) => request(`/api/matches/${matchId}/messages`),
+  // Unscoped one-step song search (no artist_id) -- backs the track picker
+  // in message threads. The artist-scoped form is artistTrackSearch below.
+  trackSearch: (q) => request(`/api/tracks/search?q=${encodeURIComponent(q)}`),
+  // What the caller is currently playing on Spotify, for the one-tap share.
+  // Resolves to { playing: null } whenever there's nothing shareable.
+  nowPlaying: () => request('/api/me/now-playing'),
+  matchPlaylist: (matchId) => request(`/api/matches/${matchId}/playlist`),
+  groupPlaylist: (groupId) => request(`/api/groups/${groupId}/playlist`),
+  // `track` is the raw Spotify track object (from trackSearch/nowPlaying) --
+  // the server needs its artists[] and album.images to resolve it into the
+  // catalog without a follow-up Spotify call. `body` is an optional caption.
+  shareTrack: (matchId, track, body) =>
+    request(`/api/matches/${matchId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ track, body }),
+    }),
+  shareTrackToGroup: (groupId, track, body) =>
+    request(`/api/groups/${groupId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ track, body }),
+    }),
   sendMessage: (matchId, body) =>
     request(`/api/matches/${matchId}/messages`, {
       method: 'POST',

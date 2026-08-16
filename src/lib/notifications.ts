@@ -129,11 +129,19 @@ export async function notifyMessage(db: D1Database, env: Env, messageId: string,
   // load and has nothing to render without it -- a bare '/messages' link
   // lands the recipient on a broken, empty conversation view instead of the
   // actual match they were messaged from.
-  const message = await db.prepare('SELECT match_id FROM messages WHERE id = ?').bind(messageId).first<{ match_id: string }>();
+  const message = await db
+    .prepare('SELECT match_id, track_id FROM messages WHERE id = ?')
+    .bind(messageId)
+    .first<{ match_id: string; track_id: string | null }>();
 
+  // A shared song gets its own copy. It's the single warmest notification
+  // this app sends -- concrete, unhurried, and about the other person rather
+  // than about you -- so it's worth not burying under the generic "new
+  // message" line.
+  const isTrack = !!message?.track_id;
   const pushed = await sendPushToUser(db, env, recipientId, {
-    title: 'New message on Wavelengthz',
-    body: 'Open the app to read it.',
+    title: isTrack ? 'Someone sent you a song' : 'New message on Wavelengthz',
+    body: isTrack ? 'Open the app to hear it.' : 'Open the app to read it.',
     url: message ? `/messages?matchId=${message.match_id}` : '/messages',
   });
 
@@ -142,8 +150,10 @@ export async function notifyMessage(db: D1Database, env: Env, messageId: string,
   if (!pushed && recipient.email && recipient.email_notifications_enabled) {
     await sendEmail(env, {
       to: recipient.email,
-      subject: 'New message on Wavelengthz',
-      html: `<p>You have a new message. Open the app to read it.</p>`,
+      subject: isTrack ? 'Someone sent you a song on Wavelengthz' : 'New message on Wavelengthz',
+      html: isTrack
+        ? `<p>Someone shared a song with you. Open the app to hear it.</p>`
+        : `<p>You have a new message. Open the app to read it.</p>`,
     });
   }
 

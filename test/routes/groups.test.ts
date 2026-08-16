@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
 import { insertTestUser } from '../helpers/createUser';
@@ -53,7 +53,7 @@ async function cookieFor(userId: string) {
 beforeEach(async () => {
   // Children before parents -- D1 enforces FK constraints.
   await env.DB.exec(
-    'DELETE FROM group_messages; DELETE FROM group_members; DELETE FROM groups; DELETE FROM blocks; DELETE FROM user_photos; DELETE FROM music_swipes; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM sessions; DELETE FROM users;'
+    'DELETE FROM group_messages; DELETE FROM group_members; DELETE FROM groups; DELETE FROM blocks; DELETE FROM user_photos; DELETE FROM music_swipes; DELETE FROM user_genres; DELETE FROM genres; DELETE FROM tracks; DELETE FROM artists; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM sessions; DELETE FROM users;'
   );
   await makeUser('u1');
 });
@@ -602,5 +602,136 @@ describe('POST /api/groups/:id/messages/:messageId/recall', () => {
       {} as ExecutionContext
     );
     expect(res.status).toBe(403);
+  });
+});
+
+describe('sharing a track in a group thread', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubArtistLookup() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+        if (url.includes('/v1/artists/')) {
+          return new Response(
+            JSON.stringify({ id: 'sp-a', name: 'Some Artist', genres: ['indie'], images: [{ url: 'https://i/a.jpg' }], popularity: 10 }),
+            { status: 200 }
+          );
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+  }
+
+  const track = (id: string) => ({
+    id,
+    name: `Song ${id}`,
+    artists: [{ id: 'sp-a', name: 'Some Artist' }],
+    album: { images: [{ url: `https://i/${id}.jpg` }] },
+    preview_url: null,
+  });
+
+  async function makeGroup(cookie: string) {
+    const res = await worker.fetch(
+      new Request('http://localhost/api/groups', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Crate Diggers', topic: 'indie' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    return (await res.json<any>()).groupId;
+  }
+
+  async function share(cookie: string, groupId: string, id: string, body?: string) {
+    return worker.fetch(
+      new Request(`http://localhost/api/groups/${groupId}/messages`, {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ track: track(id), body }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+  }
+
+  it('stores a shared track and returns it resolved on the thread', async () => {
+    const cookie = await cookieFor('u1');
+    const groupId = await makeGroup(cookie);
+    stubArtistLookup();
+
+    expect((await share(cookie, groupId, 'sp-t1')).status).toBe(200);
+
+    const listed = await worker.fetch(
+      new Request(`http://localhost/api/groups/${groupId}/messages`, { headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    const body = await listed.json<any>();
+    expect(body.messages[0].track).toMatchObject({ spotifyId: 'sp-t1', artistName: 'Some Artist' });
+  });
+
+  it('builds the group crate from every member\'s shared tracks, dropping recalled ones', async () => {
+    const cookie = await cookieFor('u1');
+    const groupId = await makeGroup(cookie);
+    stubArtistLookup();
+    await share(cookie, groupId, 'sp-a1');
+    await share(cookie, groupId, 'sp-b1');
+
+    const msg = await env.DB.prepare(
+      `SELECT m.id FROM group_messages m JOIN tracks t ON t.id = m.track_id WHERE t.spotify_id = 'sp-a1'`
+    ).first<{ id: string }>();
+    await worker.fetch(
+      new Request(`http://localhost/api/groups/${groupId}/messages/${msg!.id}/recall`, { method: 'POST', headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+
+    const res = await worker.fetch(
+      new Request(`http://localhost/api/groups/${groupId}/playlist`, { headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    const body = await res.json<any>();
+    expect(body.count).toBe(1);
+    expect(body.tracks[0].spotifyId).toBe('sp-b1');
+  });
+
+  it('is forbidden for a non-member', async () => {
+    const cookie = await cookieFor('u1');
+    const groupId = await makeGroup(cookie);
+    await makeUser('outsider');
+    const outsider = await cookieFor('outsider');
+
+    const res = await worker.fetch(
+      new Request(`http://localhost/api/groups/${groupId}/playlist`, { headers: { Cookie: outsider } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it('still rejects an empty plain message, while allowing a bare track', async () => {
+    const cookie = await cookieFor('u1');
+    const groupId = await makeGroup(cookie);
+    stubArtistLookup();
+
+    expect((await share(cookie, groupId, 'sp-ok')).status).toBe(200);
+
+    const empty = await worker.fetch(
+      new Request(`http://localhost/api/groups/${groupId}/messages`, {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: '' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(empty.status).toBe(400);
   });
 });

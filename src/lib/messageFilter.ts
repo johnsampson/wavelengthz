@@ -31,3 +31,23 @@ export function isValidMessageBody(body: string): boolean {
   if (containsBlockedWord(trimmed)) return false;
   return true;
 }
+
+/**
+ * A shared track (migrations/0021) carries an OPTIONAL caption rather than a
+ * required body -- sending just the song, with nothing said, is the most
+ * common and most natural form of it. So the rule inverts: an empty body is
+ * fine here (and only here), but a non-empty one still has to clear every
+ * check a plain text message does, since a caption is just as visible as any
+ * other message.
+ *
+ * Deliberately NOT folded into isValidMessageBody as an "allow empty" flag:
+ * that function's contract ("this string is safe to show another user") is
+ * relied on by bios too, and quietly teaching it to accept empty strings
+ * would weaken it everywhere for the benefit of one caller.
+ */
+export function isValidTrackCaption(body: unknown): boolean {
+  if (body === undefined || body === null) return true;
+  if (typeof body !== 'string') return false;
+  if (!body.trim()) return true;
+  return isValidMessageBody(body);
+}

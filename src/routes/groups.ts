@@ -2,7 +2,8 @@ import type { RouterType, IRequest } from 'itty-router';
 import { getSessionUser } from '../lib/session';
 import { isBlockedEitherDirection } from '../lib/blocks';
 import { haversineKm } from '../lib/scoring';
-import { isValidMessageBody } from '../lib/messageFilter';
+import { isValidMessageBody, isValidTrackCaption } from '../lib/messageFilter';
+import { resolveSharedTrack, loadSharedTracks, type ShareableSpotifyTrack } from '../lib/trackSharing';
 import { canRecall } from '../lib/messageRecall';
 import { hasCompleteProfile, photoCountFor, likedSongCountFor } from '../lib/messagingGate';
 
@@ -177,21 +178,60 @@ export function registerGroupRoutes(router: RouterType) {
     if (!membership) return new Response('Forbidden', { status: 403 });
 
     const rows = await env.DB.prepare(
-      `SELECT id, sender_id, body, created_at, recalled_at FROM group_messages WHERE group_id = ? ORDER BY created_at ASC`
+      `SELECT id, sender_id, body, track_id, created_at, recalled_at FROM group_messages WHERE group_id = ? ORDER BY created_at ASC`
     ).bind(request.params.id).all<any>();
 
+    const tracks = await loadSharedTracks(
+      env.DB,
+      rows.results.filter((m) => !m.recalled_at).map((m) => m.track_id)
+    );
+
     // Same reasoning as GET /api/matches/:id/messages: the row (and its real
-    // body) stays in D1 regardless -- nulling `body` here is what actually
-    // keeps recalled content from reaching other members.
+    // body) stays in D1 regardless -- nulling `body` (and `track`) here is
+    // what actually keeps recalled content from reaching other members.
     return Response.json({
       messages: rows.results.map((m) => ({
         id: m.id,
         sender_id: m.sender_id,
         body: m.recalled_at ? null : m.body,
+        track: m.recalled_at || !m.track_id ? null : tracks.get(m.track_id) ?? null,
         created_at: m.created_at,
         recalledAt: m.recalled_at,
       })),
     });
+  });
+
+  // A group's collective crate -- every non-recalled track any member has
+  // shared. Same derived-not-stored design as the 1:1 playlist; see
+  // GET /api/matches/:id/playlist and migrations/0021.
+  router.get('/api/groups/:id/playlist', async (request: IRequest, env: Env) => {
+    const user = await getSessionUser(request, env.DB);
+    if (!user) return new Response('Unauthorized', { status: 401 });
+
+    const membership = await env.DB.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?')
+      .bind(request.params.id, user.id)
+      .first();
+    if (!membership) return new Response('Forbidden', { status: 403 });
+
+    const rows = await env.DB.prepare(
+      `SELECT track_id, sender_id, created_at FROM group_messages
+       WHERE group_id = ? AND track_id IS NOT NULL AND recalled_at IS NULL
+       ORDER BY created_at ASC`
+    ).bind(request.params.id).all<{ track_id: string; sender_id: string; created_at: number }>();
+
+    const tracks = await loadSharedTracks(env.DB, rows.results.map((r) => r.track_id));
+
+    const seen = new Set<string>();
+    const items = [];
+    for (const row of rows.results) {
+      if (seen.has(row.track_id)) continue;
+      const track = tracks.get(row.track_id);
+      if (!track) continue;
+      seen.add(row.track_id);
+      items.push({ ...track, sharedBy: row.sender_id, sharedAt: row.created_at });
+    }
+
+    return Response.json({ tracks: items, count: items.length });
   });
 
   router.post('/api/groups/:id/messages/:messageId/recall', async (request: IRequest, env: Env) => {
@@ -233,15 +273,27 @@ export function registerGroupRoutes(router: RouterType) {
       return Response.json({ error: 'profile_incomplete' }, { status: 403 });
     }
 
-    const { body } = await request.json<{ body: string }>();
-    if (!isValidMessageBody(body)) {
+    const { body, track } = await request.json<{ body?: string; track?: ShareableSpotifyTrack }>();
+
+    // Same two-shapes-one-endpoint split as POST /api/matches/:id/messages.
+    let trackId: string | null = null;
+    if (track) {
+      if (!isValidTrackCaption(body)) {
+        return Response.json({ error: 'invalid_message' }, { status: 400 });
+      }
+      const resolved = await resolveSharedTrack(env, track, user.id);
+      if ('error' in resolved) {
+        return Response.json({ error: resolved.error }, { status: resolved.error === 'artist_unavailable' ? 503 : 400 });
+      }
+      trackId = resolved.trackId;
+    } else if (!isValidMessageBody(body ?? '')) {
       return Response.json({ error: 'invalid_message' }, { status: 400 });
     }
 
     const id = crypto.randomUUID();
     const now = Date.now();
-    await env.DB.prepare('INSERT INTO group_messages (id, group_id, sender_id, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .bind(id, groupId, user.id, body, now, now)
+    await env.DB.prepare('INSERT INTO group_messages (id, group_id, sender_id, body, track_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .bind(id, groupId, user.id, (body ?? '').trim(), trackId, now, now)
       .run();
 
     return Response.json({ ok: true, messageId: id });

@@ -574,3 +574,264 @@ describe('POST /api/matches/:id/messages/:messageId/recall', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('sharing a track in a match thread', () => {
+  /** Only the token + GET /v1/artists/{id} are legal here; anything else throws. */
+  function stubArtistLookup() {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        calls.push(url);
+        if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+        if (url.includes('/v1/artists/')) {
+          return new Response(
+            JSON.stringify({ id: 'sp-artist-1', name: 'Some Artist', genres: ['indie'], images: [{ url: 'https://i/a.jpg' }], popularity: 60 }),
+            { status: 200 }
+          );
+        }
+        // Resend (notifyMessage) -- unrelated to what these tests assert.
+        return new Response('{}', { status: 200 });
+      })
+    );
+    return calls;
+  }
+
+  const track = (id = 'sp-t1') => ({
+    id,
+    name: `Song ${id}`,
+    artists: [{ id: 'sp-artist-1', name: 'Some Artist' }],
+    album: { images: [{ url: `https://i/${id}.jpg` }] },
+    preview_url: null,
+  });
+
+  async function share(cookie: string, body: any) {
+    return worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+  }
+
+  it('stores a shared track and returns it, resolved, on the thread', async () => {
+    stubArtistLookup();
+    const cookie = await cookieFor('u1');
+
+    const res = await share(cookie, { track: track() });
+    expect(res.status).toBe(200);
+
+    const listed = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages', { headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    const body = await listed.json<any>();
+    expect(body.messages).toHaveLength(1);
+    expect(body.messages[0].track).toMatchObject({ spotifyId: 'sp-t1', name: 'Song sp-t1', artistName: 'Some Artist' });
+    // Internal id, not the Spotify one -- the player bar needs spotifyId, the
+    // rest of the app needs the catalog id.
+    expect(body.messages[0].track.id).not.toBe('sp-t1');
+  });
+
+  it('accepts an optional caption alongside the track', async () => {
+    stubArtistLookup();
+    const cookie = await cookieFor('u1');
+
+    await share(cookie, { track: track(), body: 'this one is you' });
+
+    const listed = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages', { headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    const body = await listed.json<any>();
+    expect(body.messages[0].body).toBe('this one is you');
+    expect(body.messages[0].track).not.toBeNull();
+  });
+
+  it('allows an empty body for a track, but still rejects one for a plain message', async () => {
+    stubArtistLookup();
+    const cookie = await cookieFor('u1');
+
+    expect((await share(cookie, { track: track() })).status).toBe(200);
+    expect((await share(cookie, { body: '' })).status).toBe(400);
+  });
+
+  it('still applies the caption charset rules -- a caption is as visible as any message', async () => {
+    stubArtistLookup();
+    const cookie = await cookieFor('u1');
+
+    const res = await share(cookie, { track: track(), body: 'check this https://evil.example' });
+
+    expect(res.status).toBe(400);
+    expect((await res.json<any>()).error).toBe('invalid_message');
+  });
+
+  it('reports 503 (not 400) when Spotify cannot resolve the artist, and stores nothing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
+    const cookie = await cookieFor('u1');
+
+    const res = await share(cookie, { track: track() });
+
+    expect(res.status).toBe(503);
+    expect((await res.json<any>()).error).toBe('artist_unavailable');
+    const count = await env.DB.prepare('SELECT COUNT(*) c FROM messages').first<{ c: number }>();
+    expect(count?.c).toBe(0);
+  });
+
+  it('notifies the recipient exactly as a text message does', async () => {
+    stubArtistLookup();
+    const cookie = await cookieFor('u1');
+
+    await share(cookie, { track: track() });
+
+    const note = await env.DB.prepare(`SELECT user_id, type FROM notifications WHERE type = 'message'`).first<any>();
+    expect(note.user_id).toBe('u2');
+  });
+});
+
+describe('GET /api/matches/:id/playlist', () => {
+  function stubArtistLookup() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+        if (url.includes('/v1/artists/')) {
+          return new Response(
+            JSON.stringify({ id: 'sp-artist-1', name: 'Some Artist', genres: [], images: [{ url: 'https://i/a.jpg' }], popularity: 1 }),
+            { status: 200 }
+          );
+        }
+        return new Response('{}', { status: 200 });
+      })
+    );
+  }
+
+  const track = (id: string) => ({
+    id,
+    name: `Song ${id}`,
+    artists: [{ id: 'sp-artist-1', name: 'Some Artist' }],
+    album: { images: [{ url: `https://i/${id}.jpg` }] },
+    preview_url: null,
+  });
+
+  async function share(cookie: string, id: string) {
+    return worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ track: track(id) }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+  }
+
+  async function playlist(cookie: string) {
+    const res = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/playlist', { headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    // 403 comes back as plain text ('Forbidden'), not JSON -- only parse on OK.
+    return { status: res.status, body: res.ok ? await res.json<any>() : null };
+  }
+
+  it('is empty for a thread with no shared tracks, even with plain messages in it', async () => {
+    stubArtistLookup();
+    const cookie = await cookieFor('u1');
+    await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: 'just talking' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+
+    const { body } = await playlist(cookie);
+    expect(body).toEqual({ tracks: [], count: 0 });
+  });
+
+  it('accumulates tracks from both participants, oldest first', async () => {
+    stubArtistLookup();
+    const c1 = await cookieFor('u1');
+    const c2 = await cookieFor('u2');
+    await share(c1, 'sp-a');
+    await share(c2, 'sp-b');
+
+    const { body } = await playlist(c1);
+    expect(body.count).toBe(2);
+    expect(body.tracks.map((t: any) => t.spotifyId)).toEqual(['sp-a', 'sp-b']);
+    expect(body.tracks[0].sharedBy).toBe('u1');
+    expect(body.tracks[1].sharedBy).toBe('u2');
+  });
+
+  it('lists a re-sent song once, at its first appearance', async () => {
+    stubArtistLookup();
+    const c1 = await cookieFor('u1');
+    await share(c1, 'sp-a');
+    await share(c1, 'sp-b');
+    await share(c1, 'sp-a');
+
+    const { body } = await playlist(c1);
+    expect(body.tracks.map((t: any) => t.spotifyId)).toEqual(['sp-a', 'sp-b']);
+  });
+
+  // The reason the playlist is derived from messages rather than stored
+  // separately: un-sending has to actually un-share.
+  it('drops a track from the playlist when its message is recalled', async () => {
+    stubArtistLookup();
+    const c1 = await cookieFor('u1');
+    await share(c1, 'sp-a');
+    await share(c1, 'sp-b');
+
+    const msg = await env.DB.prepare(
+      `SELECT m.id FROM messages m JOIN tracks t ON t.id = m.track_id WHERE t.spotify_id = 'sp-a'`
+    ).first<{ id: string }>();
+    const recalled = await worker.fetch(
+      new Request(`http://localhost/api/matches/m1/messages/${msg!.id}/recall`, { method: 'POST', headers: { Cookie: c1 } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(recalled.status).toBe(200);
+
+    const { body } = await playlist(c1);
+    expect(body.count).toBe(1);
+    expect(body.tracks.map((t: any) => t.spotifyId)).toEqual(['sp-b']);
+  });
+
+  it('hides a recalled track from the thread itself too, not just the playlist', async () => {
+    stubArtistLookup();
+    const c1 = await cookieFor('u1');
+    await share(c1, 'sp-a');
+    const msg = await env.DB.prepare('SELECT id FROM messages LIMIT 1').first<{ id: string }>();
+    await worker.fetch(
+      new Request(`http://localhost/api/matches/m1/messages/${msg!.id}/recall`, { method: 'POST', headers: { Cookie: c1 } }),
+      env,
+      {} as ExecutionContext
+    );
+
+    const listed = await worker.fetch(
+      new Request('http://localhost/api/matches/m1/messages', { headers: { Cookie: c1 } }),
+      env,
+      {} as ExecutionContext
+    );
+    const body = await listed.json<any>();
+    expect(body.messages[0].track).toBeNull();
+    expect(body.messages[0].body).toBeNull();
+  });
+
+  it('is forbidden for someone outside the match', async () => {
+    const c3 = await cookieFor('u3');
+    const { status } = await playlist(c3);
+    expect(status).toBe(403);
+  });
+});

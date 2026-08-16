@@ -8,6 +8,7 @@ import {
   fetchArtistTracksQuick,
   QUICK_TRACK_LIMIT,
   searchTracksByArtist,
+  searchTracks,
   fetchTrackById,
   getClientCredentialsToken,
 } from '../lib/spotify';
@@ -388,7 +389,55 @@ export function registerCatalogRoutes(router: RouterType) {
     const url = new URL(request.url);
     const q = url.searchParams.get('q') ?? '';
     const artistId = url.searchParams.get('artist_id');
-    if (!artistId) return Response.json({ error: 'artist_id required' }, { status: 400 });
+
+    // Without ?artist_id=, this is an unscoped "find any song by name"
+    // search. People think in songs -- "I want to send Landslide" -- not
+    // artist-then-song, so sharing a track in a thread (or picking an anthem)
+    // needs this one-step form; the artist-scoped branch below stays exactly
+    // as it was for /artist's own track picker.
+    //
+    // Same DB-first-flavored merge as GET /api/artists/search, and the same
+    // deliberate exception CLAUDE.md carves out for search specifically: a
+    // search has to ask Spotify for material this app doesn't have yet, so
+    // "DB-first" here means surfacing and tagging already-cataloged matches
+    // rather than skipping the call.
+    if (!artistId) {
+      if (!q.trim()) return Response.json({ results: [] });
+
+      const localRows = await env.DB.prepare(
+        `SELECT t.id, t.spotify_id, t.name, t.album_image_url, a.name AS artist_name
+         FROM tracks t LEFT JOIN artists a ON a.id = t.artist_id
+         WHERE t.name LIKE ? LIMIT 10`
+      )
+        .bind(`%${q}%`)
+        .all<{ id: string; spotify_id: string; name: string; album_image_url: string | null; artist_name: string | null }>();
+      const localSpotifyIds = new Set(localRows.results.map((r) => r.spotify_id));
+
+      const token = await getValidAccessToken(user, env, env.DB).catch(() => getClientCredentialsToken(env));
+      const spotifyResults = await searchTracks(token, q, 10, env.RATE_LIMIT_KV);
+
+      return Response.json({
+        results: [
+          ...localRows.results.map((r) => ({
+            id: r.id,
+            spotifyTrackId: r.spotify_id,
+            name: r.name,
+            artistName: r.artist_name,
+            imageUrl: r.album_image_url,
+            inCatalog: true,
+          })),
+          ...spotifyResults
+            .filter((t: any) => !localSpotifyIds.has(t.id))
+            .map((t: any) => ({
+              spotifyTrackId: t.id,
+              name: t.name,
+              artistName: t.artists?.[0]?.name ?? null,
+              imageUrl: t.album?.images?.[0]?.url ?? null,
+              inCatalog: false,
+            })),
+        ].slice(0, 15),
+      });
+    }
 
     const artist = await env.DB.prepare('SELECT name FROM artists WHERE id = ?').bind(artistId).first<{ name: string }>();
     if (!artist) return Response.json({ error: 'unknown artist_id' }, { status: 400 });
