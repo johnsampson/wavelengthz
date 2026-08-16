@@ -22,19 +22,38 @@
 @source "./playerBar.js";
 
 /*
- * --wl-nav-h is a manually-verified estimate of the bottom nav's actual
- * rendered height (nav.js's renderNavHtml -- py-2.5 + a 24px icon + a
- * text-xs label), not a value Tailwind derives -- re-check it if that
- * markup's spacing ever changes. --wl-player-h is set/cleared entirely by
- * playerBar.js (0px when nothing is playing, 64px for the Wavelengthz
- * Player chrome, 96px for the taller Basic player iframe+badge) -- see its
- * own comment on renderChrome. Kept as :root custom properties (not
- * Tailwind theme values) specifically so .pb-app/.mb-app below react to
- * playerBar.js's changes with zero JS coordination on every page's part.
+ * --wl-nav-h: 64px below is only the pre-JS fallback (first paint, before
+ * nav.js's mountNav has run) -- mountNav overwrites it with the real
+ * measured height of the rendered <nav> every time it mounts, so the fixed
+ * player bar's own positioning (public/index.html etc.'s `bottom: calc(...)`
+ * inline style) always sits flush against the actual nav instead of an
+ * estimate that can be a pixel or two off depending on font
+ * rendering/safe-area quirks. --wl-player-h is set/cleared entirely by
+ * playerBar.js (0px when nothing is playing, 80px for the Wavelengthz
+ * Player chrome/loading state, 104px for the taller Basic player
+ * iframe+badge) -- see its own comment on renderChrome. Kept as :root
+ * custom properties (not Tailwind theme values) specifically so
+ * .pb-app/.mb-app below react to nav.js's/playerBar.js's changes with zero
+ * JS coordination on every page's part.
  */
 :root {
   --wl-nav-h: 64px;
   --wl-player-h: 0px;
+}
+
+/*
+ * Scrolls a player-bar track/artist name left-to-right only when it doesn't
+ * fit (see playerBar.js's applyMarquee) -- holds at the start and end so a
+ * just-barely-overflowing title is still readable, not a nonstop scroll.
+ * --wl-marquee-distance/--wl-marquee-duration are set per-element by
+ * applyMarquee from the actual measured overflow, not fixed here.
+ */
+@keyframes wl-marquee {
+  0%, 15% { transform: translateX(0); }
+  85%, 100% { transform: translateX(var(--wl-marquee-distance, 0)); }
+}
+.wl-marquee-scrolling [data-marquee-text] {
+  animation: wl-marquee var(--wl-marquee-duration, 6s) ease-in-out infinite;
 }
 
 @layer components {

@@ -112,8 +112,22 @@
 // fetch resolved (Alpine's x-show evaluates its expression continuously
 // regardless of visibility, unlike x-if). /onboarding is deliberately not
 // on the router (see router.js's ROUTES) -- it's a one-time gate reached by
-// redirect, not a destination anyone links to or navigates back into.
-const CACHE_NAME = 'wavelengthz-shell-v32';
+// redirect, not a destination anyone links to or navigates back into. v33
+// is a round of player-bar feedback: taller chrome with the artist name
+// shown alongside the track, a marquee that auto-scrolls a truncated
+// name/artist instead of just clipping it, a neutral loading state instead
+// of a "Basic player" badge flash before Premium availability resolves, a
+// like button (POST /api/swipe/music, mirrored from every track row's own
+// Like button), and --wl-nav-h is now measured from the real rendered nav
+// (nav.js's mountNav) instead of a hardcoded estimate -- fixes a 1-2px gap
+// between the player bar and the nav that let scrolled content peek
+// through. Also routes several more internal navigations (deck search ->
+// artist/profile, groups -> group, match unmatch/block -> matches, group
+// leave -> groups) through the client-side router instead of a hard
+// window.location.href reload, so playback survives them the same way it
+// already did for a plain link click -- and replaces the deck/artist pages'
+// swipe-left "Pass" ✕ icon with a thumbs-down glyph.
+const CACHE_NAME = 'wavelengthz-shell-v33';
 const APP_SHELL = [
   '/',
   '/app.js',

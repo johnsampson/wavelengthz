@@ -3,6 +3,7 @@ import { createDeckApp } from '../../public/index.js';
 import { showErrorToast } from '../../public/toast.js';
 import { play, togglePlayPause, isCurrentTrack } from '../../public/playerBar.js';
 import { attachSwipeDeck } from '../../public/swipe.js';
+import { navigate } from '../../public/router.js';
 
 vi.mock('../../public/toast.js', () => ({ showErrorToast: vi.fn() }));
 vi.mock('../../public/playerBar.js', () => ({
@@ -11,6 +12,7 @@ vi.mock('../../public/playerBar.js', () => ({
   isCurrentTrack: vi.fn(() => false),
 }));
 vi.mock('../../public/swipe.js', () => ({ attachSwipeDeck: vi.fn() }));
+vi.mock('../../public/router.js', () => ({ navigate: vi.fn() }));
 
 function fakeStorage() {
   const store = new Map<string, string>();
@@ -35,6 +37,7 @@ beforeEach(() => {
   vi.mocked(togglePlayPause).mockClear();
   vi.mocked(isCurrentTrack).mockReset().mockReturnValue(false);
   vi.mocked(attachSwipeDeck).mockReset().mockReturnValue(vi.fn());
+  vi.mocked(navigate).mockClear();
   vi.stubGlobal('localStorage', fakeStorage());
   vi.stubGlobal('sessionStorage', fakeStorage());
 });
@@ -117,11 +120,11 @@ describe('deck app', () => {
     vi.stubGlobal('window', fakeWindow());
     vi.mocked(isCurrentTrack).mockReturnValue(false);
     const app = createDeckApp();
-    app.current = { anthemTrack: { spotifyId: 'sp1', name: 'Song', imageUrl: 'img' } };
+    app.current = { anthemTrack: { spotifyId: 'sp1', id: 'sp1', name: 'Song', artistName: 'Some Artist', imageUrl: 'img' } };
 
     await app.toggleAnthem();
 
-    expect(play).toHaveBeenCalledWith({ spotifyId: 'sp1', name: 'Song', imageUrl: 'img' });
+    expect(play).toHaveBeenCalledWith({ spotifyId: 'sp1', id: 'sp1', name: 'Song', artistName: 'Some Artist', imageUrl: 'img' });
   });
 
   it('toggleAnthem is a no-op when the current card has no anthem', async () => {
@@ -151,6 +154,64 @@ describe('deck app', () => {
 
     expect(app.mode).toBe('music');
     expect(storage.getItem('wl_deck_mode')).toBe('music');
+    vi.unstubAllGlobals();
+  });
+
+  it('viewProfile routes to the current candidate\'s profile without a full reload', () => {
+    vi.stubGlobal('window', fakeWindow());
+    const app = createDeckApp();
+    app.current = { id: 'u2', displayName: 'Sam' };
+
+    app.viewProfile();
+
+    expect(navigate).toHaveBeenCalledWith('/profile?id=u2');
+  });
+
+  it('viewProfile is a no-op with no current candidate', () => {
+    vi.stubGlobal('window', fakeWindow());
+    const app = createDeckApp();
+    app.current = null;
+
+    app.viewProfile();
+
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('selectArtist routes straight to an already-cataloged artist', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('sessionStorage', fakeStorage());
+    const app = createDeckApp();
+
+    await app.selectArtist({ id: 'a1', inCatalog: true });
+
+    expect(navigate).toHaveBeenCalledWith('/artist?id=a1');
+  });
+
+  it('selectArtist creates then routes to an artist not yet in the catalog', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('sessionStorage', fakeStorage());
+    stubApi((path) => {
+      if (path === '/api/artists') return new Response(JSON.stringify({ artistId: 'new-a1' }), { status: 200 });
+      return new Response('not found', { status: 404 });
+    });
+    const app = createDeckApp();
+
+    await app.selectArtist({ spotifyArtistId: 'sp-a1', inCatalog: false });
+
+    expect(navigate).toHaveBeenCalledWith('/artist?id=new-a1');
+    vi.unstubAllGlobals();
+  });
+
+  it('selectArtist growls a toast when creating the artist fails', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('sessionStorage', fakeStorage());
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
+    const app = createDeckApp();
+
+    await app.selectArtist({ spotifyArtistId: 'sp-a1', inCatalog: false });
+
+    expect(navigate).not.toHaveBeenCalled();
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('artist'));
     vi.unstubAllGlobals();
   });
 });

@@ -89,14 +89,15 @@ describe('artist page', () => {
     vi.unstubAllGlobals();
   });
 
-  it('togglePlayer hands off a new track to the player bar', async () => {
+  it('togglePlayer hands off a new track to the player bar, tagged with this page\'s one artist name', async () => {
     vi.stubGlobal('window', fakeWindow());
     vi.mocked(isCurrentTrack).mockReturnValue(false);
     const app = createArtistApp();
+    app.artist = { id: 'a1', name: 'Test Artist', genres: [], totalLikes: 0, totalLikesInArea: 0 };
 
-    await app.togglePlayer({ spotifyId: 'sp1', name: 'Song', imageUrl: 'img' });
+    await app.togglePlayer({ id: 't1', spotifyId: 'sp1', name: 'Song', imageUrl: 'img' });
 
-    expect(play).toHaveBeenCalledWith({ spotifyId: 'sp1', name: 'Song', imageUrl: 'img' });
+    expect(play).toHaveBeenCalledWith({ spotifyId: 'sp1', id: 't1', name: 'Song', artistName: 'Test Artist', imageUrl: 'img' });
     vi.unstubAllGlobals();
   });
 

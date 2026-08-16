@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createGroupsApp } from '../../public/groups.js';
 import { showErrorToast } from '../../public/toast.js';
+import { navigate } from '../../public/router.js';
 
 vi.mock('../../public/toast.js', () => ({ showErrorToast: vi.fn() }));
+vi.mock('../../public/router.js', () => ({ navigate: vi.fn() }));
 
 beforeEach(() => {
   vi.mocked(showErrorToast).mockClear();
+  vi.mocked(navigate).mockClear();
 });
 
 function stubApi(handler: (path: string, options?: RequestInit) => Response) {
@@ -76,8 +79,6 @@ describe('groups list', () => {
   });
 
   it('navigates into the group after successfully joining', async () => {
-    const fakeWindow = { location: { href: '' } };
-    vi.stubGlobal('window', fakeWindow);
     stubApi((path) => {
       if (path.endsWith('/join')) return new Response('{}', { status: 200 });
       return new Response('{}', { status: 200 });
@@ -86,7 +87,7 @@ describe('groups list', () => {
 
     await app.join({ id: 'g1' });
 
-    expect(fakeWindow.location.href).toBe('/group?id=g1');
+    expect(navigate).toHaveBeenCalledWith('/group?id=g1');
     vi.unstubAllGlobals();
   });
 });

@@ -70,7 +70,10 @@ export function createArtistApp() {
         await togglePlayPause();
         return;
       }
-      await play({ spotifyId: track.spotifyId, name: track.name, imageUrl: track.imageUrl });
+      // Every track on this page belongs to the one artist this.artist
+      // already holds -- no per-track artist name in GET /api/artists/:id's
+      // response shape, so it's supplied from the page's own state instead.
+      await play({ spotifyId: track.spotifyId, id: track.id, name: track.name, artistName: this.artist?.name ?? null, imageUrl: track.imageUrl });
     },
 
     async swipeTrack(track, direction) {

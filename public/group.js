@@ -1,6 +1,7 @@
 import { api } from './app.js';
 import { requireAuth } from './auth.js';
 import { showErrorToast } from './toast.js';
+import { navigate } from './router.js';
 
 // Extracted from group.html's inline script -- see messages.js's comment
 // for why this carries a destroy() too (same poll-interval/audio-unlock
@@ -184,7 +185,7 @@ export function createGroupApp() {
       this.error = null;
       try {
         await api.leaveGroup(this.groupId);
-        window.location.href = '/groups';
+        await navigate('/groups');
       } catch (e) {
         showErrorToast('Could not leave the group. Please try again.');
       }

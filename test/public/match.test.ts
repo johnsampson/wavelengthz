@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createMatchApp } from '../../public/match.js';
 import { showErrorToast } from '../../public/toast.js';
+import { navigate } from '../../public/router.js';
 
 vi.mock('../../public/toast.js', () => ({ showErrorToast: vi.fn() }));
+vi.mock('../../public/router.js', () => ({ navigate: vi.fn() }));
 
 beforeEach(() => {
   vi.mocked(showErrorToast).mockClear();
+  vi.mocked(navigate).mockClear();
 });
 
 // match.js reads `window.location.search` at object-construction time (not
@@ -44,26 +47,24 @@ describe('match detail', () => {
   });
 
   it('navigates to /matches after a successful unmatch', async () => {
-    const win = fakeWindow();
-    vi.stubGlobal('window', win);
+    vi.stubGlobal('window', fakeWindow());
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
     const app = createMatchApp();
 
     await app.unmatch();
 
-    expect(win.location.href).toBe('/matches');
+    expect(navigate).toHaveBeenCalledWith('/matches');
     vi.unstubAllGlobals();
   });
 
   it('growls a toast and does not navigate when unmatch fails', async () => {
-    const win = fakeWindow();
-    vi.stubGlobal('window', win);
+    vi.stubGlobal('window', fakeWindow());
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
     const app = createMatchApp();
 
     await app.unmatch();
 
-    expect(win.location.href).toBe('');
+    expect(navigate).not.toHaveBeenCalled();
     expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('unmatch'));
     vi.unstubAllGlobals();
   });

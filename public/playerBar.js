@@ -8,20 +8,28 @@
 // three separate track lists.
 //
 // Module-scope state below (currentTrack/mode/sdkState) is the mechanism
-// that will let "now playing" survive navigating between pages once a
-// client-side router stops doing full page reloads for internal links (see
+// that lets "now playing" survive navigating between pages once
+// public/router.js stops doing full page reloads for internal links (see
 // wavelengthzPlayer.js's own comment on why it's a standalone singleton for
 // exactly this reason) -- ES module imports of the same URL resolve to the
-// same in-memory instance for the life of the document, so this state is
-// already "session-persistent" the moment nothing tears the document down.
-// Until the router exists, mounting this on every page that shows tracks is
-// still a real improvement on its own: one fixed bar instead of 5
-// duplicated inline players, and playback survives switching between tracks
-// on the SAME page the exact way it always did.
+// same in-memory instance for the life of the document, so this state stays
+// intact across every client-side navigation.
 import { checkPlayerAvailability, playTrack, pausePlayback, resumePlayback, onStateChange } from './wavelengthzPlayer.js';
+import { api } from './app.js';
+import { showToast, showErrorToast } from './toast.js';
 
-let currentTrack = null; // { spotifyId, name, imageUrl } | null
-let mode = null; // 'sdk' | 'iframe' | null -- null only when currentTrack is null too
+// `id` is what the like button (below) swipes against -- this app's own
+// catalog id when the caller has one (artist.html's rows, profile.html's
+// shared/recent lists), or the raw Spotify track id for a track sourced
+// straight from a user's cached Spotify "top tracks" (the anthem chip,
+// profile.html's own top-tracks list, neither of which ever touches the
+// tracks catalog table). Either works as a swipe target -- POST
+// /api/swipe/music has no FK constraint on item_id -- a Spotify-sourced id
+// just won't cascade to an artist-like/genre-affinity bump the way a
+// catalog-backed one does. Only truly absent (hiding the button) if some
+// future caller passes a track with neither.
+let currentTrack = null; // { spotifyId, id, name, artistName, imageUrl } | null
+let mode = null; // 'sdk' | 'iframe' | null -- null while currentTrack is set but availability hasn't resolved yet, or when currentTrack itself is null
 let sdkState = null; // { paused, position, duration } | null -- sdk mode only
 let sdkListenerAttached = false;
 let mounted = false;
@@ -52,33 +60,93 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
+const HEART_ICON = '<path d="M12 21C2 15 2 10 3 7L7 11L12 7L17 11L21 7C22 10 22 15 12 21Z" />';
+
+function likeButtonHtml(currentTrack) {
+  // See the module comment on `currentTrack.id` above -- in practice every
+  // current call site passes one, so this only hides the button for a
+  // hypothetical future caller that passes neither an id nor a fallback.
+  if (!currentTrack.id) return '';
+  return `
+    <button
+      type="button"
+      data-action="like"
+      aria-label="Like this track"
+      class="btn-ghost h-9 w-9 shrink-0 rounded-full text-brand-400"
+    >
+      <svg viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-5 w-5">${HEART_ICON}</svg>
+    </button>`;
+}
+
+// Marquee text wrapper -- overflow:hidden + nowrap with no ellipsis (see
+// applyMarquee, below, for why: text-overflow:ellipsis doesn't play well
+// with an animated transform on the same element, so this intentionally
+// never shows "..." -- it either fits and sits still, or doesn't fit and
+// scrolls to reveal the rest instead of truncating it away). data-marquee
+// is how applyMarquee finds these after the innerHTML swap below.
+//
+// The literal space before `${extraClass...}` matters, not just style: like
+// index.html's own @source comment in styles.css describes, Tailwind v4's
+// content scanner extracts class candidates by splitting the raw source
+// text on whitespace/quotes -- `whitespace-nowrap${extraClass` with no
+// space between them reads as one unmatched token to the scanner, so
+// `.whitespace-nowrap` silently never made it into the built CSS the first
+// time this was written (confirmed by grepping tailwind.css -- verify the
+// same way after touching this line again).
+function marqueeSpan(text, extraClass) {
+  return `<span data-marquee class="block overflow-hidden whitespace-nowrap ${extraClass || ''}"><span data-marquee-text class="inline-block">${text}</span></span>`;
+}
+
 // Pure string-builder (mirrors nav.js's renderNavHtml/renderHeaderHtml) so
 // the chrome's markup is unit-testable independent of any DOM/fetch side
-// effects. `name`/`imageUrl` ultimately come from Spotify's own catalog
-// data by way of this app's backend -- escaped here since this is raw
-// innerHTML construction, unlike Alpine's x-text/:src bindings elsewhere in
-// this app, which escape by construction.
+// effects. `name`/`artistName`/`imageUrl` ultimately come from Spotify's
+// own catalog data by way of this app's backend -- escaped here since this
+// is raw innerHTML construction, unlike Alpine's x-text/:src bindings
+// elsewhere in this app, which escape by construction.
 export function renderPlayerChromeHtml(state) {
   const { currentTrack, mode, sdkState } = state;
   if (!currentTrack) return '';
 
   const name = escapeHtml(currentTrack.name ?? '');
+  const artistName = currentTrack.artistName ? escapeHtml(currentTrack.artistName) : '';
   const imageUrl = currentTrack.imageUrl ?? '';
   const closeButton = `
     <button type="button" data-action="hide" aria-label="Close player" class="btn-ghost h-9 w-9 shrink-0 rounded-full text-lg">✕</button>`;
+  const likeButton = likeButtonHtml(currentTrack);
+  const textStack = `
+    <div class="min-w-0 flex-1">
+      ${marqueeSpan(name, 'text-sm font-medium text-neutral-100')}
+      ${artistName ? marqueeSpan(artistName, 'text-xs text-neutral-400') : ''}
+    </div>`;
+
+  // mode === null: availability hasn't resolved yet (a brief window right
+  // after play() is tapped) -- deliberately no play/pause control and no
+  // "Basic player" badge here, since showing either would mean picking one
+  // that's likely wrong and then immediately swapping it a beat later. Art
+  // + name + close is the only thing safe to commit to this early.
+  if (mode === null) {
+    return `
+      <div class="mx-auto flex w-full max-w-md items-center gap-3 p-4">
+        <img src="${imageUrl}" alt="" class="h-14 w-14 shrink-0 rounded object-cover ring-1 ring-white/10" />
+        ${textStack}
+        ${closeButton}
+      </div>`;
+  }
 
   if (mode === 'sdk') {
     const paused = !sdkState || sdkState.paused;
     const pct = !sdkState || !sdkState.duration ? 0 : (sdkState.position / sdkState.duration) * 100;
     return `
-      <div class="mx-auto flex w-full max-w-md items-center gap-3 p-3">
-        <img src="${imageUrl}" alt="" class="h-10 w-10 shrink-0 rounded object-cover ring-1 ring-white/10" />
+      <div class="mx-auto flex w-full max-w-md items-center gap-3 p-4">
+        <img src="${imageUrl}" alt="" class="h-14 w-14 shrink-0 rounded object-cover ring-1 ring-white/10" />
         <div class="min-w-0 flex-1">
-          <p class="truncate text-sm font-medium text-neutral-100">${name}</p>
+          ${marqueeSpan(name, 'text-sm font-medium text-neutral-100')}
+          ${artistName ? marqueeSpan(artistName, 'text-xs text-neutral-400') : ''}
           <div class="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-white/10">
             <div class="h-full rounded-full bg-gradient-to-r from-brand-500 to-accent-500" style="width:${pct}%"></div>
           </div>
         </div>
+        ${likeButton}
         <button
           type="button"
           data-action="toggle"
@@ -98,25 +166,56 @@ export function renderPlayerChromeHtml(state) {
   // per-page "Basic player" fallback badge already documented, just
   // relocated here.
   return `
-    <div class="mx-auto flex w-full max-w-md items-center gap-3 p-3">
-      <img src="${imageUrl}" alt="" class="h-10 w-10 shrink-0 rounded object-cover ring-1 ring-white/10" />
+    <div class="mx-auto flex w-full max-w-md items-center gap-3 p-4">
+      <img src="${imageUrl}" alt="" class="h-14 w-14 shrink-0 rounded object-cover ring-1 ring-white/10" />
       <div class="min-w-0 flex-1">
         <span class="block text-[10px] font-semibold tracking-wide text-amber-400 uppercase">Basic player</span>
-        <p class="truncate text-sm font-medium text-neutral-100">${name}</p>
+        ${marqueeSpan(name, 'text-sm font-medium text-neutral-100')}
+        ${artistName ? marqueeSpan(artistName, 'text-xs text-neutral-400') : ''}
       </div>
+      ${likeButton}
       ${closeButton}
     </div>`;
+}
+
+// Scrolls a marquee span's text left-to-right only when it's actually
+// truncated (scrollWidth > clientWidth) -- static text just sits still, no
+// animation applied. text-overflow:ellipsis is deliberately never used on
+// these (see marqueeSpan's comment): an animated transform on an
+// ellipsis-truncated element renders inconsistently across browsers, so the
+// wrapper is plain overflow:hidden and the animation itself is what reveals
+// the rest of the text over time.
+function applyMarquee(el) {
+  if (!el) return;
+  const inner = el.querySelector('[data-marquee-text]');
+  if (!inner) return;
+  const overflow = inner.scrollWidth - el.clientWidth;
+  if (overflow <= 1) return; // fits -- leave static
+  el.style.setProperty('--wl-marquee-distance', `-${overflow}px`);
+  // Roughly constant scroll speed regardless of text length, with a floor
+  // so even a barely-overflowing title still holds still long enough to
+  // read before it moves.
+  el.style.setProperty('--wl-marquee-duration', `${Math.max(4, overflow / 30)}s`);
+  el.classList.add('wl-marquee-scrolling');
 }
 
 function renderChrome() {
   const root = document.getElementById('wl-player-chrome');
   if (!root) return;
   root.innerHTML = renderPlayerChromeHtml({ currentTrack, mode, sdkState });
+  // Overflow can only be measured once the new markup has real layout, so
+  // this runs as a follow-up pass over whatever marquee wrappers just got
+  // inserted, not as part of the string built above.
+  root.querySelectorAll('[data-marquee]').forEach(applyMarquee);
   // Consumed by the .pb-app/.mb-app utility classes (public/styles.css) so
   // every page's bottom clearance adjusts automatically without the page
-  // (or a future router) needing to know or care whether the bar is
-  // currently showing, and which of its two heights it's showing at.
-  document.documentElement.style.setProperty('--wl-player-h', !currentTrack ? '0px' : mode === 'iframe' ? '96px' : '64px');
+  // (or the router) needing to know or care whether the bar is currently
+  // showing, and which of its three heights (loading/sdk/iframe) it's
+  // showing at.
+  document.documentElement.style.setProperty(
+    '--wl-player-h',
+    !currentTrack ? '0px' : mode === 'iframe' ? '104px' : '80px'
+  );
 }
 
 // The only place the iframe is created/replaced -- Spotify's embed exposes
@@ -149,11 +248,13 @@ function hideIframe() {
 }
 
 // The one entry point every page's track row calls -- explicit-tap-only
-// takeover: arriving at a page never calls this on its own, only a real
-// click handler does.
+// takeover: arriving at a page (or navigating to a different one via the
+// router) never calls this on its own, only a real click handler does, and
+// nothing about navigating away from a page stops whatever's already
+// playing here either.
 export async function play(track) {
   currentTrack = track;
-  mode = null;
+  mode = null; // renders the neutral loading state below, not a guess at sdk/iframe
   sdkState = null;
   renderChrome();
 
@@ -197,6 +298,20 @@ export async function togglePlayPause() {
   else await pausePlayback();
 }
 
+// Right-swipes the currently playing track the same way every other track
+// row's Like button does (POST /api/swipe/music) -- a no-op if there's no
+// internal id to swipe against (renderPlayerChromeHtml already hides the
+// button in that case, but this guards direct callers too).
+export async function like() {
+  if (!currentTrack?.id) return;
+  try {
+    await api.swipe('music', { item_type: 'track', item_id: currentTrack.id, direction: 'right' });
+    showToast({ message: 'Liked', icon: '❤️' });
+  } catch (e) {
+    showErrorToast('Could not like that track. Please try again.');
+  }
+}
+
 // Explicit close only -- never called implicitly by navigation or by
 // selecting a different track (play() above handles takeover on its own).
 export async function hide() {
@@ -209,9 +324,9 @@ export async function hide() {
 }
 
 // Called once, at boot, from every page's bootstrap script -- guarded like
-// nav.js's pollTimer so it stays a no-op on repeat calls (relevant once a
-// router re-runs each destination page's bootstrap on every navigation;
-// harmless today too). Deliberately never re-mounts: the bar's content is
+// nav.js's pollTimer so it stays a no-op on repeat calls (relevant since
+// the router re-runs each destination page's bootstrap on every
+// navigation). Deliberately never re-mounts: the bar's content is
 // route-independent, so nothing about switching pages should ever touch
 // #wl-player-root.
 export function mountPlayerBar() {
@@ -223,8 +338,17 @@ export function mountPlayerBar() {
     const action = e.target.closest('[data-action]')?.dataset.action;
     if (action === 'toggle') togglePlayPause();
     else if (action === 'hide') hide();
+    else if (action === 'like') like();
   });
   renderChrome();
+}
+
+// Test-only: lets like()'s tests exercise its two branches (a real
+// currentTrack.id present vs. not) without going through play(), which
+// touches `document` and this test pool has none. Not called anywhere
+// outside test/public/playerBar.test.ts.
+export function _setCurrentTrackForTests(track) {
+  currentTrack = track;
 }
 
 // Test-only: mirrors wavelengthzPlayer.js's own _resetForTests -- this

@@ -218,7 +218,7 @@ describe('GET /api/candidates/people', () => {
     const body = await res.json<any>();
     const u2 = body.candidates.find((c: any) => c.id === 'u2');
     const u3 = body.candidates.find((c: any) => c.id === 'u3');
-    expect(u2.anthemTrack).toEqual({ id: 'sp-t1', spotifyId: 'sp-t1', name: 'Their Anthem', imageUrl: 'https://img/t1.jpg' });
+    expect(u2.anthemTrack).toEqual({ id: 'sp-t1', spotifyId: 'sp-t1', name: 'Their Anthem', artistName: null, imageUrl: 'https://img/t1.jpg' });
     expect(u3.anthemTrack).toBeNull();
   });
 
@@ -836,7 +836,7 @@ describe('GET /api/people/:id/profile', () => {
 
     expect(body.profile.topGenres).toEqual(['indie', 'pop']);
     expect(body.profile.topArtists).toEqual([{ id: 'sp-a1', name: 'Their Fave Artist', imageUrl: 'https://img/a1.jpg' }]);
-    expect(body.profile.topTracks).toEqual([{ id: 'sp-t1', spotifyId: 'sp-t1', name: 'Their Fave Track', imageUrl: 'https://img/t1.jpg' }]);
+    expect(body.profile.topTracks).toEqual([{ id: 'sp-t1', spotifyId: 'sp-t1', name: 'Their Fave Track', artistName: null, imageUrl: 'https://img/t1.jpg' }]);
   });
 
   it('includes anthemTrack when the target has one set, resolved against their own top_tracks', async () => {
@@ -850,7 +850,7 @@ describe('GET /api/people/:id/profile', () => {
     const res = await worker.fetch(new Request('http://localhost/api/people/u2/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
     const body = await res.json<any>();
 
-    expect(body.profile.anthemTrack).toEqual({ id: 'sp-t1', spotifyId: 'sp-t1', name: 'Their Fave Track', imageUrl: 'https://img/t1.jpg' });
+    expect(body.profile.anthemTrack).toEqual({ id: 'sp-t1', spotifyId: 'sp-t1', name: 'Their Fave Track', artistName: null, imageUrl: 'https://img/t1.jpg' });
   });
 
   it('reports anthemTrack as null when unset or fallen out of top_tracks', async () => {
@@ -1019,7 +1019,7 @@ describe('GET /api/people/:id/profile', () => {
     const res = await worker.fetch(new Request('http://localhost/api/people/u1/profile', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
     const body = await res.json<any>();
 
-    expect(body.profile.recentTracks).toEqual([{ id: 'trk-recent-1', spotifyId: 'sp-trk-recent-1', name: 'A Track', imageUrl: '/t1.jpg' }]);
+    expect(body.profile.recentTracks).toEqual([{ id: 'trk-recent-1', spotifyId: 'sp-trk-recent-1', name: 'A Track', artistName: 'An Artist', imageUrl: '/t1.jpg' }]);
     expect(body.profile.recentArtists).toEqual([{ id: 'art-recent-1', name: 'An Artist', imageUrl: null }]);
   });
 

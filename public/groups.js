@@ -1,6 +1,7 @@
 import { api } from './app.js';
 import { requireAuth } from './auth.js';
 import { showErrorToast } from './toast.js';
+import { navigate } from './router.js';
 
 // Extracted from groups.html's inline script -- see matches.js's comment
 // for why (same reasoning, same shape).
@@ -45,7 +46,7 @@ export function createGroupsApp() {
       this.error = null;
       try {
         await api.joinGroup(g.id);
-        window.location.href = `/group?id=${g.id}`;
+        await navigate(`/group?id=${g.id}`);
       } catch (e) {
         if (e.status === 403 && e.body?.error === 'group_full') {
           showErrorToast('That group is full.');

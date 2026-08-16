@@ -45,6 +45,8 @@ interface RecentMusicItem {
   // Distinct from `id` (our internal catalog UUID) since migrations/0002
   // obfuscated it. Artists have no player, so it's omitted there.
   spotifyId?: string;
+  // Track's own artist name -- also track-only, same reasoning as spotifyId.
+  artistName?: string | null;
 }
 
 /**
@@ -62,20 +64,21 @@ async function recentRightSwipedItems(
   const rows = await db
     .prepare(
       `SELECT ms.item_id as id, COALESCE(a.name, t.name) as name, ${imageColumn} as image_url,
-              COALESCE(a.spotify_id, t.spotify_id) as spotify_id
+              COALESCE(a.spotify_id, t.spotify_id) as spotify_id, ta.name as track_artist_name
        FROM music_swipes ms
        LEFT JOIN artists a ON ms.item_type = 'artist' AND a.id = ms.item_id
        LEFT JOIN tracks t ON ms.item_type = 'track' AND t.id = ms.item_id
+       LEFT JOIN artists ta ON ms.item_type = 'track' AND ta.id = t.artist_id
        WHERE ms.user_id = ? AND ms.item_type = ? AND ms.direction = 'right'
        ORDER BY ms.created_at DESC
        LIMIT ?`
     )
     .bind(userId, itemType, limit)
-    .all<{ id: string; name: string; image_url: string | null; spotify_id: string | null }>();
+    .all<{ id: string; name: string; image_url: string | null; spotify_id: string | null; track_artist_name: string | null }>();
 
   return rows.results.map((r) =>
     itemType === 'track'
-      ? { id: r.id, name: r.name, imageUrl: r.image_url, spotifyId: r.spotify_id! }
+      ? { id: r.id, name: r.name, imageUrl: r.image_url, spotifyId: r.spotify_id!, artistName: r.track_artist_name }
       : { id: r.id, name: r.name, imageUrl: r.image_url }
   );
 }

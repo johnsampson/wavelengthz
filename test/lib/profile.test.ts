@@ -25,8 +25,8 @@ describe('getDisplayMusicProfile', () => {
       { artist_id: 'a1', rank: 1, name: 'First Artist', imageUrl: 'https://img/a1.jpg' },
     ]);
     const topTracks = JSON.stringify([
-      { track_id: 't2', rank: 2, name: 'Second Track', imageUrl: 'https://img/t2.jpg' },
-      { track_id: 't1', rank: 1, name: 'First Track', imageUrl: 'https://img/t1.jpg' },
+      { track_id: 't2', rank: 2, name: 'Second Track', artistName: 'Artist Two', imageUrl: 'https://img/t2.jpg' },
+      { track_id: 't1', rank: 1, name: 'First Track', artistName: 'Artist One', imageUrl: 'https://img/t1.jpg' },
     ]);
     const topGenres = JSON.stringify(['pop', 'indie']);
     await env.DB.prepare(
@@ -46,9 +46,20 @@ describe('getDisplayMusicProfile', () => {
     // profile.html's embed player can use one uniform field name across all
     // three track lists on the page, regardless of source.
     expect(result.topTracks).toEqual([
-      { id: 't1', spotifyId: 't1', name: 'First Track', imageUrl: 'https://img/t1.jpg' },
-      { id: 't2', spotifyId: 't2', name: 'Second Track', imageUrl: 'https://img/t2.jpg' },
+      { id: 't1', spotifyId: 't1', name: 'First Track', artistName: 'Artist One', imageUrl: 'https://img/t1.jpg' },
+      { id: 't2', spotifyId: 't2', name: 'Second Track', artistName: 'Artist Two', imageUrl: 'https://img/t2.jpg' },
     ]);
+  });
+
+  it('defaults artistName to null for a top_tracks row stored before that field existed', async () => {
+    const topTracks = JSON.stringify([{ track_id: 't1', rank: 1, name: 'First Track', imageUrl: 'https://img/t1.jpg' }]);
+    await env.DB.prepare(
+      `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at) VALUES ('mp3b', 'u1', '[]', ?, '[]', 'medium_term', 1000, 1000, 1000)`
+    ).bind(topTracks).run();
+
+    const result = await getDisplayMusicProfile(env.DB, 'u1');
+
+    expect(result.topTracks).toEqual([{ id: 't1', spotifyId: 't1', name: 'First Track', artistName: null, imageUrl: 'https://img/t1.jpg' }]);
   });
 
   it('caps artists and tracks at 10 each', async () => {
@@ -68,8 +79,8 @@ describe('getDisplayMusicProfile', () => {
 
 describe('pickAnthemTrack', () => {
   const topTracks = [
-    { id: 't1', spotifyId: 't1', name: 'First Track', imageUrl: 'https://img/t1.jpg' },
-    { id: 't2', spotifyId: 't2', name: 'Second Track', imageUrl: 'https://img/t2.jpg' },
+    { id: 't1', spotifyId: 't1', name: 'First Track', artistName: 'Artist One', imageUrl: 'https://img/t1.jpg' },
+    { id: 't2', spotifyId: 't2', name: 'Second Track', artistName: 'Artist Two', imageUrl: 'https://img/t2.jpg' },
   ];
 
   it('returns null when no anthem is set', () => {
@@ -119,8 +130,8 @@ describe('getAnthemTracksForUsers', () => {
       { id: 'u2', anthem_track_id: 't9' },
     ]);
 
-    expect(result.get('u1')).toEqual({ id: 't1', spotifyId: 't1', name: 'My Anthem', imageUrl: 'https://img/t1.jpg' });
-    expect(result.get('u2')).toEqual({ id: 't9', spotifyId: 't9', name: 'Their Anthem', imageUrl: 'https://img/t9.jpg' });
+    expect(result.get('u1')).toEqual({ id: 't1', spotifyId: 't1', name: 'My Anthem', artistName: null, imageUrl: 'https://img/t1.jpg' });
+    expect(result.get('u2')).toEqual({ id: 't9', spotifyId: 't9', name: 'Their Anthem', artistName: null, imageUrl: 'https://img/t9.jpg' });
   });
 
   it('omits a user whose chosen anthem has fallen out of their top_tracks', async () => {

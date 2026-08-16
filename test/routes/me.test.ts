@@ -46,7 +46,16 @@ describe('GET /api/me', () => {
         }
         if (url.includes('top/tracks')) {
           return new Response(
-            JSON.stringify({ items: [{ id: 't1', name: 'Track One', album: { images: [{ url: 'https://img.example/t1.jpg' }] } }] }),
+            JSON.stringify({
+              items: [
+                {
+                  id: 't1',
+                  name: 'Track One',
+                  artists: [{ name: 'Track Artist' }],
+                  album: { images: [{ url: 'https://img.example/t1.jpg' }] },
+                },
+              ],
+            }),
             { status: 200 }
           );
         }
@@ -67,7 +76,7 @@ describe('GET /api/me', () => {
     const topArtists = JSON.parse(row.top_artists);
     expect(topArtists[0]).toEqual({ artist_id: 'a1', rank: 1, name: 'Artist One', imageUrl: 'https://img.example/a1.jpg' });
     const topTracks = JSON.parse(row.top_tracks);
-    expect(topTracks[0]).toEqual({ track_id: 't1', rank: 1, name: 'Track One', imageUrl: 'https://img.example/t1.jpg' });
+    expect(topTracks[0]).toEqual({ track_id: 't1', rank: 1, name: 'Track One', artistName: 'Track Artist', imageUrl: 'https://img.example/t1.jpg' });
 
     vi.unstubAllGlobals();
   });
