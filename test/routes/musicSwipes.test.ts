@@ -126,6 +126,53 @@ describe('GET /api/candidates/music', () => {
     expect(body.candidates[0].imageUrl).toBe('https://img.example/t1.jpg');
   });
 
+  it('includes a representative track for an artist candidate, when one already exists in the catalog', async () => {
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('t1', 'sp-t1', 'Track One', 'a1', 'https://img.example/t1.jpg', 'seed', 1, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/candidates/music?limit=10', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, ctx);
+    const body = await res.json<any>();
+    const a1 = body.candidates.find((c: any) => c.itemId === 'a1');
+    expect(a1.track).toEqual({ id: 't1', spotifyId: 'sp-t1', name: 'Track One', imageUrl: 'https://img.example/t1.jpg' });
+  });
+
+  it('reports track: null for an artist candidate with no cataloged tracks', async () => {
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/candidates/music?limit=10', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, ctx);
+    const body = await res.json<any>();
+    const a1 = body.candidates.find((c: any) => c.itemId === 'a1');
+    expect(a1.track).toBeNull();
+  });
+
+  it('picks the earliest-inserted track as the representative one when an artist has more than one', async () => {
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('t1', 'sp-t1', 'First Track', 'a1', 'https://img.example/t1.jpg', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('t2', 'sp-t2', 'Second Track', 'a1', 'https://img.example/t2.jpg', 'seed', 1, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/candidates/music?limit=10', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, ctx);
+    const body = await res.json<any>();
+    const a1 = body.candidates.find((c: any) => c.itemId === 'a1');
+    expect(a1.track.id).toBe('t1');
+  });
+
+  it('omits track info for track-type candidates -- the preview feature is artist-mode only', async () => {
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('t1', 'sp-t1', 'Track One', 'a1', 'https://img.example/t1.jpg', 'seed', 1, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/candidates/music?item_type=track', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, ctx);
+    const body = await res.json<any>();
+    expect(body.candidates[0].track).toBeNull();
+  });
+
   it('tops up the catalog from Spotify and returns fresh candidates once the local pool is exhausted', async () => {
     // Exhaust both seeded artists.
     await env.DB.prepare(

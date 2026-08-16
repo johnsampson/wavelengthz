@@ -138,6 +138,128 @@ describe('deck app', () => {
     expect(togglePlayPause).not.toHaveBeenCalled();
   });
 
+  it('togglePreviewTrack toggles pause on the currently-playing preview track instead of restarting it', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.mocked(isCurrentTrack).mockReturnValue(true);
+    const app = createDeckApp();
+    app.current = { name: 'Some Artist', track: { spotifyId: 'sp1', id: 't1', name: 'Song', imageUrl: 'img' } };
+
+    await app.togglePreviewTrack();
+
+    expect(togglePlayPause).toHaveBeenCalled();
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  it('togglePreviewTrack hands off a new preview track to the player bar, tagged with the current artist name', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.mocked(isCurrentTrack).mockReturnValue(false);
+    const app = createDeckApp();
+    app.current = { name: 'Some Artist', track: { spotifyId: 'sp1', id: 't1', name: 'Song', imageUrl: 'img' } };
+
+    await app.togglePreviewTrack();
+
+    expect(play).toHaveBeenCalledWith({ spotifyId: 'sp1', id: 't1', name: 'Song', artistName: 'Some Artist', imageUrl: 'img' });
+  });
+
+  it('togglePreviewTrack is a no-op when the current card has no catalog track', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    const app = createDeckApp();
+    app.current = { name: 'Some Artist', track: null };
+
+    await app.togglePreviewTrack();
+
+    expect(play).not.toHaveBeenCalled();
+    expect(togglePlayPause).not.toHaveBeenCalled();
+  });
+
+  it('viewArtist routes to the current candidate\'s artist profile in Music mode', () => {
+    vi.stubGlobal('window', fakeWindow());
+    const app = createDeckApp();
+    app.mode = 'music';
+    app.current = { itemId: 'a1', name: 'Some Artist' };
+
+    app.viewArtist();
+
+    expect(navigate).toHaveBeenCalledWith('/artist?id=a1');
+  });
+
+  it('viewArtist is a no-op in People mode -- displayName is not a link to an artist', () => {
+    vi.stubGlobal('window', fakeWindow());
+    const app = createDeckApp();
+    app.mode = 'people';
+    app.current = { id: 'u2', displayName: 'Sam' };
+
+    app.viewArtist();
+
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('viewArtist is a no-op with no current candidate', () => {
+    vi.stubGlobal('window', fakeWindow());
+    const app = createDeckApp();
+    app.mode = 'music';
+    app.current = null;
+
+    app.viewArtist();
+
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('showNext prefetches the next queued artist in Music mode, warming GET /api/artists/:id ahead of an actual visit', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { getElementById: vi.fn(() => null) });
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/artists/a2') return new Response(JSON.stringify({ artist: {}, tracks: [] }), { status: 200 });
+      return new Response('not found', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createDeckApp();
+    app.mode = 'music';
+    (app as any).$nextTick = (fn: () => void) => fn();
+    app.queue = [
+      { itemType: 'artist', itemId: 'a1', name: 'First' },
+      { itemType: 'artist', itemId: 'a2', name: 'Second' },
+    ];
+
+    await app.showNext();
+
+    expect(app.current).toEqual({ itemType: 'artist', itemId: 'a1', name: 'First' });
+    expect(fetchMock).toHaveBeenCalledWith('/api/artists/a2', expect.anything());
+    vi.unstubAllGlobals();
+  });
+
+  it('showNext does not prefetch in People mode', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { getElementById: vi.fn(() => null) });
+    const fetchMock = vi.fn(async () => new Response('not found', { status: 404 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createDeckApp();
+    app.mode = 'people';
+    (app as any).$nextTick = (fn: () => void) => fn();
+    app.queue = [{ id: 'u1', displayName: 'First' }, { id: 'u2', displayName: 'Second' }];
+
+    await app.showNext();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('showNext does not prefetch when nothing remains queued after this card', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { getElementById: vi.fn(() => null) });
+    const fetchMock = vi.fn(async () => new Response('not found', { status: 404 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createDeckApp();
+    app.mode = 'music';
+    (app as any).$nextTick = (fn: () => void) => fn();
+    app.queue = [{ itemType: 'artist', itemId: 'a1', name: 'First' }];
+
+    await app.showNext();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   it('setMode persists the choice and reloads the queue without stopping playback', async () => {
     const storage = fakeStorage();
     vi.stubGlobal('localStorage', storage);

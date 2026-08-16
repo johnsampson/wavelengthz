@@ -15,7 +15,7 @@ const TRACKS_PAGE_SIZE = 30;
 export function createArtistApp() {
   return {
     artistId: new URLSearchParams(window.location.search).get('id'),
-    /** @type {{id: string, name: string, imageUrl?: string, genres: string[], totalLikes: number, totalLikesInArea: number} | null} */
+    /** @type {{id: string, name: string, imageUrl?: string, genres: string[], totalLikes: number, totalLikesInArea: number, direction: string | null} | null} */
     artist: null,
     tracks: [],
     error: null,
@@ -83,6 +83,24 @@ export function createArtistApp() {
         await api.swipe('music', { item_type: 'track', item_id: track.id, direction });
       } catch (e) {
         track.direction = previous;
+        showErrorToast('Could not save that. Please try again.');
+      }
+    },
+
+    // Likes the artist as a whole -- the same swipe a right-swipe in the
+    // Music-mode deck records (src/routes/musicSwipes.ts), just reachable
+    // directly from the profile page too. No separate "unlike" affordance,
+    // same as the per-track like buttons above: tapping again while already
+    // liked just re-sends 'right', which POST /api/swipe/music already
+    // treats as a no-op (transition-based affinity tracking).
+    async likeArtist() {
+      if (!this.artist || this.artist.direction === 'right') return;
+      const previous = this.artist.direction;
+      this.artist.direction = 'right'; // optimistic
+      try {
+        await api.swipe('music', { item_type: 'artist', item_id: this.artist.id, direction: 'right' });
+      } catch (e) {
+        this.artist.direction = previous;
         showErrorToast('Could not save that. Please try again.');
       }
     },

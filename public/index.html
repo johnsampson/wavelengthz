@@ -70,7 +70,33 @@
           <span class="truncate" x-text="current?.anthemTrack?.name"></span>
         </button>
         <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-5 pt-16">
-          <h2 class="text-2xl font-bold" x-text="current?.name || current?.displayName"></h2>
+          <h2 class="text-2xl font-bold">
+            <!-- pointerdown.stop/click.stop: same swipe-drag-capture
+                 reasoning as the anthem chip above. Music mode only --
+                 People mode already has its own dedicated "view full
+                 profile" button below, and displayName isn't a link to
+                 anywhere of its own. -->
+            <button
+              type="button"
+              x-show="mode === 'music'"
+              class="text-left hover:underline underline-offset-4"
+              @pointerdown.stop
+              @click.stop="viewArtist()"
+              x-text="current?.name"
+            ></button>
+            <span x-show="mode === 'people'" x-text="current?.displayName"></span>
+          </h2>
+          <button
+            type="button"
+            x-show="mode === 'music' && current?.track"
+            class="mt-2 flex max-w-full items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm"
+            @pointerdown.stop
+            @click.stop="togglePreviewTrack()"
+            :aria-label="isCurrentPreviewTrack() ? 'Pause' : `Play ${current?.track?.name}`"
+          >
+            <span aria-hidden="true" x-text="isCurrentPreviewTrack() ? '⏸' : '▶️'"></span>
+            <span class="truncate" x-text="current?.track?.name"></span>
+          </button>
           <p class="text-neutral-200" x-text="current?.bio || current?.distanceLabel"></p>
           <div x-show="mode === 'people' && current?.topGenres?.length > 0" class="mt-2 flex flex-wrap gap-1.5">
             <template x-for="g in current?.topGenres || []" :key="g">
