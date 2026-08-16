@@ -12,9 +12,13 @@ export interface DisplayMusicItem {
 // topTracks it happens to equal `id` (this data is the user's raw cached
 // Spotify "top tracks", never touching the artists/tracks catalog tables),
 // but exposing it uniformly lets profile.html's player use one field name
-// across every track list on the page.
+// across every track list on the page. artistName is null for a row stored
+// before this field existed (an untouched pre-existing music_profiles row) --
+// not re-fetched retroactively, just displayed without a subtitle until the
+// next time this user's whole profile happens to be recomputed.
 export interface DisplayMusicTrack extends DisplayMusicItem {
   spotifyId: string;
+  artistName: string | null;
 }
 
 export interface DisplayMusicProfile {
@@ -39,12 +43,17 @@ export async function getDisplayMusicProfile(db: D1Database, userId: string): Pr
   const byRank = (a: { rank: number }, b: { rank: number }) => a.rank - b.rank;
 
   const artists: Array<{ artist_id: string; rank: number; name: string; imageUrl: string | null }> = JSON.parse(row.top_artists);
-  const tracks: Array<{ track_id: string; rank: number; name: string; imageUrl: string | null }> = JSON.parse(row.top_tracks);
+  const tracks: Array<{ track_id: string; rank: number; name: string; artistName?: string | null; imageUrl: string | null }> = JSON.parse(
+    row.top_tracks
+  );
 
   return {
     topGenres: JSON.parse(row.top_genres),
     topArtists: [...artists].sort(byRank).slice(0, DISPLAY_LIMIT).map((a) => ({ id: a.artist_id, name: a.name, imageUrl: a.imageUrl })),
-    topTracks: [...tracks].sort(byRank).slice(0, DISPLAY_LIMIT).map((t) => ({ id: t.track_id, spotifyId: t.track_id, name: t.name, imageUrl: t.imageUrl })),
+    topTracks: [...tracks]
+      .sort(byRank)
+      .slice(0, DISPLAY_LIMIT)
+      .map((t) => ({ id: t.track_id, spotifyId: t.track_id, name: t.name, artistName: t.artistName ?? null, imageUrl: t.imageUrl })),
   };
 }
 
@@ -131,8 +140,16 @@ export async function getAnthemTracksForUsers(
     .all<{ user_id: string; top_tracks: string }>();
 
   for (const row of rows.results) {
-    const tracks: Array<{ track_id: string; name: string; imageUrl: string | null }> = JSON.parse(row.top_tracks);
-    const topTracks = tracks.map((t) => ({ id: t.track_id, spotifyId: t.track_id, name: t.name, imageUrl: t.imageUrl }));
+    const tracks: Array<{ track_id: string; name: string; artistName?: string | null; imageUrl: string | null }> = JSON.parse(
+      row.top_tracks
+    );
+    const topTracks = tracks.map((t) => ({
+      id: t.track_id,
+      spotifyId: t.track_id,
+      name: t.name,
+      artistName: t.artistName ?? null,
+      imageUrl: t.imageUrl,
+    }));
     const anthem = pickAnthemTrack(topTracks, anthemByUserId.get(row.user_id)!);
     if (anthem) anthems.set(row.user_id, anthem);
   }

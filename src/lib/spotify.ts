@@ -324,16 +324,22 @@ export async function fetchTopArtists(
 export async function fetchTopTracks(
   accessToken: string,
   timeRange: string
-): Promise<Array<{ id: string; name: string; imageUrl: string | null; rank: number }>> {
+): Promise<Array<{ id: string; name: string; artistName: string | null; imageUrl: string | null; rank: number }>> {
   const res = await spotifyFetch(
     `https://api.spotify.com/v1/me/top/tracks?time_range=${timeRange}&limit=50`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
   if (!res.ok) throw new Error(`Spotify top tracks fetch failed: ${res.status} ${await res.text()}`);
-  const data = await res.json<{ items: Array<{ id: string; name: string; album?: { images?: Array<{ url: string }> } }> }>();
+  const data = await res.json<{
+    items: Array<{ id: string; name: string; artists?: Array<{ name: string }>; album?: { images?: Array<{ url: string }> } }>;
+  }>();
   return data.items.map((item, i) => ({
     id: item.id,
     name: item.name,
+    // First credited artist only -- matches how every other track list in
+    // this app (artist.html, GET /api/artists/:id) shows a single artist
+    // name, not the full featured-artist list.
+    artistName: item.artists?.[0]?.name ?? null,
     imageUrl: item.album?.images?.[0]?.url ?? null,
     rank: i + 1,
   }));

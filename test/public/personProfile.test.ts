@@ -50,9 +50,9 @@ describe('person profile page', () => {
     vi.stubGlobal('window', fakeWindow());
     const app = createPersonProfileApp();
 
-    await app.togglePlayer({ spotifyId: 'sp1', name: 'Song', imageUrl: 'img' });
+    await app.togglePlayer({ id: 't1', spotifyId: 'sp1', name: 'Song', artistName: 'Some Artist', imageUrl: 'img' });
 
-    expect(play).toHaveBeenCalledWith({ spotifyId: 'sp1', name: 'Song', imageUrl: 'img' });
+    expect(play).toHaveBeenCalledWith({ spotifyId: 'sp1', id: 't1', name: 'Song', artistName: 'Some Artist', imageUrl: 'img' });
     vi.unstubAllGlobals();
   });
 

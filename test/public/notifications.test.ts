@@ -1,5 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createNotificationsApp } from '../../public/notifications.js';
+import { navigate } from '../../public/router.js';
+
+vi.mock('../../public/router.js', () => ({ navigate: vi.fn() }));
+
+beforeEach(() => {
+  vi.mocked(navigate).mockClear();
+});
 
 function stubApi(handler: (path: string, options?: RequestInit) => Response) {
   vi.stubGlobal('fetch', vi.fn(async (path: string, options?: RequestInit) => handler(path, options)));
@@ -22,8 +29,6 @@ describe('notifications list', () => {
   });
 
   it('marks an unread notification read and navigates for a match', async () => {
-    const fakeWindow = { location: { href: '' } };
-    vi.stubGlobal('window', fakeWindow);
     const fetchMock = vi.fn(async (path: string) => {
       if (path === '/api/notifications/n1/read') return new Response('{}', { status: 200 });
       return new Response('{}', { status: 200 });
@@ -36,33 +41,29 @@ describe('notifications list', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/notifications/n1/read', expect.objectContaining({ method: 'POST' }));
     expect(n.readAt).toEqual(expect.any(Number));
-    expect(fakeWindow.location.href).toBe('/match?id=m1');
+    expect(navigate).toHaveBeenCalledWith('/match?id=m1');
     vi.unstubAllGlobals();
   });
 
   it('still navigates even if marking read fails', async () => {
-    const fakeWindow = { location: { href: '' } };
-    vi.stubGlobal('window', fakeWindow);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
     const app = createNotificationsApp();
     const n = { id: 'n1', matchId: 'm1', readAt: null as number | null };
 
     await app.open(n);
 
-    expect(fakeWindow.location.href).toBe('/match?id=m1');
+    expect(navigate).toHaveBeenCalledWith('/match?id=m1');
     vi.unstubAllGlobals();
   });
 
   it('does not navigate for a notification with no matchId', async () => {
-    const fakeWindow = { location: { href: '' } };
-    vi.stubGlobal('window', fakeWindow);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
     const app = createNotificationsApp();
     const n = { id: 'n1', matchId: null, readAt: Date.now() };
 
     await app.open(n);
 
-    expect(fakeWindow.location.href).toBe('');
+    expect(navigate).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 });

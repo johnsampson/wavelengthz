@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createGroupApp } from '../../public/group.js';
 import { showErrorToast } from '../../public/toast.js';
+import { navigate } from '../../public/router.js';
 
 vi.mock('../../public/toast.js', () => ({ showErrorToast: vi.fn() }));
+vi.mock('../../public/router.js', () => ({ navigate: vi.fn() }));
 
 function fakeWindow() {
   return { location: { search: '?id=g1', href: '' }, AudioContext: undefined, webkitAudioContext: undefined };
@@ -29,6 +31,7 @@ function stubApi(handler: (path: string) => Response) {
 
 beforeEach(() => {
   vi.mocked(showErrorToast).mockClear();
+  vi.mocked(navigate).mockClear();
   vi.useFakeTimers();
 });
 
@@ -99,15 +102,14 @@ describe('group chat', () => {
   });
 
   it('navigates to /groups after successfully leaving', async () => {
-    const win = fakeWindow();
-    vi.stubGlobal('window', win);
+    vi.stubGlobal('window', fakeWindow());
     vi.stubGlobal('document', fakeDocument());
     stubApi(() => new Response('{}', { status: 200 }));
     const app = createGroupApp();
 
     await app.leave();
 
-    expect(win.location.href).toBe('/groups');
+    expect(navigate).toHaveBeenCalledWith('/groups');
   });
 
   it('resolves a member id to their display name, falling back to "Someone"', () => {

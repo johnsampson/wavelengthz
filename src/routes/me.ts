@@ -48,7 +48,9 @@ export function registerMeRoutes(router: RouterType) {
         // Existing scoring code (src/lib/profile.ts) only ever re-maps this back
         // down to {id, rank}, so the extra fields are invisible to it.
         const topArtists = JSON.stringify(artists.map((a) => ({ artist_id: a.id, rank: a.rank, name: a.name, imageUrl: a.imageUrl })));
-        const topTracks = JSON.stringify(tracks.map((t) => ({ track_id: t.id, rank: t.rank, name: t.name, imageUrl: t.imageUrl })));
+        const topTracks = JSON.stringify(
+          tracks.map((t) => ({ track_id: t.id, rank: t.rank, name: t.name, artistName: t.artistName, imageUrl: t.imageUrl }))
+        );
         const topGenres = JSON.stringify([...genreRank.keys()]);
         const now = Date.now();
 

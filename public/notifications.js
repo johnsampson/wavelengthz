@@ -1,5 +1,6 @@
 import { api } from './app.js';
 import { requireAuth } from './auth.js';
+import { navigate } from './router.js';
 
 // Extracted from notifications.html's inline script -- see matches.js's
 // comment for why (same reasoning, same shape).
@@ -27,7 +28,7 @@ export function createNotificationsApp() {
           // Non-fatal -- still navigate even if marking read failed.
         }
       }
-      if (n.matchId) window.location.href = `/match?id=${n.matchId}`;
+      if (n.matchId) await navigate(`/match?id=${n.matchId}`);
     },
   };
 }

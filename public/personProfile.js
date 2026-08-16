@@ -46,7 +46,10 @@ export function createPersonProfileApp() {
         await togglePlayPause();
         return;
       }
-      await play({ spotifyId: track.spotifyId, name: track.name, imageUrl: track.imageUrl });
+      // All three lists on this page (top/shared/recent) share the same
+      // {id, spotifyId, name, artistName, imageUrl} shape now, so this
+      // works uniformly regardless of which one `track` came from.
+      await play({ spotifyId: track.spotifyId, id: track.id, name: track.name, artistName: track.artistName, imageUrl: track.imageUrl });
     },
 
     // Clicking the currently-set anthem again clears it (trackId: null) --

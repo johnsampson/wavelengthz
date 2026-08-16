@@ -1,6 +1,7 @@
 import { api } from './app.js';
 import { requireAuth } from './auth.js';
 import { showErrorToast } from './toast.js';
+import { navigate } from './router.js';
 
 // Extracted from match.html's inline script -- see matches.js's comment for
 // why (same reasoning, same shape).
@@ -26,7 +27,7 @@ export function createMatchApp() {
     async unmatch() {
       try {
         await api.unmatch(this.matchId);
-        window.location.href = '/matches';
+        await navigate('/matches');
       } catch (e) {
         showErrorToast('Could not unmatch. Please try again.');
       }
@@ -35,7 +36,7 @@ export function createMatchApp() {
     async block() {
       try {
         await api.block(this.match.otherUserId);
-        window.location.href = '/matches';
+        await navigate('/matches');
       } catch (e) {
         showErrorToast('Could not block that user. Please try again.');
       }

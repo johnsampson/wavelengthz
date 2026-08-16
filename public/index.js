@@ -4,6 +4,7 @@ import { getAuthedUser } from './auth.js';
 import { shouldSearch, debounce, loadStoredMode, storeMode, saveSearchState, takeSearchState } from './search.js';
 import { play, togglePlayPause, isCurrentTrack } from './playerBar.js';
 import { showErrorToast } from './toast.js';
+import { navigate } from './router.js';
 
 // Extracted from index.html's inline script -- see matches.js's comment for
 // why (same reasoning, same shape). Also adds destroy(), same new
@@ -22,7 +23,7 @@ export function createDeckApp() {
     // to Music every single time.
     mode: loadStoredMode(localStorage),
     queue: [],
-    /** @type {{id?: string, itemType?: string, itemId?: string, name?: string, displayName?: string, imageUrl?: string, primaryPhotoUrl?: string, bio?: string, distanceLabel?: string, topGenres?: string[], anthemTrack?: {spotifyId: string, name: string, imageUrl?: string} | null} | null} */
+    /** @type {{id?: string, itemType?: string, itemId?: string, name?: string, displayName?: string, imageUrl?: string, primaryPhotoUrl?: string, bio?: string, distanceLabel?: string, topGenres?: string[], anthemTrack?: {spotifyId: string, id?: string, name: string, artistName?: string | null, imageUrl?: string} | null} | null} */
     current: null,
     detachSwipe: null,
     authed: null,
@@ -191,17 +192,20 @@ export function createDeckApp() {
     },
 
     async selectArtist(result) {
-      // Saved right before leaving the deck entirely (this is a real
-      // navigation, not an SPA route change) so init()'s own
-      // takeSearchState call can reopen this same search on the way back --
-      // see search.js's own comment on why this landed the user somewhere
-      // unhelpful (defaulting back to People mode, with no memory of what
-      // they'd searched) instead.
+      // Saved right before leaving the deck's search view -- even though
+      // this now goes through the router (a real reload isn't needed to
+      // reopen this same search on the way back), init()'s own
+      // takeSearchState call still only runs once per fresh createDeckApp()
+      // instance, which is exactly what a route back to `/` produces
+      // (whether from the browser's back button or another tap into
+      // search) -- see search.js's own comment on why this landed the user
+      // somewhere unhelpful (defaulting back to People mode, with no memory
+      // of what they'd searched) before this existed.
       saveSearchState(sessionStorage, { query: this.searchQuery, results: this.searchResults });
 
       // Already cataloged -- result.id is our internal artist UUID.
       if (result.inCatalog) {
-        window.location.href = `/artist?id=${result.id}`;
+        await navigate(`/artist?id=${result.id}`);
         return;
       }
       // A live Spotify result has no internal id yet (see GET
@@ -209,7 +213,7 @@ export function createDeckApp() {
       // so there's a real artist row (and UUID) to navigate to.
       try {
         const res = await api.createArtist(result.spotifyArtistId);
-        window.location.href = `/artist?id=${res.artistId}`;
+        await navigate(`/artist?id=${res.artistId}`);
       } catch (e) {
         showErrorToast('Could not add that artist. Please try again.');
       }
@@ -217,7 +221,7 @@ export function createDeckApp() {
 
     viewProfile() {
       if (!this.current) return;
-      window.location.href = `/profile?id=${this.current.id}`;
+      navigate(`/profile?id=${this.current.id}`);
     },
 
     async toggleAnthem() {
@@ -226,8 +230,14 @@ export function createDeckApp() {
         await togglePlayPause();
         return;
       }
-      const { spotifyId, name, imageUrl } = this.current.anthemTrack;
-      await play({ spotifyId, name, imageUrl });
+      // An anthem's `id` equals its `spotifyId` (this data is straight from
+      // Spotify's own "top tracks" for the card's owner, never touching the
+      // tracks catalog table) -- the player bar's like button still works
+      // fine against it (POST /api/swipe/music has no FK constraint on
+      // item_id), it just won't cascade to an artist-like/genre-affinity
+      // bump the way a catalog-backed track's like does.
+      const { spotifyId, id, name, artistName, imageUrl } = this.current.anthemTrack;
+      await play({ spotifyId, id, name, artistName, imageUrl });
     },
   };
 }

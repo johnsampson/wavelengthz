@@ -111,7 +111,18 @@ export function renderHeaderHtml(unreadCount = 0) {
 // the header placeholder while still getting the nav).
 export function mountNav(pathname = window.location.pathname) {
   const root = document.getElementById('wl-nav-root');
-  if (root) root.innerHTML = renderNavHtml(pathname);
+  if (!root) return;
+  root.innerHTML = renderNavHtml(pathname);
+  // Measured, not guessed: the fixed player bar (public/playerBar.js)
+  // positions itself at `bottom: calc(var(--wl-nav-h) + ...)` so it sits
+  // flush against the real nav -- a hardcoded estimate here (this used to
+  // be a fixed 64px in styles.css) was consistently a pixel or two off from
+  // the actual rendered height depending on font metrics/safe-area, leaving
+  // a sliver of scrolled content visible between the two. Runs on every
+  // mount (first load and every router navigation), so it self-corrects if
+  // the nav's own markup or the viewport's font rendering ever changes.
+  const navEl = root.firstElementChild;
+  if (navEl) document.documentElement.style.setProperty('--wl-nav-h', `${navEl.getBoundingClientRect().height}px`);
 }
 
 // Pure, so it's unit-testable independent of the fetch/DOM side effects

@@ -76,7 +76,7 @@
   <!-- Fixed above the bottom nav, filled in by playerBar.js's mountPlayerBar()
        -- see its own comment for why the two sub-containers are split and
        never innerHTML'd together. Empty (0-height) until something plays. -->
-  <div id="wl-player-root" class="fixed inset-x-0 z-10" style="bottom: calc(var(--wl-nav-h) + env(safe-area-inset-bottom))">
+  <div id="wl-player-root" class="fixed inset-x-0 z-10" style="bottom: var(--wl-nav-h)">
     <div id="wl-player-chrome" class="border-t border-white/10 bg-surface/90 backdrop-blur-lg"></div>
     <div id="wl-player-iframe-host" class="hidden border-t border-white/10 bg-surface/90 backdrop-blur-lg"></div>
   </div>
