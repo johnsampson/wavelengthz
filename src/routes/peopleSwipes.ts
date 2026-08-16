@@ -33,6 +33,28 @@ const RECENT_MUSIC_LIMIT = 10;
 // keeps today's exact reciprocity untouched. Params, in order: me.seeking,
 // me.seeking, me.gender.
 const RECIPROCITY_SQL = `(u.seeking = 'friends' AND ? = 'friends') OR (u.gender = ? AND u.seeking = ?)`;
+
+// Symmetric to musicSwipes.ts's own blockedGenreFilter, applied here so a
+// genre `me` has explicitly hidden from their music deck (user_blocked_
+// genres, src/routes/genreBlocks.ts) doesn't also keep surfacing people
+// whose own top genres are dominated by it -- previously this had zero
+// effect on People mode at all: blocking a genre only ever filtered
+// music-deck candidates, so the very next batch of people candidates could
+// (and did) still be full of people tagged with the genre just blocked.
+// A hard eligibility filter (excludes the candidate outright), not a
+// scoring nudge, applied to both the like-priority and pool queries below --
+// consistent with how every other exclusion criterion in this function
+// works (distance/age/blocks all apply to both pools too), rather than a
+// special case that only demotes score and could still let a heavily-
+// overlapping candidate rank near the top anyway. music_profiles.top_genres
+// is a JSON *array* (unlike artists.genres, an object map keyed by genre --
+// see genresFromRow), so json_each is read via `je.value`, not `je.key`. A
+// candidate with no music_profiles row yet has nothing to conflict with, so
+// this never excludes them. Params, in order: me.id.
+const GENRE_BLOCK_FILTER = `AND NOT EXISTS (
+  SELECT 1 FROM music_profiles mp, json_each(mp.top_genres) je
+  WHERE mp.user_id = u.id AND je.value IN (SELECT genre FROM user_blocked_genres WHERE user_id = ?)
+)`;
 function reciprocityParams(me: Pick<UserRow, 'gender' | 'seeking'>): [string, string, string] {
   return [me.seeking!, me.seeking!, me.gender!];
 }
@@ -170,9 +192,10 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
          AND u.lat IS NOT NULL AND u.lng IS NOT NULL
          AND u.lat BETWEEN ? AND ?
          AND (${RECIPROCITY_SQL})
+         ${GENRE_BLOCK_FILTER}
        ORDER BY ps.match_score DESC
        LIMIT ?`
-    ).bind(me.id, me.id, me.id, me.id, minLat, maxLat, ...reciprocityParams(me), LIKE_PRIORITY_LIMIT).all<UserRow & { match_score: number }>();
+    ).bind(me.id, me.id, me.id, me.id, minLat, maxLat, ...reciprocityParams(me), me.id, LIKE_PRIORITY_LIMIT).all<UserRow & { match_score: number }>();
 
     const likePriorityIds = new Set(likePriorityRows.results.map((r) => r.id));
 
@@ -186,8 +209,9 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
          AND NOT EXISTS (
            SELECT 1 FROM blocks b WHERE (b.blocker_id = ? AND b.blocked_id = u.id) OR (b.blocker_id = u.id AND b.blocked_id = ?)
          )
+         ${GENRE_BLOCK_FILTER}
        LIMIT ?`
-    ).bind(me.id, minLat, maxLat, ...reciprocityParams(me), me.id, me.id, me.id, POOL_LIMIT).all<UserRow>();
+    ).bind(me.id, minLat, maxLat, ...reciprocityParams(me), me.id, me.id, me.id, me.id, POOL_LIMIT).all<UserRow>();
 
     const pool = poolRows.results.filter((u) => !likePriorityIds.has(u.id));
 

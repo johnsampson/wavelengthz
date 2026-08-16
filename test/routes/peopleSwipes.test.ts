@@ -50,7 +50,7 @@ async function cookieFor(userId: string) {
 beforeEach(async () => {
   // Child rows before parent `users` rows -- D1 enforces FK constraints here.
   await env.DB.exec(
-    'DELETE FROM notifications; DELETE FROM matches; DELETE FROM blocks; DELETE FROM people_swipes; DELETE FROM music_swipes; DELETE FROM user_genres; DELETE FROM music_profiles; DELETE FROM user_photos; DELETE FROM sessions; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;'
+    'DELETE FROM notifications; DELETE FROM matches; DELETE FROM blocks; DELETE FROM people_swipes; DELETE FROM music_swipes; DELETE FROM user_genres; DELETE FROM user_blocked_genres; DELETE FROM music_profiles; DELETE FROM user_photos; DELETE FROM sessions; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;'
   );
   await makeUser('u1');
   await makeUser('u2');
@@ -429,6 +429,78 @@ describe('age_min/age_max are enforced as a filter, not just a scoring weight', 
     const res = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
     const body = await res.json<any>();
     expect(body.candidates.find((c: any) => c.id === 'narrow-young')).toBeUndefined();
+  });
+});
+
+describe('a blocked genre (src/routes/genreBlocks.ts) is enforced as a filter, not just a scoring weight', () => {
+  async function blockGenre(userId: string, genre: string) {
+    await env.DB.prepare(
+      `INSERT INTO user_blocked_genres (id, user_id, genre, created_at, updated_at) VALUES (?, ?, ?, 1000, 1000)`
+    ).bind(`block-${userId}-${genre}`, userId, genre).run();
+  }
+
+  async function setTopGenres(userId: string, genres: string[]) {
+    await env.DB.prepare(
+      `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at) VALUES (?, ?, '[]', '[]', ?, 'medium_term', 1000, 1000, 1000)`
+    ).bind(`mp-${userId}`, userId, JSON.stringify(genres)).run();
+  }
+
+  it('excludes a pool candidate whose top genres include a genre the caller has blocked', async () => {
+    await blockGenre('u1', 'country');
+    await setTopGenres('u2', ['country', 'pop']);
+    await setTopGenres('u3', ['indie', 'rock']);
+
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'u2')).toBeUndefined();
+    expect(body.candidates.find((c: any) => c.id === 'u3')).toBeDefined();
+  });
+
+  it('excludes an out-of-genre liker from the like-priority queue too', async () => {
+    await blockGenre('u1', 'country');
+    await setTopGenres('u2', ['country']);
+    await env.DB.prepare(
+      `INSERT INTO people_swipes (id, swiper_id, target_id, direction, match_score, created_at, updated_at) VALUES ('s1', 'u2', 'u1', 'right', 0.99, 1000, 1000)`
+    ).run();
+
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'u2')).toBeUndefined();
+  });
+
+  it('never excludes a candidate with no music_profiles row on record', async () => {
+    // u3 has no top genres at all -- nothing to conflict with a blocked
+    // genre, so it must never be excluded just because it can't be checked.
+    await blockGenre('u1', 'country');
+
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'u3')).toBeDefined();
+  });
+
+  it('does not exclude a candidate over a genre the CANDIDATE (not the caller) has blocked', async () => {
+    // Blocking only ever reflects the blocker's own preference -- u2 blocking
+    // "country" must not affect what u1 sees.
+    await blockGenre('u2', 'country');
+    await setTopGenres('u3', ['country']);
+
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'u3')).toBeDefined();
+  });
+
+  it('does not exclude a candidate whose top genres include OTHER genres but not a blocked one', async () => {
+    await blockGenre('u1', 'country');
+    await setTopGenres('u2', ['pop', 'indie', 'rock']);
+
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/candidates/people?limit=50', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.candidates.find((c: any) => c.id === 'u2')).toBeDefined();
   });
 });
 
