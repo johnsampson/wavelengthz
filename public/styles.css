@@ -42,6 +42,23 @@
 }
 
 /*
+ * Fixes the bottom nav (and player bar) visibly sliding up with the page
+ * during a swipe, leaving a gap of bare background below them -- reported
+ * on mobile: a vertical swipe on a page with little/no real scrollable
+ * content triggers the browser's elastic overscroll/rubber-band bounce,
+ * which drags *everything* (fixed-position elements included) along with
+ * it until it snaps back. overscroll-behavior-y: none disables that bounce
+ * outright. html AND body: iOS Safari needs it on both to fully suppress
+ * the bounce; Chrome/Android is satisfied by either. This also disables
+ * pull-to-refresh, an acceptable trade for an app with its own persistent
+ * chrome (nav + player bar) that a native-style refresh gesture would
+ * fight with anyway.
+ */
+html, body {
+  overscroll-behavior-y: none;
+}
+
+/*
  * Scrolls a player-bar track/artist name left-to-right only when it doesn't
  * fit (see playerBar.js's applyMarquee) -- holds at the start and end so a
  * just-barely-overflowing title is still readable, not a nonstop scroll.

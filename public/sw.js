@@ -162,8 +162,15 @@
 // except the first of a session ends up warmed this way. Also adds a
 // direct "like this artist" button to /artist's header (previously the
 // only way to like an artist was indirectly, via the deck or liking one of
-// its tracks).
-const CACHE_NAME = 'wavelengthz-shell-v36';
+// its tracks). v37 fixes the bottom nav (and player bar) visibly sliding
+// up with the page during a swipe on mobile, leaving a gap of bare
+// background below them -- every page's <body> switches from min-h-screen
+// (100vh, a static value that doesn't track the browser's dynamic
+// toolbar hiding/showing on scroll) to min-h-dvh (100dvh, which does), and
+// styles.css adds overscroll-behavior-y: none on html/body to stop the
+// elastic overscroll/rubber-band bounce itself from dragging fixed-position
+// elements along with it in the first place.
+const CACHE_NAME = 'wavelengthz-shell-v37';
 const APP_SHELL = [
   '/',
   '/app.js',
