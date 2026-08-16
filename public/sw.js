@@ -126,8 +126,18 @@
 // leave -> groups) through the client-side router instead of a hard
 // window.location.href reload, so playback survives them the same way it
 // already did for a plain link click -- and replaces the deck/artist pages'
-// swipe-left "Pass" ✕ icon with a thumbs-down glyph.
-const CACHE_NAME = 'wavelengthz-shell-v33';
+// swipe-left "Pass" ✕ icon with a thumbs-down glyph. v34 adds
+// <link rel="apple-touch-icon"> and <meta name="apple-mobile-web-app-
+// capable"> to every page's <head> -- iOS Safari's "Add to Home Screen"
+// reads apple-touch-icon directly (independent of the web app manifest),
+// and had nothing to read anywhere in this app before now, which is why
+// the app logo never showed up on an iPhone home screen. Reuses the same
+// hosted logo the manifest's own icons already point at (no local asset
+// pipeline for a dedicated opaque icon exists yet) -- note for a future
+// pass: iOS pre-16 renders a transparent PNG's transparent regions with a
+// white or black fill depending on system theme, so a proper fix would
+// still want a version of this logo with a real opaque background.
+const CACHE_NAME = 'wavelengthz-shell-v34';
 const APP_SHELL = [
   '/',
   '/app.js',
