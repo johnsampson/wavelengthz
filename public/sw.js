@@ -127,17 +127,29 @@
 // window.location.href reload, so playback survives them the same way it
 // already did for a plain link click -- and replaces the deck/artist pages'
 // swipe-left "Pass" ✕ icon with a thumbs-down glyph. v34 adds
-// <link rel="apple-touch-icon"> and <meta name="apple-mobile-web-app-
-// capable"> to every page's <head> -- iOS Safari's "Add to Home Screen"
-// reads apple-touch-icon directly (independent of the web app manifest),
-// and had nothing to read anywhere in this app before now, which is why
-// the app logo never showed up on an iPhone home screen. Reuses the same
-// hosted logo the manifest's own icons already point at (no local asset
-// pipeline for a dedicated opaque icon exists yet) -- note for a future
-// pass: iOS pre-16 renders a transparent PNG's transparent regions with a
-// white or black fill depending on system theme, so a proper fix would
-// still want a version of this logo with a real opaque background.
-const CACHE_NAME = 'wavelengthz-shell-v34';
+// <link rel="manifest" href="/manifest.json"> to every page's <head> --
+// previously only index.html and login.html had it, so "Add to Home
+// Screen" from any other page (e.g. /settings) had no manifest to read
+// start_url from and just bookmarked whatever page was currently open
+// instead of installing a real app shortcut back to the deck. Anyone who
+// already installed from a non-deck page needs to remove that shortcut and
+// re-add it (a code fix alone can't retroactively repoint an icon that
+// already exists on a home screen). v35 adds <link rel="apple-touch-icon">
+// and <meta name="apple-mobile-web-app-capable"> to every page's <head> --
+// iOS Safari's "Add to Home Screen" reads apple-touch-icon directly
+// (independent of the web app manifest), and had nothing to read anywhere
+// in this app before now, which is why the app logo never showed up on an
+// iPhone home screen. Also switches manifest.json's icons and the new
+// apple-touch-icon links from the external img.wavelengthz.com CDN to new
+// local files under public/icons/ (added to this precache list below) --
+// self-hosted, so an icon is available offline on first install instead of
+// depending on a live cross-origin fetch. Placeholder source image for now
+// (still has a transparent background, so iOS pre-16 will still fill it
+// white/black at the corners depending on system theme) -- swapping in a
+// proper opaque-background version later still needs its own CACHE_NAME
+// bump like any other precached file's content changing, same as
+// everywhere else in this list.
+const CACHE_NAME = 'wavelengthz-shell-v35';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -164,6 +176,9 @@ const APP_SHELL = [
   '/group.js',
   '/tailwind.css',
   '/manifest.json',
+  '/icons/icon-180.png',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
   '/onboarding',
   '/history',
   '/matches',
