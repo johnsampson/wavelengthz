@@ -12,7 +12,7 @@
   <link rel="apple-touch-icon" href="/icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
 </head>
-<body class="min-h-dvh bg-base text-neutral-50 p-4 flex flex-col">
+<body class="h-dvh overflow-hidden bg-base text-neutral-50 p-4 flex flex-col">
   <div id="wl-header-root"></div>
   <div id="wl-app-root" x-data="pageApp()" x-init="init()" class="flex flex-1 flex-col min-h-0">
   <p x-show="error" x-text="error" class="text-red-400 max-w-md w-full mx-auto mb-2" role="alert"></p>
@@ -29,7 +29,7 @@
     </svg>
     <span x-text="`${playlistCount} song${playlistCount === 1 ? '' : 's'} shared`"></span>
   </button>
-  <ul id="message-list" class="flex-1 flex flex-col gap-2 overflow-y-auto max-w-md w-full mx-auto">
+  <ul id="message-list" class="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto max-w-md w-full mx-auto">
     <template x-for="message in messages" :key="message.id">
       <li class="flex flex-col" :class="message.sender_id === myId ? 'items-end' : 'items-start'">
         <span class="mb-0.5 text-xs text-neutral-500" x-text="message.sender_id === myId ? 'You' : otherName"></span>

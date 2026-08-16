@@ -113,3 +113,66 @@ describe('messages thread', () => {
     expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('Messaging'));
   });
 });
+
+describe('scrollToBottom', () => {
+  /** Minimal stand-in for the <ul> and its album-art <img> children. */
+  function fakeList(images: Array<{ complete: boolean }> = []) {
+    const imgs = images.map((i) => ({
+      ...i,
+      _handlers: [] as Array<() => void>,
+      addEventListener(_type: string, fn: () => void) {
+        this._handlers.push(fn);
+      },
+      fireLoad() {
+        this._handlers.forEach((h) => h());
+      },
+    }));
+    return { scrollTop: 0, scrollHeight: 2000, querySelectorAll: () => imgs, _imgs: imgs };
+  }
+
+  it('pins the list to the bottom', () => {
+    const list = fakeList();
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { ...fakeDocument(), getElementById: vi.fn(() => list) });
+    const app = createMessagesApp();
+
+    app.scrollToBottom();
+
+    expect(list.scrollTop).toBe(2000);
+  });
+
+  // Regression: a shared track's album art has no intrinsic height until it
+  // loads, so the list grew after the initial scroll and the newest message
+  // ended up below the fold.
+  it('re-pins once a not-yet-loaded album image finishes loading', () => {
+    const list = fakeList([{ complete: false }]);
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { ...fakeDocument(), getElementById: vi.fn(() => list) });
+    const app = createMessagesApp();
+
+    app.scrollToBottom();
+    list.scrollHeight = 2600; // image loaded, list got taller
+    list._imgs[0].fireLoad();
+
+    expect(list.scrollTop).toBe(2600);
+  });
+
+  it('does not attach a listener to an already-loaded image', () => {
+    const list = fakeList([{ complete: true }]);
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { ...fakeDocument(), getElementById: vi.fn(() => list) });
+    const app = createMessagesApp();
+
+    app.scrollToBottom();
+
+    expect(list._imgs[0]._handlers).toHaveLength(0);
+  });
+
+  it('is a safe no-op when the list is not in the DOM', () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { ...fakeDocument(), getElementById: vi.fn(() => null) });
+    const app = createMessagesApp();
+
+    expect(() => app.scrollToBottom()).not.toThrow();
+  });
+});

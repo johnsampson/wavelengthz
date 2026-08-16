@@ -112,7 +112,18 @@ export async function navigate(url, { push = true } = {}) {
   const html = await res.text();
   if (token !== navToken) return;
 
-  const mod = await import(route.module);
+  // Fail soft, same as the fetch above. An import() rejection here (a stale
+  // service-worker cache missing a newly-added module, a chunk that 404s mid-
+  // deploy) would otherwise reject navigate() -- and onClick calls it without
+  // awaiting or catching, so the rejection would surface as an unhandled
+  // promise and the app would simply sit there having done nothing visible.
+  let mod;
+  try {
+    mod = await import(route.module);
+  } catch (e) {
+    if (token === navToken) window.location.href = url;
+    return;
+  }
   if (token !== navToken) return;
 
   const oldRoot = document.getElementById('wl-app-root');
