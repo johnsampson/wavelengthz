@@ -97,4 +97,31 @@ describe('pre-launch site-wide password gate', () => {
     const res = await worker.fetch(req, gatedEnv, {} as ExecutionContext);
     expect(res.status).toBe(401);
   });
+
+  // Deliberate, known hole (see the exemption list's own comment in
+  // src/index.ts): iOS's installed PWA can't reliably carry Basic Auth
+  // credentials through the Spotify OAuth redirect chain, so Spotify login
+  // failed 100% of the time from the home-screen app while working fine
+  // from a regular browser tab. Exempted so it works from both, at the
+  // accepted cost of these two URLs being reachable without the site
+  // password pre-launch.
+  it('exempts /login/spotify and /callback from the gate', async () => {
+    const gatedEnv = { ...env, SITE_BASIC_AUTH_USER: 'preview', SITE_BASIC_AUTH_PASSWORD: 'letmein' };
+
+    const loginRes = await worker.fetch(new Request('http://localhost/login/spotify'), gatedEnv, {} as ExecutionContext);
+    expect(loginRes.status).toBe(302); // past the gate, into the real route handler's Spotify redirect
+
+    const callbackRes = await worker.fetch(new Request('http://localhost/callback'), gatedEnv, {} as ExecutionContext);
+    expect(callbackRes.status).toBe(400); // past the gate, into the real route handler's "Invalid OAuth state"
+  });
+
+  it('still gates /login/google and /callback/google -- the exemption is Spotify-only', async () => {
+    const gatedEnv = { ...env, SITE_BASIC_AUTH_USER: 'preview', SITE_BASIC_AUTH_PASSWORD: 'letmein' };
+
+    const loginRes = await worker.fetch(new Request('http://localhost/login/google'), gatedEnv, {} as ExecutionContext);
+    expect(loginRes.status).toBe(401);
+
+    const callbackRes = await worker.fetch(new Request('http://localhost/callback/google'), gatedEnv, {} as ExecutionContext);
+    expect(callbackRes.status).toBe(401);
+  });
 });

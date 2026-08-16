@@ -150,14 +150,35 @@ function withSecurityHeaders(response: Response): Response {
 // these paths expose anything sensitive (just a logo and static app
 // metadata), so exempting them doesn't weaken the gate's actual purpose of
 // keeping app content/API access closed pre-launch.
-const SITE_BASIC_AUTH_EXEMPT_PATHS = new Set(['/manifest.json', '/icons/icon-180.png', '/icons/icon-192.png', '/icons/icon-512.png']);
+// '/login/spotify' and '/callback' are a deliberate, known hole in the
+// gate, not an oversight: iOS's installed PWA (standalone display mode)
+// handles HTTP Basic Auth unreliably across a cross-origin redirect chain
+// (wavelengthz.com -> accounts.spotify.com -> back to wavelengthz.com/
+// callback) -- there's often no UI to even show the native auth prompt in
+// standalone mode, so Spotify login failed 100% of the time from the
+// installed app while working fine from a regular Safari/Chrome tab
+// (where cached Basic Auth credentials are attached automatically). The
+// properly-closed fix is replacing this whole gate with a cookie-based
+// login page (cookies, unlike Basic Auth, are shared between Safari and
+// the installed PWA) -- deferred as a bigger follow-up. Until then, anyone
+// who finds these two exact URLs can complete a real Spotify OAuth login
+// and create a live account without ever seeing the site password prompt.
+// Explicitly accepted as a pre-launch trade-off; revisit before real launch.
+const SITE_BASIC_AUTH_EXEMPT_PATHS = new Set([
+  '/manifest.json',
+  '/icons/icon-180.png',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/login/spotify',
+  '/callback',
+]);
 
 // Pre-launch site-wide password gate -- a no-op unless both
 // SITE_BASIC_AUTH_USER/PASSWORD are set (see src/env.d.ts). Checked first,
 // before rate limiting/routing/anything else, and ahead of ASSETS too (once
 // [assets].run_worker_first is on, every request -- API and static alike --
 // reaches this handler), so nothing about the app is reachable without it,
-// except the PWA-install-critical paths above.
+// except the paths exempted above.
 function checkSiteBasicAuth(request: Request, env: Env): Response | null {
   if (!env.SITE_BASIC_AUTH_USER || !env.SITE_BASIC_AUTH_PASSWORD) return null;
   if (SITE_BASIC_AUTH_EXEMPT_PATHS.has(new URL(request.url).pathname)) return null;
