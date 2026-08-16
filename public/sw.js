@@ -126,8 +126,16 @@
 // leave -> groups) through the client-side router instead of a hard
 // window.location.href reload, so playback survives them the same way it
 // already did for a plain link click -- and replaces the deck/artist pages'
-// swipe-left "Pass" ✕ icon with a thumbs-down glyph.
-const CACHE_NAME = 'wavelengthz-shell-v33';
+// swipe-left "Pass" ✕ icon with a thumbs-down glyph. v34 adds
+// <link rel="manifest" href="/manifest.json"> to every page's <head> --
+// previously only index.html and login.html had it, so "Add to Home
+// Screen" from any other page (e.g. /settings) had no manifest to read
+// start_url from and just bookmarked whatever page was currently open
+// instead of installing a real app shortcut back to the deck. Anyone who
+// already installed from a non-deck page needs to remove that shortcut and
+// re-add it (a code fix alone can't retroactively repoint an icon that
+// already exists on a home screen).
+const CACHE_NAME = 'wavelengthz-shell-v34';
 const APP_SHELL = [
   '/',
   '/app.js',
