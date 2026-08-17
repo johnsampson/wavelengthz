@@ -41,6 +41,15 @@ let currentTrack = null; // { spotifyId, id, name, artistName, imageUrl } | null
 let mode = null; // 'sdk' | 'iframe' | null -- null while currentTrack is set but availability hasn't resolved yet, or when currentTrack itself is null
 let sdkState = null; // { paused, position, duration } | null -- sdk mode only
 
+// Swipe-left-to-reveal-trash state (issue #108: "align the radio player w/
+// the tracks view... maybe make the radio a swipe left that exposes a trash
+// can to close the radio?"). Whether the trash is currently snapped open --
+// module-scope like everything else here so renderChrome()'s frequent
+// full-innerHTML replacements (every progress tick, every state change)
+// render the swipeable content already at rest in the right position
+// instead of losing an open reveal on the next re-render.
+let swipeRevealed = false;
+
 // Threshold tracking for the current SDK play (see migrations/0022). Measures
 // accumulated PLAYING time, not track position: playback may start at the
 // hook offset rather than 0:00, and pausing stops position while wall-clock
@@ -254,6 +263,32 @@ function escapeHtml(str) {
 }
 
 const HEART_ICON = '<path d="M12 21C2 15 2 10 3 7L7 11L12 7L17 11L21 7C22 10 22 15 12 21Z" />';
+// Stroke-style outline, matching the Pass/thumbs-down icon convention used
+// everywhere else in this app (fill="none" stroke="currentColor"
+// stroke-width="2" ...) rather than HEART_ICON's filled-shape convention.
+const TRASH_ICON = '<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />';
+
+// Width of the trash-can action revealed behind the bar's content on a
+// swipe-left (issue #108). Exported so mountPlayerBar()'s pointer handlers
+// and this module's own tests share one number with renderPlayerChromeHtml's
+// resting-state markup below.
+export const SWIPE_REVEAL_PX = 72;
+
+/**
+ * Clamp a drag to a valid reveal offset: 0 (closed) through -SWIPE_REVEAL_PX
+ * (trash fully revealed). `baseOffset` is where the drag started from (0 if
+ * closed, -maxReveal if already revealed and the user is now dragging it
+ * back closed) -- pure so the clamping math is testable without a DOM.
+ */
+export function clampRevealOffset(baseOffset, deltaX, maxReveal = SWIPE_REVEAL_PX) {
+  return Math.min(0, Math.max(-maxReveal, baseOffset + deltaX));
+}
+
+/** Whether a released drag ended far enough over to snap open rather than
+ * spring back closed. */
+export function shouldSnapOpen(offset, maxReveal = SWIPE_REVEAL_PX, thresholdRatio = 0.4) {
+  return Math.abs(offset) > maxReveal * thresholdRatio;
+}
 
 function likeButtonHtml(currentTrack) {
   // See the module comment on `currentTrack.id` above -- in practice every
@@ -297,7 +332,7 @@ function marqueeSpan(text, extraClass) {
 // is raw innerHTML construction, unlike Alpine's x-text/:src bindings
 // elsewhere in this app, which escape by construction.
 export function renderPlayerChromeHtml(state) {
-  const { currentTrack, mode, sdkState } = state;
+  const { currentTrack, mode, sdkState, revealed } = state;
   if (!currentTrack) return '';
 
   const name = escapeHtml(currentTrack.name ?? '');
@@ -312,80 +347,113 @@ export function renderPlayerChromeHtml(state) {
       ${artistName ? marqueeSpan(artistName, 'text-xs text-neutral-400') : ''}
     </div>`;
 
+  return wrapWithSwipeReveal(renderContent(), revealed);
+
   // mode === null: availability hasn't resolved yet (a brief window right
   // after play() is tapped) -- deliberately no play/pause control and no
   // "Basic player" badge here, since showing either would mean picking one
   // that's likely wrong and then immediately swapping it a beat later. Art
   // + name + close is the only thing safe to commit to this early.
-  if (mode === null) {
-    return `
-      <div class="mx-auto flex w-full max-w-md items-center gap-3 p-4">
-        <img src="${imageUrl}" alt="" class="h-14 w-14 shrink-0 rounded object-cover ring-1 ring-white/10" />
-        ${textStack}
-        ${closeButton}
-      </div>`;
-  }
+  function renderContent() {
+    if (mode === null) {
+      return `
+        <div class="mx-auto flex w-full max-w-md items-center gap-3 p-4">
+          <img src="${imageUrl}" alt="" class="h-14 w-14 shrink-0 rounded object-cover ring-1 ring-white/10" />
+          ${textStack}
+          ${closeButton}
+        </div>`;
+    }
 
-  if (mode === 'sdk') {
-    const paused = !sdkState || sdkState.paused;
-    const positionMs = sdkState?.position ?? 0;
-    const durationMs = sdkState?.duration ?? 0;
-    const pct = durationMs ? (positionMs / durationMs) * 100 : 0;
+    if (mode === 'sdk') {
+      const paused = !sdkState || sdkState.paused;
+      const positionMs = sdkState?.position ?? 0;
+      const durationMs = sdkState?.duration ?? 0;
+      const pct = durationMs ? (positionMs / durationMs) * 100 : 0;
+      return `
+        <div class="mx-auto flex w-full max-w-md items-center gap-3 p-4">
+          <img src="${imageUrl}" alt="" class="h-14 w-14 shrink-0 rounded object-cover ring-1 ring-white/10" />
+          <div class="min-w-0 flex-1">
+            ${marqueeSpan(name, 'text-sm font-medium text-neutral-100')}
+            ${artistName ? marqueeSpan(artistName, 'text-xs text-neutral-400') : ''}
+            <!-- Seekable. The -my-2/py-2 gives a ~20px tall touch target
+                 without changing the bar's visual weight or the row's height;
+                 a 4px-tall strip is impossible to hit accurately on a phone.
+                 role=slider + arrow keys so this isn't pointer-only. -->
+            <div
+              data-action="seek"
+              role="slider"
+              tabindex="0"
+              aria-label="Seek"
+              aria-valuemin="0"
+              aria-valuemax="${Math.round(durationMs)}"
+              aria-valuenow="${Math.round(positionMs)}"
+              aria-valuetext="${formatTime(positionMs)} of ${formatTime(durationMs)}"
+              class="-my-2 mt-1.5 cursor-pointer py-2"
+            >
+              <div class="h-1 w-full overflow-hidden rounded-full bg-white/10">
+                <div class="h-full rounded-full bg-gradient-to-r from-brand-500 to-accent-500" style="width:${pct}%"></div>
+              </div>
+            </div>
+          </div>
+          ${likeButton}
+          <button
+            type="button"
+            data-action="toggle"
+            aria-label="${paused ? 'Play' : 'Pause'}"
+            class="btn-primary h-9 w-9 shrink-0 rounded-full p-0"
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">${
+              paused ? '<path d="M8 5v14l11-7z" />' : '<path d="M7 5h4v14H7zM13 5h4v14h-4z" />'
+            }</svg>
+          </button>
+          ${closeButton}
+        </div>`;
+    }
+
+    // iframe mode: the embed's own controls handle play/pause, and this app
+    // has no way to observe its playback state -- same reasoning the old
+    // per-page "Basic player" fallback badge already documented, just
+    // relocated here.
     return `
       <div class="mx-auto flex w-full max-w-md items-center gap-3 p-4">
         <img src="${imageUrl}" alt="" class="h-14 w-14 shrink-0 rounded object-cover ring-1 ring-white/10" />
         <div class="min-w-0 flex-1">
+          <span class="block text-[10px] font-semibold tracking-wide text-amber-400 uppercase">Basic player</span>
           ${marqueeSpan(name, 'text-sm font-medium text-neutral-100')}
           ${artistName ? marqueeSpan(artistName, 'text-xs text-neutral-400') : ''}
-          <!-- Seekable. The -my-2/py-2 gives a ~20px tall touch target
-               without changing the bar's visual weight or the row's height;
-               a 4px-tall strip is impossible to hit accurately on a phone.
-               role=slider + arrow keys so this isn't pointer-only. -->
-          <div
-            data-action="seek"
-            role="slider"
-            tabindex="0"
-            aria-label="Seek"
-            aria-valuemin="0"
-            aria-valuemax="${Math.round(durationMs)}"
-            aria-valuenow="${Math.round(positionMs)}"
-            aria-valuetext="${formatTime(positionMs)} of ${formatTime(durationMs)}"
-            class="-my-2 mt-1.5 cursor-pointer py-2"
-          >
-            <div class="h-1 w-full overflow-hidden rounded-full bg-white/10">
-              <div class="h-full rounded-full bg-gradient-to-r from-brand-500 to-accent-500" style="width:${pct}%"></div>
-            </div>
-          </div>
         </div>
         ${likeButton}
-        <button
-          type="button"
-          data-action="toggle"
-          aria-label="${paused ? 'Play' : 'Pause'}"
-          class="btn-primary h-9 w-9 shrink-0 rounded-full p-0"
-        >
-          <svg viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-4 w-4">${
-            paused ? '<path d="M8 5v14l11-7z" />' : '<path d="M7 5h4v14H7zM13 5h4v14h-4z" />'
-          }</svg>
-        </button>
         ${closeButton}
       </div>`;
   }
+}
 
-  // iframe mode: the embed's own controls handle play/pause, and this app
-  // has no way to observe its playback state -- same reasoning the old
-  // per-page "Basic player" fallback badge already documented, just
-  // relocated here.
+// Trash-can action revealed behind the bar's content on a swipe-left (issue
+// #108). Both layers are `position: relative`/`absolute` with an explicit
+// z-index rather than relying on DOM order, since a non-positioned
+// in-flow descendant would otherwise paint above a positioned one
+// regardless of source order -- the trash button MUST stay under the
+// content whenever `revealed` is false, or it'd bleed through as a red
+// sliver at the bar's right edge on every track. mountPlayerBar()'s pointer
+// handlers animate `data-swipe-content`'s transform live during a drag;
+// this only ever renders the two settled states (0 or fully revealed).
+function wrapWithSwipeReveal(contentHtml, revealed) {
   return `
-    <div class="mx-auto flex w-full max-w-md items-center gap-3 p-4">
-      <img src="${imageUrl}" alt="" class="h-14 w-14 shrink-0 rounded object-cover ring-1 ring-white/10" />
-      <div class="min-w-0 flex-1">
-        <span class="block text-[10px] font-semibold tracking-wide text-amber-400 uppercase">Basic player</span>
-        ${marqueeSpan(name, 'text-sm font-medium text-neutral-100')}
-        ${artistName ? marqueeSpan(artistName, 'text-xs text-neutral-400') : ''}
-      </div>
-      ${likeButton}
-      ${closeButton}
+    <div class="relative overflow-hidden">
+      <button
+        type="button"
+        data-action="hide"
+        aria-label="Close player"
+        class="absolute inset-y-0 right-0 z-0 flex items-center justify-center bg-red-600 text-white"
+        style="width:${SWIPE_REVEAL_PX}px"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto h-5 w-5">${TRASH_ICON}</svg>
+      </button>
+      <div
+        data-swipe-content
+        class="relative z-10 touch-pan-y bg-surface transition-transform duration-200 ease-out"
+        style="transform:translateX(${revealed ? -SWIPE_REVEAL_PX : 0}px)"
+      >${contentHtml}</div>
     </div>`;
 }
 
@@ -413,7 +481,7 @@ function applyMarquee(el) {
 function renderChrome() {
   const root = document.getElementById('wl-player-chrome');
   if (!root) return;
-  root.innerHTML = renderPlayerChromeHtml({ currentTrack, mode, sdkState });
+  root.innerHTML = renderPlayerChromeHtml({ currentTrack, mode, sdkState, revealed: swipeRevealed });
   // Overflow can only be measured once the new markup has real layout, so
   // this runs as a follow-up pass over whatever marquee wrappers just got
   // inserted, not as part of the string built above.
@@ -490,6 +558,7 @@ async function startPlayback(track) {
   currentTrack = track;
   mode = null; // renders the neutral loading state below, not a guess at sdk/iframe
   sdkState = null;
+  swipeRevealed = false; // a fresh track starts closed, regardless of the outgoing track's reveal state
   renderChrome();
 
   const availability = await checkPlayerAvailability();
@@ -640,6 +709,7 @@ export async function hide() {
   currentTrack = null;
   mode = null;
   sdkState = null;
+  swipeRevealed = false;
   stopPlayTracking();
   resetRadio();
   hideIframe();
@@ -657,7 +727,78 @@ export function mountPlayerBar() {
   mounted = true;
   const chromeRoot = document.getElementById('wl-player-chrome');
   if (!chromeRoot) return;
+
+  // Swipe-left-to-reveal-trash (issue #108). Gesture state lives in this
+  // closure, not module scope -- it's purely about the drag interaction
+  // itself, unlike `swipeRevealed` (module scope, above), which is the
+  // settled result renderPlayerChromeHtml needs on every re-render. A tap
+  // (movement never exceeds DRAG_START_PX) falls through untouched to the
+  // click handler below; a confirmed drag suppresses the click that would
+  // otherwise follow the pointerup (e.g. an accidental "like" or "toggle"
+  // from releasing over a button mid-swipe).
+  const DRAG_START_PX = 8;
+  let swipeStartX = 0;
+  let swipeStartY = 0;
+  let swipePointerId = null;
+  let swipeDragging = false;
+  let suppressNextClick = false;
+
+  chromeRoot.addEventListener('pointerdown', (e) => {
+    // The seek strip has its own dedicated interaction (tap-to-position +
+    // arrow keys, see below) and no drag-scrub support today -- excluded
+    // here so dragging across it does nothing (its existing, unsurprising
+    // behavior) rather than swiping the whole bar away underneath it.
+    if (e.target.closest('[data-action="seek"]')) return;
+    if (!e.target.closest('[data-swipe-content]')) return;
+    swipeStartX = e.clientX;
+    swipeStartY = e.clientY;
+    swipePointerId = e.pointerId;
+    swipeDragging = false;
+  });
+
+  chromeRoot.addEventListener('pointermove', (e) => {
+    if (swipePointerId === null || e.pointerId !== swipePointerId) return;
+    const contentEl = chromeRoot.querySelector('[data-swipe-content]');
+    if (!contentEl) return;
+    const deltaX = e.clientX - swipeStartX;
+    if (!swipeDragging) {
+      // Horizontal intent only -- a mostly-vertical drag (e.g. the page
+      // scrolling under a touch that started on the bar) is never a swipe
+      // here.
+      if (Math.abs(deltaX) < DRAG_START_PX || Math.abs(deltaX) < Math.abs(e.clientY - swipeStartY)) return;
+      swipeDragging = true;
+      contentEl.setPointerCapture(swipePointerId);
+      contentEl.style.transition = 'none'; // live-tracks the pointer; the snap on release re-enables the class's transition
+    }
+    e.preventDefault();
+    const baseOffset = swipeRevealed ? -SWIPE_REVEAL_PX : 0;
+    contentEl.style.transform = `translateX(${clampRevealOffset(baseOffset, deltaX)}px)`;
+  });
+
+  const endSwipeDrag = (e) => {
+    if (swipePointerId === null) return;
+    if (swipeDragging) {
+      const contentEl = chromeRoot.querySelector('[data-swipe-content]');
+      const baseOffset = swipeRevealed ? -SWIPE_REVEAL_PX : 0;
+      const offset = clampRevealOffset(baseOffset, e.clientX - swipeStartX);
+      swipeRevealed = shouldSnapOpen(offset);
+      if (contentEl) {
+        contentEl.style.transition = '';
+        contentEl.style.transform = `translateX(${swipeRevealed ? -SWIPE_REVEAL_PX : 0}px)`;
+      }
+      suppressNextClick = true;
+    }
+    swipePointerId = null;
+    swipeDragging = false;
+  };
+  chromeRoot.addEventListener('pointerup', endSwipeDrag);
+  chromeRoot.addEventListener('pointercancel', endSwipeDrag);
+
   chromeRoot.addEventListener('click', (e) => {
+    if (suppressNextClick) {
+      suppressNextClick = false;
+      return;
+    }
     const el = e.target.closest('[data-action]');
     const action = el?.dataset.action;
     if (action === 'toggle') togglePlayPause();
@@ -696,6 +837,7 @@ export function _resetForTests() {
   currentTrack = null;
   mode = null;
   sdkState = null;
+  swipeRevealed = false;
   stopPlayTracking();
   resetRadio();
   sdkListenerAttached = false;

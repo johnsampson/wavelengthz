@@ -8,6 +8,9 @@ import {
   seekStepTargetMs,
   formatTime,
   SEEK_STEP_MS,
+  SWIPE_REVEAL_PX,
+  clampRevealOffset,
+  shouldSnapOpen,
   _setCurrentTrackForTests,
   _resetForTests,
 } from '../../public/playerBar.js';
@@ -176,6 +179,71 @@ describe('renderPlayerChromeHtml', () => {
     expect(html).toContain('&lt;script&gt;');
     expect(html).toContain('&amp;');
     expect(html).toContain('&quot;quoted&quot;');
+  });
+
+  // Swipe-left-to-reveal-trash (issue #108): every mode's content is wrapped
+  // in the same swipe-content/trash-button pair, so these run once against
+  // the sdk branch rather than duplicating across all three modes.
+  it('wraps the content in a closed (translateX 0) swipe reveal by default', () => {
+    const html = renderPlayerChromeHtml({
+      currentTrack: { spotifyId: 'trk1', name: 'Valborg', imageUrl: '' },
+      mode: 'sdk',
+      sdkState: null,
+    });
+
+    expect(html).toContain('data-swipe-content');
+    expect(html).toContain('transform:translateX(0px)');
+  });
+
+  it('renders the swipe content already snapped open when revealed is true', () => {
+    const html = renderPlayerChromeHtml({
+      currentTrack: { spotifyId: 'trk1', name: 'Valborg', imageUrl: '' },
+      mode: 'sdk',
+      sdkState: null,
+      revealed: true,
+    });
+
+    expect(html).toContain(`transform:translateX(-${SWIPE_REVEAL_PX}px)`);
+  });
+
+  it('renders a trash-can action behind the content, in addition to the existing close button', () => {
+    const html = renderPlayerChromeHtml({
+      currentTrack: { spotifyId: 'trk1', name: 'Valborg', imageUrl: '' },
+      mode: 'sdk',
+      sdkState: null,
+    });
+
+    // Both the always-visible ✕ close button and the trash-can revealed by
+    // a swipe call hide() -- same action, two affordances.
+    expect(html.match(/data-action="hide"/g)?.length).toBe(2);
+  });
+});
+
+describe('clampRevealOffset', () => {
+  it('clamps a leftward drag from closed to the reveal width', () => {
+    expect(clampRevealOffset(0, -30)).toBe(-30);
+    expect(clampRevealOffset(0, -1000)).toBe(-SWIPE_REVEAL_PX);
+  });
+
+  it('never reveals on a rightward drag from closed', () => {
+    expect(clampRevealOffset(0, 50)).toBe(0);
+  });
+
+  it('clamps a drag starting from an already-revealed position back toward closed', () => {
+    expect(clampRevealOffset(-SWIPE_REVEAL_PX, 20)).toBe(-SWIPE_REVEAL_PX + 20);
+    expect(clampRevealOffset(-SWIPE_REVEAL_PX, 1000)).toBe(0);
+  });
+});
+
+describe('shouldSnapOpen', () => {
+  it('snaps open once the drag passes the threshold ratio of the reveal width', () => {
+    expect(shouldSnapOpen(-SWIPE_REVEAL_PX * 0.5)).toBe(true);
+    expect(shouldSnapOpen(-SWIPE_REVEAL_PX * 0.2)).toBe(false);
+  });
+
+  it('treats a barely-open drag as a spring back to closed', () => {
+    expect(shouldSnapOpen(-1)).toBe(false);
+    expect(shouldSnapOpen(0)).toBe(false);
   });
 });
 
