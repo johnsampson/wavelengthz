@@ -95,9 +95,9 @@ describe('artist page', () => {
     const app = createArtistApp();
     app.artist = { id: 'a1', name: 'Test Artist', genres: [], totalLikes: 0, totalLikesInArea: 0, direction: null };
 
-    await app.togglePlayer({ id: 't1', spotifyId: 'sp1', name: 'Song', imageUrl: 'img' });
+    await app.togglePlayer({ id: 't1', spotifyId: 'sp1', name: 'Song', imageUrl: 'img', durationMs: 210000 });
 
-    expect(play).toHaveBeenCalledWith({ spotifyId: 'sp1', id: 't1', name: 'Song', artistName: 'Test Artist', imageUrl: 'img' });
+    expect(play).toHaveBeenCalledWith({ spotifyId: 'sp1', id: 't1', name: 'Song', artistName: 'Test Artist', imageUrl: 'img', durationMs: 210000 });
     vi.unstubAllGlobals();
   });
 

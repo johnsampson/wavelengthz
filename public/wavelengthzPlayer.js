@@ -133,7 +133,12 @@ async function connectPlayer() {
 // Starts playback of one Spotify track id on this page's Connect device.
 // Returns true on success, false on any failure -- callers fall back to the
 // iframe embed either way, so the specific failure reason isn't surfaced.
-export async function playTrack(spotifyTrackId) {
+// positionMs starts playback partway in ("the hook") rather than at 0:00 --
+// see public/playHeuristics.js's hookOffsetMs for why. Spotify counts 30
+// seconds of playback toward a stream regardless of where it started, so
+// this doesn't affect whether a play counts, only how likely the listener is
+// to stay that long.
+export async function playTrack(spotifyTrackId, { positionMs = 0 } = {}) {
   const connection = await getPlayer();
   if (!connection) return false;
 
@@ -145,7 +150,10 @@ export async function playTrack(spotifyTrackId) {
         Authorization: `Bearer ${availability.accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ uris: [`spotify:track:${spotifyTrackId}`] }),
+      body: JSON.stringify({
+        uris: [`spotify:track:${spotifyTrackId}`],
+        ...(positionMs > 0 ? { position_ms: Math.floor(positionMs) } : {}),
+      }),
     });
     return res.ok;
   } catch (e) {

@@ -57,6 +57,12 @@ export const api = {
   // Resolves to { playing: null } whenever there's nothing shareable.
   nowPlaying: () => request('/api/me/now-playing'),
   matchPlaylist: (matchId) => request(`/api/matches/${matchId}/playlist`),
+  // Playback telemetry (src/routes/plays.ts) -- how often a listen actually
+  // runs long enough for Spotify to count the stream. Both are strictly
+  // fire-and-forget; a failure must never disturb playback.
+  recordPlay: (body) =>
+    request('/api/plays', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  markPlayCounted: (playId) => request(`/api/plays/${playId}/counted`, { method: 'POST' }),
   groupPlaylist: (groupId) => request(`/api/groups/${groupId}/playlist`),
   // `track` is the raw Spotify track object (from trackSearch/nowPlaying) --
   // the server needs its artists[] and album.images to resolve it into the

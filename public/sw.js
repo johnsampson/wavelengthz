@@ -207,8 +207,21 @@
 // /group?id=) was missing the cache for its HTML while still serving that
 // page's .js FROM the cache, so a release that changed both left an
 // installed PWA running new markup against a stale script. router.js's
-// import() also fails soft now instead of rejecting unhandled.
-const CACHE_NAME = 'wavelengthz-shell-v40';
+// import() also fails soft now instead of rejecting unhandled. v41 gives artists a
+// better shot at a counted stream, and makes the current rate visible.
+// Spotify pays a rightsholder once a track has been played 30 seconds, and
+// a swipe-shaped app has an obvious structural reason to rarely get there.
+// The Wavelengthz Player now starts a track partway in (public/
+// playHeuristics.js's hookOffsetMs -- new, added to this precache list)
+// rather than at 0:00, so the first 30 seconds is the hook rather than the
+// intro; Spotify counts 30s of playback wherever it started, so this changes
+// how long people stay, not whether a play counts. It also records each SDK
+// play and whether accumulated PLAYING time (not track position -- see
+// playHeuristics' createPlayProgress) crossed the threshold, via the new
+// POST /api/plays endpoints, so the counted share stops being invisible.
+// Nothing here touches the Free-tier iframe path, which exposes no JS API
+// and is therefore unobservable and uninfluenceable.
+const CACHE_NAME = 'wavelengthz-shell-v41';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -234,6 +247,7 @@ const APP_SHELL = [
   '/messages.js',
   '/group.js',
   '/trackPicker.js',
+  '/playHeuristics.js',
   '/tailwind.css',
   '/manifest.json',
   '/icons/icon-180.png',

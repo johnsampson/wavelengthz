@@ -192,9 +192,9 @@ describe('track picker', () => {
   it('plays a shared track through the persistent player bar', async () => {
     const picker = makePicker();
 
-    await picker.playSharedTrack({ id: 't1', spotifyId: 'sp1', name: 'Song', artistName: 'A', imageUrl: 'i' });
+    await picker.playSharedTrack({ id: 't1', spotifyId: 'sp1', name: 'Song', artistName: 'A', imageUrl: 'i', durationMs: 200000 });
 
-    expect(play).toHaveBeenCalledWith({ spotifyId: 'sp1', id: 't1', name: 'Song', artistName: 'A', imageUrl: 'i' });
+    expect(play).toHaveBeenCalledWith({ spotifyId: 'sp1', id: 't1', name: 'Song', artistName: 'A', imageUrl: 'i', durationMs: 200000 });
   });
 
   it('pauses instead of restarting when the tapped track is already playing', async () => {

@@ -15,6 +15,7 @@
 // same in-memory instance for the life of the document, so this state stays
 // intact across every client-side navigation.
 import { checkPlayerAvailability, playTrack, pausePlayback, resumePlayback, onStateChange } from './wavelengthzPlayer.js';
+import { hookOffsetMs, createPlayProgress, PLAY_THRESHOLD_MS } from './playHeuristics.js';
 import { api } from './app.js';
 import { showToast, showErrorToast } from './toast.js';
 
@@ -31,6 +32,52 @@ import { showToast, showErrorToast } from './toast.js';
 let currentTrack = null; // { spotifyId, id, name, artistName, imageUrl } | null
 let mode = null; // 'sdk' | 'iframe' | null -- null while currentTrack is set but availability hasn't resolved yet, or when currentTrack itself is null
 let sdkState = null; // { paused, position, duration } | null -- sdk mode only
+
+// Threshold tracking for the current SDK play (see migrations/0022). Measures
+// accumulated PLAYING time, not track position: playback may start at the
+// hook offset rather than 0:00, and pausing stops position while wall-clock
+// time keeps running -- so position alone would answer the wrong question.
+// A timer rather than the SDK's state events, because player_state_changed
+// fires on transitions (play/pause/seek/track change), not on a clock, so
+// waiting for an event that reports position >= threshold could wait forever
+// on a track nobody touches.
+let playProgress = null;
+let playThresholdTimer = null;
+let currentPlayId = null;
+let playThresholdReported = false;
+
+function clearPlayThresholdTimer() {
+  if (playThresholdTimer !== null) {
+    clearTimeout(playThresholdTimer);
+    playThresholdTimer = null;
+  }
+}
+
+// Fire-and-forget throughout: this is telemetry sitting behind someone
+// listening to music, and must never surface an error or block playback.
+function schedulePlayThreshold() {
+  clearPlayThresholdTimer();
+  if (playThresholdReported || !playProgress) return;
+  playThresholdTimer = setTimeout(() => {
+    playThresholdTimer = null;
+    if (playThresholdReported || !currentPlayId) return;
+    playThresholdReported = true;
+    api.markPlayCounted(currentPlayId).catch(() => {});
+  }, playProgress.remainingToThresholdMs());
+}
+
+function stopPlayTracking() {
+  clearPlayThresholdTimer();
+  playProgress = null;
+  currentPlayId = null;
+  playThresholdReported = false;
+}
+
+// Exported for tests only -- lets the suite observe threshold bookkeeping
+// without a real SDK or a real clock.
+export function _playTrackingStateForTests() {
+  return { currentPlayId, playThresholdReported, playedMs: playProgress ? playProgress.playedMs() : null };
+}
 let sdkListenerAttached = false;
 let mounted = false;
 
@@ -253,6 +300,9 @@ function hideIframe() {
 // nothing about navigating away from a page stops whatever's already
 // playing here either.
 export async function play(track) {
+  // Whatever was playing is over -- if it never reached the threshold, that
+  // stays recorded as an uncounted play, which is exactly the signal wanted.
+  stopPlayTracking();
   currentTrack = track;
   mode = null; // renders the neutral loading state below, not a guess at sdk/iframe
   sdkState = null;
@@ -262,16 +312,48 @@ export async function play(track) {
   let resolvedMode = pickMode(availability);
 
   if (resolvedMode === 'sdk') {
-    const started = await playTrack(track.spotifyId);
+    // Start at the hook rather than 0:00 -- most songs open on an intro, so
+    // 0:00 puts the least compelling part of the track in exactly the first
+    // 30 seconds that decide whether the stream counts. Falls back to 0 for
+    // an unknown or too-short duration.
+    const startPositionMs = hookOffsetMs(track.durationMs);
+    const started = await playTrack(track.spotifyId, { positionMs: startPositionMs });
     if (started) {
       mode = 'sdk';
       hideIframe();
+
+      playProgress = createPlayProgress(() => Date.now());
+      playProgress.start();
+      playThresholdReported = false;
+      schedulePlayThreshold();
+      // Recorded after playback actually started, so an attempt that failed
+      // never lands in the denominator. Fire-and-forget: no playId simply
+      // means this one play goes unmeasured.
+      api
+        .recordPlay({ spotifyTrackId: track.spotifyId, trackId: track.id ?? null, startPositionMs })
+        .then((res) => {
+          currentPlayId = res?.playId ?? null;
+        })
+        .catch(() => {});
+
       if (!sdkListenerAttached) {
         sdkListenerAttached = true;
         onStateChange((state) => {
           if (!currentTrack || !state) return;
           if (state.track_window?.current_track?.id !== currentTrack.spotifyId) return;
+          const wasPaused = !sdkState || sdkState.paused;
           sdkState = { paused: state.paused, position: state.position, duration: state.duration };
+          // Keep accumulated playing time honest across pause/resume, and
+          // re-arm the timer for whatever is still owed.
+          if (playProgress) {
+            if (state.paused) {
+              playProgress.pause();
+              clearPlayThresholdTimer();
+            } else if (wasPaused) {
+              playProgress.resume();
+              schedulePlayThreshold();
+            }
+          }
           renderChrome();
         });
       }
@@ -319,6 +401,7 @@ export async function hide() {
   currentTrack = null;
   mode = null;
   sdkState = null;
+  stopPlayTracking();
   hideIframe();
   renderChrome();
 }
@@ -360,6 +443,7 @@ export function _resetForTests() {
   currentTrack = null;
   mode = null;
   sdkState = null;
+  stopPlayTracking();
   sdkListenerAttached = false;
   mounted = false;
 }

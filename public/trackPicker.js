@@ -169,6 +169,7 @@ export function createTrackPicker(deps) {
         name: track.name,
         artistName: track.artistName,
         imageUrl: track.imageUrl,
+        durationMs: track.durationMs ?? null,
       });
     },
   };
