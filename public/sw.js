@@ -291,12 +291,20 @@
 // its now-playing fetch rather than after -- an await loses the tap gesture
 // entirely, so focusing afterward could never have worked on iOS regardless
 // of scheduling. domUtils.js is new and precached.
-// v51 adds a swipe-left-to-reveal-trash gesture to the player bar
+// v51 fixes issue #108's "the thumb down icon is not right on track card":
+// artist.html's per-track Pass button rendered its thumbs-down SVG a size
+// smaller (h-4 w-4) than its sibling Play button (h-5 w-5) in the same h-9
+// w-9 circle -- the glyph itself was already correct (the same Feather
+// thumbs-down path the deck's own Pass button uses), just undersized. Also
+// replaces the per-track and per-artist Like buttons' raw "♥" text glyph
+// with the same heart SVG path the player bar and deck use, per the issue's
+// "align... same like/heart, etc." ask.
+// v52 adds a swipe-left-to-reveal-trash gesture to the player bar
 // (public/playerBar.js) for closing it, alongside the existing explicit X
 // button (issue #108: "align the radio player w/ the tracks view... maybe
 // make the radio a swipe left that exposes a trash can to close the
 // radio?"). No new precached files, but playerBar.js's content changed.
-const CACHE_NAME = 'wavelengthz-shell-v51';
+const CACHE_NAME = 'wavelengthz-shell-v52';
 const APP_SHELL = [
   '/',
   '/app.js',

@@ -41,11 +41,19 @@
              the per-track like buttons below. -->
         <button
           type="button"
-          class="btn-primary h-11 w-11 shrink-0 rounded-full text-lg"
+          class="btn-primary h-11 w-11 shrink-0 rounded-full"
           :class="artist.direction === 'right' ? 'ring-2 ring-white' : ''"
           @click="likeArtist()"
           :aria-label="artist.direction === 'right' ? 'Liked' : 'Like this artist'"
-        >♥</button>
+        >
+          <!-- Same heart SVG as the per-track like buttons and the player
+               bar (playerBar.js's likeButtonHtml), not the raw "♥" text
+               glyph this used to be -- issue #108's "align... same
+               like/heart, etc." -->
+          <svg viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-5 w-5">
+            <path d="M12 21C2 15 2 10 3 7L7 11L12 7L17 11L21 7C22 10 22 15 12 21Z" />
+          </svg>
+        </button>
       </div>
 
       <ul class="flex flex-col gap-2">
@@ -71,21 +79,38 @@
                 </svg>
               </button>
               <button
-                class="btn-secondary h-9 w-9 rounded-full text-sm"
+                class="btn-secondary h-9 w-9 rounded-full"
                 :class="track.direction === 'left' ? 'ring-2 ring-neutral-400' : ''"
                 @click="swipeTrack(track, 'left')"
                 aria-label="Pass"
               >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto h-4 w-4">
+                <!-- Sized to match this row's own Play button (h-5 w-5 in
+                     the same h-9 w-9 circle) and the player bar's icon set
+                     (playerBar.js's likeButtonHtml uses the same pairing) --
+                     issue #108: "the thumb down icon is not right on track
+                     card" was this icon sitting a size smaller than its
+                     siblings, not the glyph itself (it's the same Feather
+                     thumbs-down path used correctly on the deck's Pass
+                     button). -->
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto h-5 w-5">
                   <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
                 </svg>
               </button>
               <button
-                class="btn-primary h-9 w-9 rounded-full text-sm"
+                class="btn-primary h-9 w-9 rounded-full"
                 :class="track.direction === 'right' ? 'ring-2 ring-white' : ''"
                 @click="swipeTrack(track, 'right')"
                 aria-label="Like"
-              >♥</button>
+              >
+                <!-- Was a raw "♥" text glyph -- a different icon system from
+                     every other heart in the app (the deck's Like button,
+                     the player bar's). Issue #108 asked for the player bar
+                     and the track view to share "same like/heart, etc." --
+                     this is that, using the exact same path. -->
+                <svg viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-5 w-5">
+                  <path d="M12 21C2 15 2 10 3 7L7 11L12 7L17 11L21 7C22 10 22 15 12 21Z" />
+                </svg>
+              </button>
             </div>
           </li>
         </template>
