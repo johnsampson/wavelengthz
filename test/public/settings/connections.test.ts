@@ -9,11 +9,17 @@ beforeEach(() => {
 });
 
 const OFF_SYNC = { enabled: false, connected: false, playlistUrl: null, lastSyncedAt: null, pendingCount: 0, syncedCount: 0 };
+const OFF_FOLLOW = { enabled: false, connected: false, lastSyncedAt: null, pendingCount: 0, followedCount: 0 };
 
-function stubApi(user: Record<string, unknown>, sync: Record<string, unknown> = OFF_SYNC) {
+function stubApi(
+  user: Record<string, unknown>,
+  sync: Record<string, unknown> = OFF_SYNC,
+  follow: Record<string, unknown> = OFF_FOLLOW
+) {
   const fetchMock = vi.fn(async (path: string) => {
     if (path === '/api/me') return new Response(JSON.stringify({ user, hasSpotify: user.hasSpotify ?? false }), { status: 200 });
     if (path === '/api/me/playlist-sync') return new Response(JSON.stringify(sync), { status: 200 });
+    if (path === '/api/me/follow-sync') return new Response(JSON.stringify(follow), { status: 200 });
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -230,6 +236,103 @@ describe('connections page', () => {
 
     expect(app.sync!.enabled).toBe(false);
     expect(app.info).toContain('stay there');
+    vi.unstubAllGlobals();
+  });
+
+  it('loads both destinations independently when Spotify is linked', async () => {
+    stubApi(
+      { id: 'u1', hasSpotify: true },
+      { ...OFF_SYNC, enabled: true, connected: true },
+      { ...OFF_FOLLOW, enabled: false, connected: false, pendingCount: 12 }
+    );
+    vi.stubGlobal('window', { location: { search: '' }, history: { replaceState: () => {} } });
+    const app = createConnectionsApp();
+
+    await app.init();
+
+    // Playlist on, following off -- the two must never imply each other.
+    expect(app.sync!.enabled).toBe(true);
+    expect(app.follow!.enabled).toBe(false);
+    expect(app.follow!.pendingCount).toBe(12);
+    vi.unstubAllGlobals();
+  });
+
+  it('sends the user through a separate consent trip to enable following', async () => {
+    const fetchMock = stubApi({ id: 'u1', hasSpotify: true });
+    const fakeWindow = { location: { href: '', search: '' }, history: { replaceState: () => {} } };
+    vi.stubGlobal('window', fakeWindow);
+    const app = createConnectionsApp();
+
+    app.enableFollow();
+
+    expect(fakeWindow.location.href).toBe('/login/spotify?intent=follow');
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('confirms following is on after returning from consent', async () => {
+    stubApi({ id: 'u1', hasSpotify: true });
+    const fakeWindow = { location: { search: '?follow_enabled=1' }, history: { replaceState: vi.fn() } };
+    vi.stubGlobal('window', fakeWindow);
+    const app = createConnectionsApp();
+
+    await app.init();
+
+    expect(app.info).toContain('Following is on');
+    expect(fakeWindow.history.replaceState).toHaveBeenCalledWith({}, '', '/settings/connections');
+    vi.unstubAllGlobals();
+  });
+
+  it('says nothing changed when follow consent was declined', async () => {
+    stubApi({ id: 'u1', hasSpotify: true });
+    vi.stubGlobal('window', { location: { search: '?follow_error=denied' }, history: { replaceState: vi.fn() } });
+    const app = createConnectionsApp();
+
+    await app.init();
+
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('Nothing was changed'));
+    vi.unstubAllGlobals();
+  });
+
+  it('reports how many artists were followed', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ followed: 1, status: { ...OFF_FOLLOW, enabled: true, connected: true } }),
+      { status: 200 }
+    )));
+    vi.stubGlobal('window', { location: { search: '' }, history: { replaceState: () => {} } });
+    const app = createConnectionsApp();
+
+    await app.followNow();
+
+    expect(app.info).toBe('Followed 1 artist on Spotify.');
+    expect(app.following).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it('makes clear that turning following off leaves existing follows alone', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ ...OFF_FOLLOW, connected: true, followedCount: 9 }),
+      { status: 200 }
+    )));
+    vi.stubGlobal('window', { location: { search: '' }, history: { replaceState: () => {} } });
+    const app = createConnectionsApp();
+
+    await app.disableFollow();
+
+    expect(app.follow!.enabled).toBe(false);
+    expect(app.info).toContain('stay followed');
+    vi.unstubAllGlobals();
+  });
+
+  it('ignores a second Follow now tap while one is running', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ followed: 0, status: OFF_FOLLOW }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('window', { location: { search: '' }, history: { replaceState: () => {} } });
+    const app = createConnectionsApp();
+
+    await Promise.all([app.followNow(), app.followNow()]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
   });
 });

@@ -244,6 +244,15 @@ const SCOPES = [
 // effect nobody asked for by flipping a sync toggle.
 export const PLAYLIST_SYNC_SCOPE = 'playlist-modify-private';
 
+// The second write scope, for opt-in following of liked artists
+// (src/lib/followSync.ts). Everything said about PLAYLIST_SYNC_SCOPE above
+// applies, plus one thing that makes this one MORE sensitive rather than
+// less: a follow is outward-facing. It shows on the user's Spotify profile
+// to anyone who looks, and it feeds their Release Radar. A private playlist
+// changes nothing anyone else can see; this does. Hence its own toggle and
+// its own consent trip, never bundled with playlist sync.
+export const FOLLOW_SYNC_SCOPE = 'user-follow-modify';
+
 // redirectUri defaults to env.SPOTIFY_REDIRECT_URI, but callers on an
 // allowlisted alternate host (src/routes/auth.ts's SPOTIFY_ALLOWED_HOSTS)
 // pass their own host's callback URL instead -- Spotify's token exchange
@@ -760,4 +769,21 @@ export async function playlistIsWritable(token: string, playlistId: string, spot
   if (!res.ok) throw new SpotifyWriteError(res.status, `Spotify playlist fetch failed: ${res.status} ${await res.text()}`);
   const data = await res.json<{ owner?: { id?: string } }>();
   return data.owner?.id === spotifyUserId;
+}
+
+// Spotify's documented ceiling for the follow endpoint -- half the playlist
+// one, so it needs its own constant rather than reusing PLAYLIST_ADD_MAX_URIS.
+export const FOLLOW_MAX_IDS = 50;
+
+export async function followArtists(token: string, artistIds: string[]): Promise<void> {
+  if (artistIds.length === 0) return;
+  if (artistIds.length > FOLLOW_MAX_IDS) {
+    throw new Error(`followArtists called with ${artistIds.length} ids, max is ${FOLLOW_MAX_IDS}`);
+  }
+  const res = await spotifyFetch(`https://api.spotify.com/v1/me/following?type=artist`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: artistIds }),
+  });
+  if (!res.ok) throw new SpotifyWriteError(res.status, `Spotify follow failed: ${res.status} ${await res.text()}`);
 }

@@ -1,6 +1,7 @@
 import type { IRequest, RouterType } from 'itty-router';
-import { PLAYLIST_SYNC_SCOPE, buildAuthUrl, exchangeCodeForToken, fetchSpotifyProfile } from '../lib/spotify';
+import { FOLLOW_SYNC_SCOPE, PLAYLIST_SYNC_SCOPE, buildAuthUrl, exchangeCodeForToken, fetchSpotifyProfile } from '../lib/spotify';
 import { hasPlaylistScope, setSyncEnabled } from '../lib/playlistSync';
+import { hasFollowScope, setFollowSyncEnabled } from '../lib/followSync';
 import { encrypt } from '../lib/crypto';
 import { createSession, requestIsSecure, requestProtocol, getSessionUser } from '../lib/session';
 import { buildGoogleAuthUrl, exchangeGoogleCode, fetchGoogleProfile } from '../lib/google';
@@ -66,7 +67,12 @@ export function registerAuthRoutes(router: RouterType) {
     // trip is unavoidable here -- a refresh cannot gain a scope the original
     // consent didn't include -- so this exists to make that trip a deliberate,
     // explained one rather than a mystery re-login.
-    const extraScopes = intent === 'sync' ? [PLAYLIST_SYNC_SCOPE] : [];
+    // Each write destination asks for its own scope and nothing more --
+    // ?intent=sync never smuggles in follow access, and vice versa. Consent
+    // to one must not imply the other, which is the whole reason they are
+    // separate toggles.
+    const extraScopes =
+      intent === 'sync' ? [PLAYLIST_SYNC_SCOPE] : intent === 'follow' ? [FOLLOW_SYNC_SCOPE] : [];
 
     // requestProtocol, not url.protocol: see the comment on requestIsSecure
     // in session.ts -- a Cloudflare Tunnel to a local instance reports http
@@ -83,7 +89,7 @@ export function registerAuthRoutes(router: RouterType) {
     // connections page with the sync result.
     const headers = new Headers({ Location: authUrl });
     headers.append('Set-Cookie', `wl_oauth_state=${state}; Path=/; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Lax; Max-Age=600`);
-    if (intent === 'connect' || intent === 'sync') {
+    if (intent === 'connect' || intent === 'sync' || intent === 'follow') {
       headers.append('Set-Cookie', `wl_oauth_intent=${intent}; Path=/; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Lax; Max-Age=600`);
     }
     return new Response(null, { status: 302, headers });
@@ -230,7 +236,7 @@ export function registerAuthRoutes(router: RouterType) {
     const intentCookie = parseCookie(request, 'wl_oauth_intent');
     const clearIntentCookie = 'wl_oauth_intent=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0';
 
-    if (intentCookie === 'connect' || intentCookie === 'sync') {
+    if (intentCookie === 'connect' || intentCookie === 'sync' || intentCookie === 'follow') {
       const currentUser = await getSessionUser(request, env.DB);
       if (currentUser) {
         const claimedBy = await env.DB.prepare(
@@ -251,6 +257,21 @@ export function registerAuthRoutes(router: RouterType) {
           ).bind(crypto.randomUUID(), currentUser.id, profile.id, profile.email ?? null, now, now),
           tokenStatement(currentUser.id),
         ]);
+
+        if (intentCookie === 'follow') {
+          // Same rule as playlist sync: only flip the flag if Spotify
+          // actually granted the scope, since the consent screen has its own
+          // cancel/partial paths and a toggle claiming a grant that didn't
+          // happen would be a lie the token can't back.
+          const granted = hasFollowScope(grantedScope);
+          if (granted) await setFollowSyncEnabled(env.DB, currentUser.id, true, now);
+
+          const headers = new Headers({
+            Location: granted ? '/settings/connections?follow_enabled=1' : '/settings/connections?follow_error=denied',
+          });
+          headers.append('Set-Cookie', clearIntentCookie);
+          return new Response(null, { status: 302, headers });
+        }
 
         if (intentCookie === 'sync') {
           // Only flip sync on if Spotify actually granted the write scope --

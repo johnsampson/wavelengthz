@@ -81,6 +81,51 @@
       </div>
     </template>
   </div>
+
+  <!-- Following liked artists. A second, separate card on purpose: this one
+       is OUTWARD-FACING -- a follow shows on the user's Spotify profile and
+       feeds their Release Radar -- so it gets its own consent and its own
+       toggle rather than riding along with the private playlist above. -->
+  <div x-show="!loading && hasSpotify && follow" class="mx-auto mb-4 max-w-md rounded-2xl border border-white/10 bg-surface/60 p-4">
+    <h2 class="font-semibold text-neutral-100">Follow artists you like</h2>
+    <p class="mt-1 text-sm text-neutral-400">
+      Follows an artist on Spotify when you like them here. Your Spotify profile shows who you follow,
+      and followed artists appear in your Release Radar.
+    </p>
+
+    <template x-if="follow && !follow.enabled">
+      <div class="mt-3">
+        <button type="button" @click="enableFollow()" class="btn-primary w-full">Turn on following</button>
+        <p class="mt-2 text-xs text-neutral-500">
+          A separate Spotify approval from playlist sync -- turning one on never turns on the other.
+        </p>
+      </div>
+    </template>
+
+    <template x-if="follow && follow.enabled">
+      <div class="mt-3 space-y-3">
+        <p class="text-sm text-brand-400" role="status">
+          On<span x-show="follow.followedCount > 0" x-text="` -- ${follow.followedCount} artists followed`"></span>
+        </p>
+
+        <p x-show="follow.pendingCount > 0" class="text-sm text-neutral-300">
+          <span x-text="follow.pendingCount"></span>
+          <span x-text="follow.pendingCount === 1 ? 'liked artist is not followed yet.' : 'liked artists are not followed yet.'"></span>
+        </p>
+
+        <button type="button" @click="followNow()" :disabled="following" class="btn-primary w-full disabled:opacity-50">
+          <span x-text="following ? 'Following...' : 'Follow now'"></span>
+        </button>
+
+        <button type="button" @click="disableFollow()" class="w-full text-center text-sm text-neutral-400 underline">
+          Turn off following
+        </button>
+        <p class="text-xs text-neutral-500">
+          Turning it off stops new follows. Artists you already follow stay followed.
+        </p>
+      </div>
+    </template>
+  </div>
   </div>
 
   <script type="module">

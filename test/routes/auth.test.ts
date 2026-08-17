@@ -36,6 +36,25 @@ describe('GET /login/spotify', () => {
     expect(syncScope).toContain('streaming');
   });
 
+  it('asks for the follow scope only on ?intent=follow, and never alongside the playlist one', async () => {
+    // The rule the separate toggles exist to enforce: consenting to one write
+    // destination must not silently grant the other.
+    const follow = await worker.fetch(new Request('http://127.0.0.1:8787/login/spotify?intent=follow'), env, {} as ExecutionContext);
+    const followScope = new URL(follow.headers.get('Location')!).searchParams.get('scope')!;
+    expect(followScope).toContain('user-follow-modify');
+    expect(followScope).not.toContain('playlist-modify-private');
+
+    const sync = await worker.fetch(new Request('http://127.0.0.1:8787/login/spotify?intent=sync'), env, {} as ExecutionContext);
+    const syncScope = new URL(sync.headers.get('Location')!).searchParams.get('scope')!;
+    expect(syncScope).toContain('playlist-modify-private');
+    expect(syncScope).not.toContain('user-follow-modify');
+  });
+
+  it('marks the follow upgrade trip with its own intent cookie', async () => {
+    const res = await worker.fetch(new Request('http://127.0.0.1:8787/login/spotify?intent=follow'), env, {} as ExecutionContext);
+    expect(res.headers.getAll('Set-Cookie').join('; ')).toContain('wl_oauth_intent=follow');
+  });
+
   it('marks the sync upgrade trip with its own intent cookie', async () => {
     const res = await worker.fetch(new Request('http://127.0.0.1:8787/login/spotify?intent=sync'), env, {} as ExecutionContext);
     const cookies = res.headers.getAll('Set-Cookie').join('; ');

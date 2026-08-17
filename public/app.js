@@ -103,6 +103,9 @@ export const api = {
   playlistSync: () => request('/api/me/playlist-sync'),
   disablePlaylistSync: () => request('/api/me/playlist-sync/disable', { method: 'POST' }),
   runPlaylistSync: () => request('/api/me/playlist-sync/run', { method: 'POST' }),
+  followSync: () => request('/api/me/follow-sync'),
+  disableFollowSync: () => request('/api/me/follow-sync/disable', { method: 'POST' }),
+  runFollowSync: () => request('/api/me/follow-sync/run', { method: 'POST' }),
   messagingStatus: () => request('/api/me/messaging-status'),
   /** @param {string} phoneNumber - E.164, e.g. "+15551234567" */
   startPhoneVerification: (phoneNumber) =>
