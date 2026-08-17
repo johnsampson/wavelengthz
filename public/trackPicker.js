@@ -2,6 +2,7 @@ import { api } from './app.js';
 import { debounce } from './search.js';
 import { showErrorToast } from './toast.js';
 import { play, togglePlayPause, isCurrentTrack } from './playerBar.js';
+import { focusAfterReveal } from './domUtils.js';
 
 // Shared by messages.js (1:1 match threads) and group.js (group threads) --
 // sharing a song, and the running playlist it accumulates into, work
@@ -44,13 +45,20 @@ export function createTrackPicker(deps) {
       this.trackQuery = '';
       this.trackResults = [];
       this.trackCaption = '';
+      this.nowPlaying = null;
+      this.nowPlayingRaw = null;
+      // Focused BEFORE the await below, not after (issue #108). An `await`
+      // yields to the event loop and loses whatever's left of the tap
+      // gesture that opened this modal, so focusing after the nowPlaying
+      // fetch could never reliably open iOS's keyboard no matter how the
+      // focus() call itself was scheduled -- see domUtils.js's
+      // focusAfterReveal for why it isn't a plain $nextTick(() => ...focus()).
+      focusAfterReveal(this.$nextTick.bind(this), this.$refs.trackSearchInput);
       // Fetched on open rather than on page load: it's a live Spotify call
       // per open, and it goes stale within a song's length anyway, so
       // fetching it up front would be both wasteful and frequently wrong.
       // Silently leaves nowPlaying null on any failure -- the button just
       // doesn't appear and search still works.
-      this.nowPlaying = null;
-      this.nowPlayingRaw = null;
       try {
         const res = await api.nowPlaying();
         if (res.playing) {
@@ -60,7 +68,6 @@ export function createTrackPicker(deps) {
       } catch (e) {
         // Not connected to Spotify, nothing playing, or a transient failure.
       }
-      this.$nextTick(() => this.$refs.trackSearchInput?.focus());
     },
 
     closeTrackPicker() {

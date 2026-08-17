@@ -281,7 +281,17 @@
 // changed). Brand-new route and script, so both MUST be in APP_SHELL from
 // this version or a first visit 404s offline. Says nothing at all below a
 // noise floor rather than reporting a trend from two swipes.
-const CACHE_NAME = 'wavelengthz-shell-v49';
+// v50 fixes issue #108's "search bar focus dies not open keyboard without a
+// 2nd click" on iOS Safari, in both the deck's artist search (index.js) and
+// the track-share picker (trackPicker.js) -- new public/domUtils.js's
+// focusAfterReveal() replaces a bare $nextTick(() => ...focus()) with
+// $nextTick + requestAnimationFrame, which keeps the focus() call inside the
+// browser's gesture-linked paint pipeline instead of a microtask iOS drops
+// the gesture link across. trackPicker.js's picker also now focuses BEFORE
+// its now-playing fetch rather than after -- an await loses the tap gesture
+// entirely, so focusing afterward could never have worked on iOS regardless
+// of scheduling. domUtils.js is new and precached.
+const CACHE_NAME = 'wavelengthz-shell-v50';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -293,6 +303,7 @@ const APP_SHELL = [
   '/search.js',
   '/photos.js',
   '/toast.js',
+  '/domUtils.js',
   '/alpine.js',
   '/playerBar.js',
   '/wavelengthzPlayer.js',
