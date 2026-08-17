@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { hookOffsetMs, createPlayProgress, isTrackEnd, RADIO_MAX_CONSECUTIVE, PLAY_THRESHOLD_MS } from '../../public/playHeuristics.js';
+import {
+  hookOffsetMs,
+  createPlayProgress,
+  isTrackEnd,
+  isDeviceGoneEnd,
+  radioAdvanceDelayMs,
+  RADIO_ADVANCE_GRACE_MS,
+  RADIO_MAX_CONSECUTIVE,
+  PLAY_THRESHOLD_MS,
+} from '../../public/playHeuristics.js';
 
 describe('hookOffsetMs', () => {
   it('starts a normal-length track partway in, not at 0:00', () => {
@@ -165,5 +174,61 @@ describe('isTrackEnd', () => {
     // asked for -- see its comment in playHeuristics.js.
     expect(RADIO_MAX_CONSECUTIVE).toBeGreaterThan(0);
     expect(RADIO_MAX_CONSECUTIVE).toBeLessThanOrEqual(30);
+  });
+});
+
+describe('radioAdvanceDelayMs', () => {
+  it('schedules for the time actually left in the track, plus a little grace', () => {
+    expect(radioAdvanceDelayMs(150_000, 180_000)).toBe(30_000 + RADIO_ADVANCE_GRACE_MS);
+  });
+
+  it('accounts for a hook-offset start rather than assuming playback began at 0:00', () => {
+    // Started 36s in on a 3-minute track: 144s left, not 180s. Getting this
+    // wrong would advance a full 36 seconds late, every single track.
+    expect(radioAdvanceDelayMs(36_000, 180_000)).toBe(144_000 + RADIO_ADVANCE_GRACE_MS);
+  });
+
+  it('gives up rather than guessing when the duration is unknown', () => {
+    // A track stored before migrations/0022 has no duration. Radio simply
+    // does not advance on the clock for it -- isTrackEnd is still the backup.
+    expect(radioAdvanceDelayMs(10_000, null as any)).toBeNull();
+    expect(radioAdvanceDelayMs(10_000, undefined as any)).toBeNull();
+    expect(radioAdvanceDelayMs(10_000, 0)).toBeNull();
+    expect(radioAdvanceDelayMs(10_000, NaN)).toBeNull();
+  });
+
+  it('gives up on a nonsense position rather than arming a bogus timer', () => {
+    expect(radioAdvanceDelayMs(-1, 180_000)).toBeNull();
+    expect(radioAdvanceDelayMs(NaN, 180_000)).toBeNull();
+  });
+
+  it('returns null once position is already at or past the end', () => {
+    expect(radioAdvanceDelayMs(180_000, 180_000)).toBeNull();
+    expect(radioAdvanceDelayMs(200_000, 180_000)).toBeNull();
+  });
+
+  it('leaves enough grace that a clean SDK ending wins the race', () => {
+    // The timer is the reliable signal, but the SDK's own ending -- when it
+    // comes -- is more precise. Grace exists so it gets there first.
+    expect(RADIO_ADVANCE_GRACE_MS).toBeGreaterThan(0);
+    expect(RADIO_ADVANCE_GRACE_MS).toBeLessThanOrEqual(3000);
+  });
+});
+
+describe('isDeviceGoneEnd', () => {
+  it('treats a null state as an ending when the track had been progressing', () => {
+    // The regression this whole fix exists for: the SDK emits a null state
+    // ("device no longer active") when a single-uri context runs out, and
+    // discarding it meant radio never advanced in a real session.
+    expect(isDeviceGoneEnd({ spotifyId: 'sp1', position: 178_000, paused: false })).toBe(true);
+  });
+
+  it('does not fire when nothing had played yet', () => {
+    expect(isDeviceGoneEnd({ spotifyId: 'sp1', position: 0, paused: false })).toBe(false);
+  });
+
+  it('does not fire without a snapshot to judge against', () => {
+    expect(isDeviceGoneEnd(null)).toBe(false);
+    expect(isDeviceGoneEnd(undefined)).toBe(false);
   });
 });

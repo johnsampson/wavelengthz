@@ -11,7 +11,10 @@ export function createConnectionsApp() {
 
     // Playlist sync. `sync` mirrors GET /api/me/playlist-sync exactly; null
     // until loaded so the section can stay hidden rather than flashing a
-    // wrong "off" state on first paint.
+    // wrong "off" state on first paint. Annotated because a bare `null`
+    // initializer infers as type `null`, which makes every later property
+    // read an error under checkJs.
+    /** @type {{enabled: boolean, connected: boolean, playlistUrl: string | null, lastSyncedAt: number | null, pendingCount: number, syncedCount: number} | null} */
     sync: null,
     syncing: false,
 
