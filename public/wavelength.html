@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wavelengthz — Your wavelength</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/tailwind.css" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+</head>
+<body class="min-h-dvh bg-base text-neutral-50 p-4 pb-app">
+  <div id="wl-header-root"></div>
+  <div id="wl-app-root" x-data="pageApp()">
+  <a href="/settings" class="mx-auto mb-2 block max-w-md text-sm text-neutral-400">&larr; Settings</a>
+  <h1 class="mx-auto mb-1 max-w-md text-2xl font-bold">Your wavelength</h1>
+  <p class="mx-auto mb-4 max-w-md text-sm text-neutral-500">
+    How your taste has shifted over the last <span x-text="drift ? drift.windowDays : 30"></span> days,
+    compared with the <span x-text="drift ? drift.windowDays : 30"></span> before that.
+  </p>
+
+  <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
+  <p x-show="loading" class="mx-auto max-w-md text-sm text-neutral-500">Working it out...</p>
+
+  <template x-if="!loading && drift">
+    <div class="mx-auto max-w-md">
+      <p x-show="headline" x-text="headline" class="mb-4 text-lg font-semibold text-brand-400"></p>
+
+      <!-- Not enough listening to say anything honest. Says so plainly and
+           points at the thing that would fix it, rather than showing empty
+           charts. -->
+      <div x-show="drift.insufficientData" class="card p-4">
+        <p class="text-sm text-neutral-300">Not enough listening yet to see a trend.</p>
+        <p class="mt-1 text-sm text-neutral-500">
+          Like a few more artists and songs and this fills in on its own.
+        </p>
+        <a href="/" class="btn-primary mt-3 block w-full text-center">Back to the deck</a>
+      </div>
+
+      <template x-if="!drift.insufficientData">
+        <div class="space-y-4">
+          <div x-show="drift.rising.length" class="card p-4">
+            <h2 class="mb-2 text-sm font-semibold text-neutral-200">Moving toward</h2>
+            <ul class="space-y-1">
+              <template x-for="entry in drift.rising" :key="entry.genre">
+                <li class="flex items-center justify-between text-sm">
+                  <span class="text-neutral-200" x-text="entry.genre"></span>
+                  <span class="text-brand-400" x-text="delta(entry)"></span>
+                </li>
+              </template>
+            </ul>
+          </div>
+
+          <div x-show="drift.falling.length" class="card p-4">
+            <h2 class="mb-2 text-sm font-semibold text-neutral-200">Playing less</h2>
+            <ul class="space-y-1">
+              <template x-for="entry in drift.falling" :key="entry.genre">
+                <li class="flex items-center justify-between text-sm">
+                  <span class="text-neutral-200" x-text="entry.genre"></span>
+                  <span class="text-neutral-400" x-text="delta(entry)"></span>
+                </li>
+              </template>
+            </ul>
+          </div>
+
+          <div x-show="!drift.rising.length && !drift.falling.length" class="card p-4">
+            <p class="text-sm text-neutral-300">Your taste held steady this month.</p>
+            <p class="mt-1 text-sm text-neutral-500">No genre moved enough to call it a trend.</p>
+          </div>
+
+          <p class="text-xs text-neutral-500">
+            Based on <span x-text="drift.likesInWindow"></span> likes in the last
+            <span x-text="drift.windowDays"></span> days.
+          </p>
+        </div>
+      </template>
+    </div>
+  </template>
+  </div>
+
+  <script type="module">
+    import { createWavelengthApp } from '/wavelength.js';
+    import { mountHeader, mountNav } from '/nav.js';
+    import { mountPlayerBar } from '/playerBar.js';
+    import '/router.js';
+    mountHeader();
+    mountNav();
+    mountPlayerBar();
+
+    window.pageApp = createWavelengthApp;
+  </script>
+  <script defer src="/alpine.js"></script>
+  <div id="wl-player-root" class="wl-gpu-layer fixed inset-x-0 z-10" style="bottom: var(--wl-nav-h)">
+    <div id="wl-player-chrome" class="border-t border-white/10 bg-surface/90 backdrop-blur-lg"></div>
+    <div id="wl-player-iframe-host" class="hidden border-t border-white/10 bg-surface/90 backdrop-blur-lg"></div>
+  </div>
+  <div id="wl-nav-root"></div>
+</body>
+</html>

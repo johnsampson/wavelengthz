@@ -24,11 +24,13 @@ Overlaps with the earlier `2026-08-09-idea-now-playing-presence.md`, which cover
 
 Get both right and it's the most differentiated surface in the app.
 
-## 4. Taste drift — your own mirror
+## 4. Taste drift — your own mirror ✅ shipped (#107)
 
-*"Your wavelength moved toward ambient this month. Here's who moved with you."*
+*"Your wavelength moved toward ambient this month."*
 
-Wrapped/Strava-style self-data is a proven return driver, and the data already exists in `music_profiles` and `user_genres`. Weekly rhythm rather than daily — but nearly free to build, which makes the ratio unusually good.
+Lives at `/wavelength`, linked from Settings. One correction to the note above: **`user_genres` turned out to be the wrong source.** It holds running totals with no history, so it can say what someone likes but never what changed. `music_swipes`' own timestamps are what make a before/after comparison possible, and that's what shipped.
+
+**Not** built: the *"here's who moved with you"* half. That needs cross-user comparison and is a genuinely different feature — worth doing once there are enough users for the answer to be interesting.
 
 ## 5. Local scene
 

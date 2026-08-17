@@ -106,6 +106,7 @@ export const api = {
   followSync: () => request('/api/me/follow-sync'),
   disableFollowSync: () => request('/api/me/follow-sync/disable', { method: 'POST' }),
   runFollowSync: () => request('/api/me/follow-sync/run', { method: 'POST' }),
+  tasteDrift: () => request('/api/me/taste-drift'),
   messagingStatus: () => request('/api/me/messaging-status'),
   /** @param {string} phoneNumber - E.164, e.g. "+15551234567" */
   startPhoneVerification: (phoneNumber) =>
