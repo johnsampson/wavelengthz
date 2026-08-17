@@ -281,7 +281,15 @@
 // changed). Brand-new route and script, so both MUST be in APP_SHELL from
 // this version or a first visit 404s offline. Says nothing at all below a
 // noise floor rather than reporting a trend from two swipes.
-const CACHE_NAME = 'wavelengthz-shell-v49';
+// v50 clarifies that photos are genuinely optional at onboarding (issue
+// #108: "don't require photos on onboarding"). Nothing in onboarding.html's
+// submit() or POST /api/onboarding was ever actually gated on photo count --
+// the count next to a file-upload control right before Continue just read as
+// mandatory with nothing saying otherwise. Now explicitly labeled optional,
+// with a note that messaging (messagingGate.ts's MIN_PHOTOS) does need a few
+// eventually, said here so that isn't a surprise met for the first time deep
+// in Settings after onboarding is already done.
+const CACHE_NAME = 'wavelengthz-shell-v50';
 const APP_SHELL = [
   '/',
   '/app.js',
