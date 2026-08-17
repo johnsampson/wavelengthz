@@ -15,7 +15,7 @@
 // same in-memory instance for the life of the document, so this state stays
 // intact across every client-side navigation.
 import { checkPlayerAvailability, playTrack, pausePlayback, resumePlayback, onStateChange } from './wavelengthzPlayer.js';
-import { hookOffsetMs, createPlayProgress, PLAY_THRESHOLD_MS } from './playHeuristics.js';
+import { hookOffsetMs, createPlayProgress, isTrackEnd, RADIO_MAX_CONSECUTIVE, PLAY_THRESHOLD_MS } from './playHeuristics.js';
 import { api } from './app.js';
 import { showToast, showErrorToast } from './toast.js';
 
@@ -75,8 +75,54 @@ function stopPlayTracking() {
 
 // Exported for tests only -- lets the suite observe threshold bookkeeping
 // without a real SDK or a real clock.
+// Radio: when a track finishes on its own, roll into the next one by the
+// same artist rather than falling silent. Universal -- wherever playback was
+// started from, it continues the same way. Deliberately NOT an autoplay: it
+// only ever continues something the listener explicitly started, and arriving
+// anywhere in the app (the deck especially) still starts nothing on its own.
+let radioQueue = [];
+let radioPlayedCount = 0;
+// Last SDK state for the current track, so isTrackEnd can tell an ending
+// from a pause (see its comment -- the SDK has no end-of-track event).
+let lastSdkSnapshot = null;
+
+function resetRadio() {
+  radioQueue = [];
+  radioPlayedCount = 0;
+  lastSdkSnapshot = null;
+}
+
+// Fire-and-forget: no queue simply means playback stops at the end of this
+// track, exactly as it did before radio existed.
+function loadRadioQueue(trackId) {
+  if (!trackId) return;
+  api
+    .trackRadio(trackId)
+    .then((res) => {
+      // Ignore a queue that arrived after the listener already moved on.
+      if (currentTrack && currentTrack.id === trackId) radioQueue = res?.tracks ?? [];
+    })
+    .catch(() => {});
+}
+
+async function advanceRadio() {
+  if (radioPlayedCount >= RADIO_MAX_CONSECUTIVE) return;
+  const next = radioQueue.shift();
+  if (!next) return;
+  radioPlayedCount += 1;
+  // startPlayback, not play() -- play() is the explicit-tap entry point and
+  // resets the queue, which would end the radio session on its first hop.
+  await startPlayback(next);
+}
+
 export function _playTrackingStateForTests() {
-  return { currentPlayId, playThresholdReported, playedMs: playProgress ? playProgress.playedMs() : null };
+  return {
+    currentPlayId,
+    playThresholdReported,
+    playedMs: playProgress ? playProgress.playedMs() : null,
+    radioQueueLength: radioQueue.length,
+    radioPlayedCount,
+  };
 }
 let sdkListenerAttached = false;
 let mounted = false;
@@ -299,10 +345,27 @@ function hideIframe() {
 // router) never calls this on its own, only a real click handler does, and
 // nothing about navigating away from a page stops whatever's already
 // playing here either.
+/**
+ * The explicit-tap entry point: every play affordance in the app calls this.
+ * Starts a fresh radio session for the tapped track's artist -- so tapping a
+ * different song anywhere (including a deck card) takes over cleanly rather
+ * than continuing the previous artist.
+ */
 export async function play(track) {
+  resetRadio();
+  await startPlayback(track);
+  // After the track is actually playing, so a queue can't arrive for a play
+  // that failed to start.
+  loadRadioQueue(track?.id);
+}
+
+// Shared by the explicit tap above and radio's own continuation. Everything
+// except radio-session lifecycle lives here.
+async function startPlayback(track) {
   // Whatever was playing is over -- if it never reached the threshold, that
   // stays recorded as an uncounted play, which is exactly the signal wanted.
   stopPlayTracking();
+  lastSdkSnapshot = null;
   currentTrack = track;
   mode = null; // renders the neutral loading state below, not a guess at sdk/iframe
   sdkState = null;
@@ -343,6 +406,14 @@ export async function play(track) {
           if (state.track_window?.current_track?.id !== currentTrack.spotifyId) return;
           const wasPaused = !sdkState || sdkState.paused;
           sdkState = { paused: state.paused, position: state.position, duration: state.duration };
+
+          // Did this track just run out? Compared against the previous
+          // snapshot for the SAME track -- see isTrackEnd for why the SDK
+          // makes this a heuristic rather than an event.
+          const snapshot = { spotifyId: currentTrack.spotifyId, position: state.position, paused: state.paused };
+          const ended = isTrackEnd(lastSdkSnapshot, snapshot);
+          lastSdkSnapshot = snapshot;
+
           // Keep accumulated playing time honest across pause/resume, and
           // re-arm the timer for whatever is still owed.
           if (playProgress) {
@@ -355,6 +426,10 @@ export async function play(track) {
             }
           }
           renderChrome();
+
+          // Last, so the finished track's own threshold accounting above is
+          // settled before the next one replaces all of it.
+          if (ended) advanceRadio();
         });
       }
       renderChrome();
@@ -402,6 +477,7 @@ export async function hide() {
   mode = null;
   sdkState = null;
   stopPlayTracking();
+  resetRadio();
   hideIframe();
   renderChrome();
 }
@@ -444,6 +520,7 @@ export function _resetForTests() {
   mode = null;
   sdkState = null;
   stopPlayTracking();
+  resetRadio();
   sdkListenerAttached = false;
   mounted = false;
 }

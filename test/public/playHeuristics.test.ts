@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hookOffsetMs, createPlayProgress, PLAY_THRESHOLD_MS } from '../../public/playHeuristics.js';
+import { hookOffsetMs, createPlayProgress, isTrackEnd, RADIO_MAX_CONSECUTIVE, PLAY_THRESHOLD_MS } from '../../public/playHeuristics.js';
 
 describe('hookOffsetMs', () => {
   it('starts a normal-length track partway in, not at 0:00', () => {
@@ -128,5 +128,42 @@ describe('createPlayProgress', () => {
     p.start(); // different track
     expect(p.playedMs()).toBe(0);
     expect(p.remainingToThresholdMs()).toBe(PLAY_THRESHOLD_MS);
+  });
+});
+
+describe('isTrackEnd', () => {
+  const at = (position: number, paused: boolean, spotifyId = 'sp1') => ({ spotifyId, position, paused });
+
+  it('detects a track running out: was playing and progressing, now paused at 0', () => {
+    expect(isTrackEnd(at(178_000, false), at(0, true))).toBe(true);
+  });
+
+  it('does not mistake an ordinary pause mid-track for an ending', () => {
+    expect(isTrackEnd(at(45_000, false), at(45_000, true))).toBe(false);
+  });
+
+  it('does not mistake a pause at the very start for an ending', () => {
+    // Position never advanced, so there was nothing to finish.
+    expect(isTrackEnd(at(0, false), at(0, true))).toBe(false);
+  });
+
+  it('does not fire when a different track is now loaded -- that is a swap', () => {
+    expect(isTrackEnd(at(178_000, false, 'sp1'), at(0, true, 'sp2'))).toBe(false);
+  });
+
+  it('does not fire on a seek back to the start while still playing', () => {
+    expect(isTrackEnd(at(90_000, false), at(0, false))).toBe(false);
+  });
+
+  it('does not fire without a previous snapshot to compare against', () => {
+    expect(isTrackEnd(null, at(0, true))).toBe(false);
+    expect(isTrackEnd(at(90_000, false), null)).toBe(false);
+  });
+
+  it('keeps the consecutive-autoplay ceiling in place', () => {
+    // The guardrail against unattended playback racking up plays nobody
+    // asked for -- see its comment in playHeuristics.js.
+    expect(RADIO_MAX_CONSECUTIVE).toBeGreaterThan(0);
+    expect(RADIO_MAX_CONSECUTIVE).toBeLessThanOrEqual(30);
   });
 });

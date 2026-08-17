@@ -220,8 +220,20 @@
 // playHeuristics' createPlayProgress) crossed the threshold, via the new
 // POST /api/plays endpoints, so the counted share stops being invisible.
 // Nothing here touches the Free-tier iframe path, which exposes no JS API
-// and is therefore unobservable and uninfluenceable.
-const CACHE_NAME = 'wavelengthz-shell-v41';
+// and is therefore unobservable and uninfluenceable. v42 adds radio: when
+// a track
+// finishes on its own, the player rolls into the next track by the same
+// artist instead of falling silent. Universal -- wherever playback was
+// started from, it continues the same way. Deliberately NOT autoplay:
+// arriving anywhere in the app (the deck especially) still starts nothing,
+// and only an explicit tap changes what's playing; radio purely continues
+// something the listener already chose. The queue comes from one D1-only
+// call (GET /api/tracks/:id/radio, zero Spotify), fetched once when playback
+// starts and advanced through client-side. Track endings are detected via
+// playHeuristics' isTrackEnd, since the Web Playback SDK has no
+// end-of-track event -- and consecutive auto-advances are capped
+// (RADIO_MAX_CONSECUTIVE) so a forgotten tab can't play on indefinitely.
+const CACHE_NAME = 'wavelengthz-shell-v42';
 const APP_SHELL = [
   '/',
   '/app.js',

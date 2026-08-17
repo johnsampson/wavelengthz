@@ -173,6 +173,54 @@ describe('deck app', () => {
     expect(togglePlayPause).not.toHaveBeenCalled();
   });
 
+  // Explicit product rule: radio continues something the listener started,
+  // but arriving at the deck -- or advancing to a new card -- never starts
+  // anything on its own. Only a deliberate tap changes what's playing.
+  it('never starts playback just from loading the deck, even with a playable card', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { getElementById: vi.fn(() => null) });
+    stubApi((path) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
+      if (path.startsWith('/api/candidates/'))
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              { itemType: 'artist', itemId: 'a1', name: 'Depeche Mode', track: { spotifyId: 'sp1', id: 't1', name: 'Song', durationMs: 200000 } },
+            ],
+          }),
+          { status: 200 }
+        );
+      return new Response('not found', { status: 404 });
+    });
+    const app = createDeckApp();
+    (app as any).$nextTick = (fn: () => void) => fn();
+
+    await app.init();
+
+    expect(app.current?.track).toBeTruthy(); // the card really is playable
+    expect(play).not.toHaveBeenCalled();
+    app.destroy();
+  });
+
+  it('never starts playback when advancing to the next card', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { getElementById: vi.fn(() => null) });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ artist: {}, tracks: [] }), { status: 200 })));
+    const app = createDeckApp();
+    app.mode = 'music';
+    (app as any).$nextTick = (fn: () => void) => fn();
+    app.queue = [
+      { itemType: 'artist', itemId: 'a1', name: 'A', track: { spotifyId: 'sp1', id: 't1', name: 'S', durationMs: 200000 } },
+      { itemType: 'artist', itemId: 'a2', name: 'B', track: { spotifyId: 'sp2', id: 't2', name: 'S2', durationMs: 200000 } },
+    ];
+
+    await app.showNext();
+    await app.showNext();
+
+    expect(play).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   it('viewArtist routes to the current candidate\'s artist profile in Music mode', () => {
     vi.stubGlobal('window', fakeWindow());
     const app = createDeckApp();

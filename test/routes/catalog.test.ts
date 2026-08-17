@@ -1010,3 +1010,86 @@ describe('GET /api/tracks/search without artist_id (one-step song search)', () =
     expect((await res.json<any>()).error).toBe('unknown artist_id');
   });
 });
+
+describe('GET /api/tracks/:id/radio', () => {
+  beforeEach(async () => {
+    // Two artists, so the query is proven to stay within one of them.
+    await env.DB.prepare(
+      `INSERT INTO artists (id, spotify_id, name, genres, source, approved, created_at) VALUES ('other-a', 'sp-other', 'Other Artist', '{}', 'seed', 1, 1000)`
+    ).run();
+    for (const [id, sp, name] of [['r1', 'sp-r1', 'First'], ['r2', 'sp-r2', 'Second'], ['r3', 'sp-r3', 'Third']]) {
+      await env.DB.prepare(
+        `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, duration_ms, source, approved, created_at) VALUES (?, ?, ?, 'local-1', 'https://i/x.jpg', 200000, 'seed', 1, 1000)`
+      ).bind(id, sp, name).run();
+    }
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, source, approved, created_at) VALUES ('x1', 'sp-x1', 'Elsewhere', 'other-a', 'seed', 1, 1000)`
+    ).run();
+  });
+
+  async function radio(cookie: string, trackId: string) {
+    const res = await worker.fetch(
+      new Request(`http://localhost/api/tracks/${trackId}/radio`, { headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    return { status: res.status, body: res.ok ? await res.json<any>() : null };
+  }
+
+  it('returns the artist\'s other tracks, in catalog order, excluding the one playing', async () => {
+    const cookie = await cookieFor('u1');
+    const { body } = await radio(cookie, 'r1');
+
+    expect(body.tracks.map((t: any) => t.id)).toEqual(['r2', 'r3']);
+    expect(body.tracks[0]).toEqual({
+      id: 'r2',
+      spotifyId: 'sp-r2',
+      name: 'Second',
+      artistName: 'Local Artist',
+      imageUrl: 'https://i/x.jpg',
+      durationMs: 200000,
+    });
+  });
+
+  it('never crosses into another artist', async () => {
+    const cookie = await cookieFor('u1');
+    const { body } = await radio(cookie, 'r1');
+    expect(body.tracks.map((t: any) => t.id)).not.toContain('x1');
+  });
+
+  it('costs zero Spotify calls -- the catalog already has these rows', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        calls.push(input.toString());
+        return new Response('{}', { status: 200 });
+      })
+    );
+    const cookie = await cookieFor('u1');
+
+    await radio(cookie, 'r1');
+
+    expect(calls.filter((c) => c.includes('spotify'))).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+
+  it('returns an empty list for a track with no catalog row, rather than an error', async () => {
+    // A deck anthem comes straight from cached Spotify top-tracks and has none.
+    const cookie = await cookieFor('u1');
+    const { status, body } = await radio(cookie, 'not-a-catalog-track');
+    expect(status).toBe(200);
+    expect(body.tracks).toEqual([]);
+  });
+
+  it('returns an empty list when the artist has nothing else', async () => {
+    const cookie = await cookieFor('u1');
+    const { body } = await radio(cookie, 'x1');
+    expect(body.tracks).toEqual([]);
+  });
+
+  it('requires a session', async () => {
+    const res = await worker.fetch(new Request('http://localhost/api/tracks/r1/radio'), env, {} as ExecutionContext);
+    expect(res.status).toBe(401);
+  });
+});

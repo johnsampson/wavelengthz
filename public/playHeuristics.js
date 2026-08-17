@@ -96,3 +96,38 @@ export function createPlayProgress(now) {
     },
   };
 }
+
+// Hard ceiling on consecutive auto-advances without any user interaction.
+// Continuous playback someone started and can see is ordinary music-player
+// behavior; playback that runs on forever in a tab nobody is looking at is
+// not, and manufacturing plays the listener never intended is stream
+// manipulation under Spotify's Developer Terms -- which for a third-party
+// app means losing API access entirely. 20 tracks is roughly an album and a
+// half, well past any real session, and it stops a forgotten tab from
+// playing all night. Any explicit tap resets the count.
+export const RADIO_MAX_CONSECUTIVE = 20;
+
+/**
+ * Whether a Spotify Web Playback SDK state transition means "the track just
+ * finished on its own", as opposed to a pause, a seek, or a track swap.
+ *
+ * The SDK has no end-of-track event. What it does emit when a track runs out
+ * with nothing queued behind it is paused-at-position-0 -- which is also
+ * exactly what pausing a track that never started looks like, hence the
+ * requirement that we previously saw this same track actually progressing.
+ *
+ * Pure and exported so this heuristic -- the flakiest part of radio -- is
+ * pinned by tests rather than discovered in production.
+ *
+ * @param {{spotifyId: string, position: number, paused: boolean} | null} previous
+ * @param {{spotifyId: string, position: number, paused: boolean} | null} next
+ */
+export function isTrackEnd(previous, next) {
+  if (!previous || !next) return false;
+  // A different track now loaded is a swap, not an ending.
+  if (previous.spotifyId !== next.spotifyId) return false;
+  if (!next.paused || next.position !== 0) return false;
+  // Only an ending if it had actually got somewhere -- otherwise this is a
+  // pause at the very start, or the initial paused state before playback.
+  return previous.position > 0;
+}

@@ -63,6 +63,9 @@ export const api = {
   recordPlay: (body) =>
     request('/api/plays', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   markPlayCounted: (playId) => request(`/api/plays/${playId}/counted`, { method: 'POST' }),
+  // More tracks by the same artist, for the player to roll into when the
+  // current one ends (src/routes/catalog.ts). Pure D1 on the server.
+  trackRadio: (trackId) => request(`/api/tracks/${trackId}/radio`),
   groupPlaylist: (groupId) => request(`/api/groups/${groupId}/playlist`),
   // `track` is the raw Spotify track object (from trackSearch/nowPlaying) --
   // the server needs its artists[] and album.images to resolve it into the
