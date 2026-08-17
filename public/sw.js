@@ -291,15 +291,23 @@
 // its now-playing fetch rather than after -- an await loses the tap gesture
 // entirely, so focusing afterward could never have worked on iOS regardless
 // of scheduling. domUtils.js is new and precached.
-// v51 guards the two person-photo <img>s that could render with a null src
+// v51 fixes issue #108's "the thumb down icon is not right on track card":
+// artist.html's per-track Pass button rendered its thumbs-down SVG a size
+// smaller (h-4 w-4) than its sibling Play button (h-5 w-5) in the same h-9
+// w-9 circle -- the glyph itself was already correct (the same Feather
+// thumbs-down path the deck's own Pass button uses), just undersized. Also
+// replaces the per-track and per-artist Like buttons' raw "♥" text glyph
+// with the same heart SVG path the player bar and deck use, per the issue's
+// "align... same like/heart, etc." ask.
+// v52 guards the two person-photo <img>s that could render with a null src
 // (issue #108's "only show a photo if one exists"): the People-mode deck
 // card's primaryPhotoUrl and the match-modal's photoUrl, both null for a
 // candidate with no uploaded photos -- now genuinely possible for anyone who
-// skipped photos at onboarding (v50-era onboarding change made that
+// skipped photos at onboarding (a recent onboarding-copy change made that
 // explicit). Each is now wrapped in x-if, matching the guard group.html
 // already uses for member face icons, rather than always rendering an <img>
 // with a dropped src attribute.
-const CACHE_NAME = 'wavelengthz-shell-v51';
+const CACHE_NAME = 'wavelengthz-shell-v52';
 const APP_SHELL = [
   '/',
   '/app.js',
