@@ -2,6 +2,7 @@ import type { RouterType, IRequest } from 'itty-router';
 import { getSessionUser } from '../lib/session';
 import { genresFromRow } from '../lib/genres';
 import { topUpArtistsForUser } from '../lib/artistTopUp';
+import { isLiveTrackName } from '../lib/trackFilters';
 
 async function genresForItem(db: D1Database, itemType: 'artist' | 'track', itemId: string): Promise<string[]> {
   const row =
@@ -178,6 +179,19 @@ export function registerMusicSwipeRoutes(router: RouterType) {
       }>();
 
     let rows = await queryCandidates();
+
+    // Live recordings excluded from track candidates (issue #108) -- surfacing
+    // one as a swipe candidate at all is the same noise problem as an artist
+    // page full of them, just one step earlier. Filtered after the query's own
+    // LIMIT, same accepted "may come back with fewer than requested" trade-off
+    // used everywhere else this filter is applied (see trackFilters.ts) --
+    // the deck already re-fetches once its local queue drains, so a
+    // shorter-than-usual page here is not a correctness issue. Artist
+    // candidates are untouched: ${table}.name there is the ARTIST's name,
+    // which this heuristic has no business examining.
+    if (itemType === 'track') {
+      rows = { ...rows, results: rows.results.filter((r) => !isLiveTrackName(r.name)) };
+    }
 
     // Never let a user permanently hit "no more candidates" in music mode.
     // Tracks aren't included in either path below: track candidates come

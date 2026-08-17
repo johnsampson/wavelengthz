@@ -281,7 +281,17 @@
 // changed). Brand-new route and script, so both MUST be in APP_SHELL from
 // this version or a first visit 404s offline. Says nothing at all below a
 // noise floor rather than reporting a trend from two swipes.
-// v50 fixes issue #108's "the thumb down icon is not right on track card":
+// v50 fixes issue #108's "search bar focus dies not open keyboard without a
+// 2nd click" on iOS Safari, in both the deck's artist search (index.js) and
+// the track-share picker (trackPicker.js) -- new public/domUtils.js's
+// focusAfterReveal() replaces a bare $nextTick(() => ...focus()) with
+// $nextTick + requestAnimationFrame, which keeps the focus() call inside the
+// browser's gesture-linked paint pipeline instead of a microtask iOS drops
+// the gesture link across. trackPicker.js's picker also now focuses BEFORE
+// its now-playing fetch rather than after -- an await loses the tap gesture
+// entirely, so focusing afterward could never have worked on iOS regardless
+// of scheduling. domUtils.js is new and precached.
+// v51 fixes issue #108's "the thumb down icon is not right on track card":
 // artist.html's per-track Pass button rendered its thumbs-down SVG a size
 // smaller (h-4 w-4) than its sibling Play button (h-5 w-5) in the same h-9
 // w-9 circle -- the glyph itself was already correct (the same Feather
@@ -289,7 +299,7 @@
 // replaces the per-track and per-artist Like buttons' raw "♥" text glyph
 // with the same heart SVG path the player bar and deck use, per the issue's
 // "align... same like/heart, etc." ask.
-const CACHE_NAME = 'wavelengthz-shell-v50';
+const CACHE_NAME = 'wavelengthz-shell-v51';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -301,6 +311,7 @@ const APP_SHELL = [
   '/search.js',
   '/photos.js',
   '/toast.js',
+  '/domUtils.js',
   '/alpine.js',
   '/playerBar.js',
   '/wavelengthzPlayer.js',
