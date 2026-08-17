@@ -307,12 +307,20 @@
 // with a note that messaging (messagingGate.ts's MIN_PHOTOS) does need a few
 // eventually, said here so that isn't a surprise met for the first time deep
 // in Settings after onboarding is already done.
-// v53 adds a swipe-left-to-reveal-trash gesture to the player bar
+// v53 guards the two person-photo <img>s that could render with a null src
+// (issue #108's "only show a photo if one exists"): the People-mode deck
+// card's primaryPhotoUrl and the match-modal's photoUrl, both null for a
+// candidate with no uploaded photos -- now genuinely possible for anyone who
+// skipped photos at onboarding (v52's change made that explicit). Each is
+// now wrapped in x-if, matching the guard group.html already uses for
+// member face icons, rather than always rendering an <img> with a dropped
+// src attribute.
+// v54 adds a swipe-left-to-reveal-trash gesture to the player bar
 // (public/playerBar.js) for closing it, alongside the existing explicit X
 // button (issue #108: "align the radio player w/ the tracks view... maybe
 // make the radio a swipe left that exposes a trash can to close the
 // radio?"). No new precached files, but playerBar.js's content changed.
-const CACHE_NAME = 'wavelengthz-shell-v53';
+const CACHE_NAME = 'wavelengthz-shell-v54';
 const APP_SHELL = [
   '/',
   '/app.js',

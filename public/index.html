@@ -47,7 +47,16 @@
       x-show="authed === true && current"
     >
       <article class="card absolute inset-0 overflow-hidden rounded-3xl" id="card">
-        <img :src="mode === 'music' ? current?.imageUrl : current?.primaryPhotoUrl" :alt="current?.name || current?.displayName || 'candidate photo'" class="absolute inset-0 h-full w-full object-cover" />
+        <!-- People-mode candidates can have no photo at all now that
+             onboarding photos are optional (issue #108) -- primaryPhotoUrl
+             is null in that case, so guard with x-if rather than always
+             rendering an <img> (a bare :src="null" just drops the src
+             attribute, leaving an empty box; skipping the element entirely
+             falls back to the card's own bg-surface, same as the member
+             face stack in group.html). -->
+        <template x-if="mode === 'music' ? current?.imageUrl : current?.primaryPhotoUrl">
+          <img :src="mode === 'music' ? current?.imageUrl : current?.primaryPhotoUrl" :alt="current?.name || current?.displayName || 'candidate photo'" class="absolute inset-0 h-full w-full object-cover" />
+        </template>
         <!-- pointerdown.stop: without it this bubbles to #card and
              attachSwipeDeck's own pointerdown listener starts a drag capture,
              which swallows the button's click entirely. Deliberately
@@ -223,7 +232,11 @@
     aria-modal="true"
     aria-label="It's a match"
   >
-    <img :src="matchModal?.photoUrl" :alt="matchModal?.name" class="h-32 w-32 rounded-full object-cover ring-4 ring-brand-500" />
+    <!-- Same null-photoUrl guard as the deck card above -- the other user
+         may have no photo (photos are optional at onboarding). -->
+    <template x-if="matchModal?.photoUrl">
+      <img :src="matchModal?.photoUrl" :alt="matchModal?.name" class="h-32 w-32 rounded-full object-cover ring-4 ring-brand-500" />
+    </template>
     <h2 class="wordmark text-3xl">It's a match!</h2>
     <p class="text-neutral-300">You and <span x-text="matchModal?.name" class="font-semibold text-neutral-100"></span> liked each other.</p>
     <div class="mt-2 flex w-full max-w-xs flex-col gap-2">
