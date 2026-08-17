@@ -1,6 +1,6 @@
 # Idea: Genre-based radio (cross-artist continuation)
 
-**Status:** Future idea — not yet scoped for implementation. Captured so it doesn't get lost, not a build plan.
+**Status:** Shipped. The open questions below were resolved as noted; kept for the reasoning behind each choice.
 
 ## Where this picks up
 
@@ -38,9 +38,9 @@ Whatever gets built must keep these — they were load-bearing in #96 and remain
 - **Never autoplay.** Arriving anywhere in the app still starts nothing; radio only ever *continues* something the listener explicitly started.
 - **Premium only.** The Free-tier embed iframe exposes no JS API, so there's no way to detect a track ending and nothing to chain.
 
-## Open questions
+## How the open questions were resolved
 
-- When does it cross the artist boundary — only when the artist's own tracks are exhausted, or interleaved from the start?
-- Ordering. `rowid` is fine within one artist (it approximates release order) but is meaningless across artists. Genre affinity? Like count? Something area-weighted, reusing what the artist page already computes?
-- Does it respect the listener's `user_genres` affinity, or stay neutral to whatever the current track's genre is? The first is more personal; the second is more predictable, and predictability may matter more in a player.
-- Should a genre-radio hop be visually distinguishable in the player bar from a same-artist hop?
+- **When it crosses:** only once the artist's own catalog is exhausted, never interleaved. The common case is then completely unchanged — someone who picked an artist keeps hearing that artist — and cross-artist play is strictly additive rather than a change to existing behavior.
+- **Ordering:** by how many genres the neighbour shares with the current artist, descending, breaking ties on `rowid`. Deterministic and explainable, and a single incidental overlap ranks last rather than being treated as equivalent to a close match.
+- **Listener affinity vs. neutrality:** neutral to the listener's own `user_genres`, keyed only off the current artist. Predictability matters more in a player than personalization — radio that quietly drifts toward your overall taste rather than the thing you just chose is surprising in a bad way. `user_blocked_genres` *is* honored, because a block is a hard constraint rather than a preference.
+- **Visual distinction:** none for now. The player bar already shows the artist name, which changes on a cross-artist hop, so a second signal would be redundant.
