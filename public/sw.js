@@ -291,7 +291,15 @@
 // its now-playing fetch rather than after -- an await loses the tap gesture
 // entirely, so focusing afterward could never have worked on iOS regardless
 // of scheduling. domUtils.js is new and precached.
-const CACHE_NAME = 'wavelengthz-shell-v50';
+// v51 guards the two person-photo <img>s that could render with a null src
+// (issue #108's "only show a photo if one exists"): the People-mode deck
+// card's primaryPhotoUrl and the match-modal's photoUrl, both null for a
+// candidate with no uploaded photos -- now genuinely possible for anyone who
+// skipped photos at onboarding (v50-era onboarding change made that
+// explicit). Each is now wrapped in x-if, matching the guard group.html
+// already uses for member face icons, rather than always rendering an <img>
+// with a dropped src attribute.
+const CACHE_NAME = 'wavelengthz-shell-v51';
 const APP_SHELL = [
   '/',
   '/app.js',
