@@ -236,7 +236,7 @@ describe('GET /api/groups/:id', () => {
     expect(res.status).toBe(200);
     const body = await res.json<any>();
     expect(body.group.name).toBe('My Group');
-    expect(body.group.members).toEqual([{ id: 'u1', displayName: null }]);
+    expect(body.group.members).toEqual([{ id: 'u1', displayName: null, photoUrl: null }]);
   });
 
   it('rejects a non-member', async () => {
@@ -733,5 +733,122 @@ describe('sharing a track in a group thread', () => {
       {} as ExecutionContext
     );
     expect(empty.status).toBe(400);
+  });
+});
+
+describe('group member faces (issue #2)', () => {
+  beforeEach(async () => {
+    await env.DB.exec(
+      'DELETE FROM group_messages; DELETE FROM group_members; DELETE FROM groups; DELETE FROM music_swipes; DELETE FROM user_photos; DELETE FROM sessions; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;'
+    );
+    await makeUser('u1');
+  });
+
+  async function createGroup(cookie: string) {
+    const res = await worker.fetch(
+      new Request('http://localhost/api/groups', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Group', lat: 30.27, lng: -97.74 }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    return (await res.json<any>()).groupId;
+  }
+
+  /**
+   * makeUser seeds photos with the schema default moderation_status
+   * ('pending', migrations/0017), which is exactly the state a freshly
+   * uploaded photo is in -- so approving is an explicit step here, matching
+   * production.
+   */
+  async function approvePrimaryPhoto(userId: string) {
+    await env.DB.prepare(
+      `UPDATE user_photos SET moderation_status = 'approved' WHERE user_id = ? AND position = 0`
+    )
+      .bind(userId)
+      .run();
+  }
+
+  async function groupDetail(cookie: string, groupId: string) {
+    const res = await worker.fetch(
+      new Request(`http://localhost/api/groups/${groupId}`, { headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    return (await res.json<any>()).group;
+  }
+
+  async function groupList(cookie: string) {
+    const res = await worker.fetch(
+      new Request('http://localhost/api/groups', { headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    return (await res.json<any>()).groups;
+  }
+
+  it('returns each member photo url on the group detail', async () => {
+    const cookie = await cookieFor('u1');
+    const groupId = await createGroup(cookie);
+    await approvePrimaryPhoto('u1');
+
+    const group = await groupDetail(cookie, groupId);
+
+    expect(group.members[0].photoUrl).toBe('/photos/photo-u1-0');
+  });
+
+  it('hands back null for a photo moderation has not approved', async () => {
+    // GET /photos/:id hides a pending/flagged photo from everyone but its
+    // owner, so returning it here would render a broken image for every
+    // other member. Same rule the people deck already applies.
+    const cookie = await cookieFor('u1');
+    const groupId = await createGroup(cookie);
+
+    const group = await groupDetail(cookie, groupId);
+
+    expect(group.members[0].photoUrl).toBeNull();
+  });
+
+  it('puts member faces on the group list cards', async () => {
+    const cookie = await cookieFor('u1');
+    await createGroup(cookie);
+    await approvePrimaryPhoto('u1');
+
+    expect((await groupList(cookie))[0].memberFaces).toEqual(['/photos/photo-u1-0']);
+  });
+
+  it('omits members with no approved photo rather than emitting blanks', async () => {
+    // A row of empty circles reads as broken; the member count beside the
+    // stack already tells the real story.
+    const cookie = await cookieFor('u1');
+    await createGroup(cookie);
+    const groups = await groupList(cookie);
+
+    expect(groups[0].memberFaces).toEqual([]);
+    expect(groups[0].memberCount).toBe(1);
+  });
+
+  it('caps the faces on a card so a full group does not overflow it', async () => {
+    const cookie = await cookieFor('u1');
+    const groupId = await createGroup(cookie);
+    await approvePrimaryPhoto('u1');
+    for (let i = 2; i <= 8; i++) {
+      await makeUser(`u${i}`);
+      await approvePrimaryPhoto(`u${i}`);
+      await worker.fetch(
+        new Request(`http://localhost/api/groups/${groupId}/join`, { method: 'POST', headers: { Cookie: await cookieFor(`u${i}`) } }),
+        env,
+        {} as ExecutionContext
+      );
+    }
+
+    const card = (await groupList(cookie))[0];
+
+    expect(card.memberCount).toBe(8);
+    expect(card.memberFaces).toHaveLength(5);
+    // Oldest members first, so the stack is stable as people join.
+    expect(card.memberFaces[0]).toBe('/photos/photo-u1-0');
   });
 });

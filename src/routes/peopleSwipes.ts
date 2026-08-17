@@ -9,6 +9,7 @@ import { computeMusicOverlap, MusicOverlap } from '../lib/musicOverlap';
 import { getDisplayMusicProfile } from '../lib/profile';
 import { getMatchNotificationDelayMs } from '../lib/notifications';
 import { isMutuallyWithinAgeRange } from '../lib/age';
+import { primaryPhotoUrls } from '../lib/photos';
 
 // Hard cap on the like-priority queue. It previously had no LIMIT at all, so a
 // popular account's deck request grew without bound.
@@ -105,29 +106,6 @@ async function recentRightSwipedItems(
   );
 }
 
-/**
- * Batched form of the old per-candidate primary-photo lookup: one query for
- * the whole pool instead of one DB round trip per candidate rendered.
- */
-async function primaryPhotoUrls(db: D1Database, userIds: string[]): Promise<Map<string, string>> {
-  const urls = new Map<string, string>();
-  if (userIds.length === 0) return urls;
-
-  // moderation_status = 'approved': a flagged/blocked position-0 photo is
-  // hidden from everyone but its owner (GET /photos/:id) -- excluding it
-  // here too avoids handing back a URL that would just 404 for every other
-  // candidate viewer. No fallback to a later photo if position 0 isn't
-  // approved -- same as showing no photo at all, an already-handled case.
-  const rows = await db
-    .prepare(
-      `SELECT user_id, id FROM user_photos WHERE position = 0 AND moderation_status = 'approved' AND user_id IN (${new Array(userIds.length).fill('?').join(', ')})`
-    )
-    .bind(...userIds)
-    .all<{ user_id: string; id: string }>();
-
-  for (const row of rows.results) urls.set(row.user_id, `/photos/${row.id}`);
-  return urls;
-}
 
 /**
  * Assembles one participant's scoring inputs from the batched lookups. A user

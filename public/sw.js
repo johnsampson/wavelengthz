@@ -256,7 +256,12 @@
 // Seeking deliberately doesn't touch threshold accounting, which measures
 // playing time rather than position, so scrubbing can't fast-track a counted
 // play. playerBar.js and wavelengthzPlayer.js changed; both are precached.
-const CACHE_NAME = 'wavelengthz-shell-v45';
+// v46 adds member face icons to groups (issue #2): the /groups cards show an
+// overlapping stack of member photos beside the member count, and /group's
+// header shows the same for its own members. Photos come from the existing
+// position-0 + moderation-approved rule, now shared via src/lib/photos.ts.
+// groups.html and group.html both changed and both are precached.
+const CACHE_NAME = 'wavelengthz-shell-v46';
 const APP_SHELL = [
   '/',
   '/app.js',

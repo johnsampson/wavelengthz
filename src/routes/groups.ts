@@ -6,6 +6,7 @@ import { isValidMessageBody, isValidTrackCaption } from '../lib/messageFilter';
 import { resolveSharedTrack, loadSharedTracks, type ShareableSpotifyTrack } from '../lib/trackSharing';
 import { canRecall } from '../lib/messageRecall';
 import { hasCompleteProfile, photoCountFor, likedSongCountFor } from '../lib/messagingGate';
+import { primaryPhotoUrls } from '../lib/photos';
 
 const MAX_GROUP_NAME_LENGTH = 60;
 const MAX_TOPIC_LENGTH = 100;
@@ -17,6 +18,48 @@ const MAX_GROUP_MEMBERS = 8;
 // (src/routes/peopleSwipes.ts) -- ~111km per degree of latitude everywhere on
 // the globe, refined by an exact haversine check in JS afterward.
 const KM_PER_DEGREE_LATITUDE = 111;
+
+
+// How many faces a group card shows before it just reads as a count. Five is
+// what fits beside the member count on a phone at the overlap below.
+const GROUP_FACE_LIMIT = 5;
+
+/**
+ * Up to GROUP_FACE_LIMIT member photo URLs per group, oldest members first.
+ *
+ * Two queries for the whole page: one for memberships across every listed
+ * group, one batched photo lookup. Slicing happens in memory rather than via
+ * a per-group LIMIT precisely so this stays two queries -- a correlated
+ * per-group limit in SQL would mean one round trip per group.
+ */
+async function faceUrlsByGroup(db: D1Database, groupIds: string[]): Promise<Map<string, string[]>> {
+  const byGroup = new Map<string, string[]>();
+  if (groupIds.length === 0) return byGroup;
+
+  const placeholders = groupIds.map(() => '?').join(', ');
+  const rows = await db
+    .prepare(
+      `SELECT group_id, user_id FROM group_members WHERE group_id IN (${placeholders}) ORDER BY joined_at ASC`
+    )
+    .bind(...groupIds)
+    .all<{ group_id: string; user_id: string }>();
+
+  const perGroup = new Map<string, string[]>();
+  for (const row of rows.results) {
+    const list = perGroup.get(row.group_id) ?? [];
+    if (list.length < GROUP_FACE_LIMIT) list.push(row.user_id);
+    perGroup.set(row.group_id, list);
+  }
+
+  const photos = await primaryPhotoUrls(db, [...new Set([...perGroup.values()].flat())]);
+  for (const [groupId, userIds] of perGroup) {
+    // Members with no approved photo are dropped rather than rendered as
+    // blanks -- a row of empty circles reads as broken, and the member count
+    // beside it already tells the real story.
+    byGroup.set(groupId, userIds.map((id) => photos.get(id)).filter((url): url is string => !!url));
+  }
+  return byGroup;
+}
 
 export function registerGroupRoutes(router: RouterType) {
   router.post('/api/groups', async (request: Request, env: Env) => {
@@ -77,17 +120,26 @@ export function registerGroupRoutes(router: RouterType) {
     // The SQL band above is intentionally loose (see peopleSwipes.ts) -- this
     // exact haversine check is the authoritative radius filter, except for
     // groups already joined (see above).
-    const groups = rows.results
-      .filter((g) => g.is_member || haversineKm(user.lat!, user.lng!, g.lat, g.lng) <= user.max_distance_km)
-      .map((g) => ({
-        id: g.id,
-        name: g.name,
-        topic: g.topic,
-        locationLabel: g.location_label,
-        memberCount: g.member_count,
-        isMember: !!g.is_member,
-        createdAt: g.created_at,
-      }));
+    const visible = rows.results.filter(
+      (g) => g.is_member || haversineKm(user.lat!, user.lng!, g.lat, g.lng) <= user.max_distance_km
+    );
+
+    // Faces for the group cards (issue #2). Two queries total regardless of
+    // how many groups are listed -- one for the memberships, one batched
+    // photo lookup -- rather than a per-group round trip, same reasoning as
+    // primaryPhotoUrls' own batching.
+    const memberFaces = await faceUrlsByGroup(env.DB, visible.map((g) => g.id));
+
+    const groups = visible.map((g) => ({
+      id: g.id,
+      name: g.name,
+      topic: g.topic,
+      locationLabel: g.location_label,
+      memberCount: g.member_count,
+      isMember: !!g.is_member,
+      createdAt: g.created_at,
+      memberFaces: memberFaces.get(g.id) ?? [],
+    }));
 
     return Response.json({ groups });
   });
@@ -108,13 +160,22 @@ export function registerGroupRoutes(router: RouterType) {
       `SELECT u.id, u.display_name FROM group_members gm JOIN users u ON u.id = gm.user_id WHERE gm.group_id = ? ORDER BY gm.joined_at ASC`
     ).bind(group.id).all<{ id: string; display_name: string | null }>();
 
+    const photos = await primaryPhotoUrls(env.DB, members.results.map((m) => m.id));
+
     return Response.json({
       group: {
         id: group.id,
         name: group.name,
         topic: group.topic,
         locationLabel: group.location_label,
-        members: members.results.map((m) => ({ id: m.id, displayName: m.display_name })),
+        members: members.results.map((m) => ({
+          id: m.id,
+          displayName: m.display_name,
+          // null is an ordinary case, not a failure: no photo uploaded yet,
+          // or a position-0 photo that moderation hasn't approved. The client
+          // falls back to an initial.
+          photoUrl: photos.get(m.id) ?? null,
+        })),
       },
     });
   });

@@ -20,9 +20,19 @@
     <div class="mx-auto mb-2 w-full max-w-md">
       <h1 class="text-xl font-bold" x-text="group.name"></h1>
       <p x-show="group.topic" class="text-sm text-neutral-400" x-text="group.topic"></p>
-      <p class="text-xs text-neutral-500">
-        <span x-text="group.members.length"></span>/8 members
-      </p>
+      <div class="mt-1 flex items-center gap-2">
+        <div class="flex -space-x-2">
+          <template x-for="m in group.members" :key="m.id">
+            <template x-if="m.photoUrl">
+              <img :src="m.photoUrl" :alt="m.displayName || 'Member'" loading="lazy"
+                   class="h-7 w-7 rounded-full object-cover ring-2 ring-base" />
+            </template>
+          </template>
+        </div>
+        <p class="text-xs text-neutral-500">
+          <span x-text="group.members.length"></span>/8 members
+        </p>
+      </div>
       <button type="button" class="btn-ghost mt-1 text-sm text-red-400" @click="leave()">Leave group</button>
     </div>
   </template>
