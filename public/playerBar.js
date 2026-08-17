@@ -15,7 +15,15 @@
 // same in-memory instance for the life of the document, so this state stays
 // intact across every client-side navigation.
 import { checkPlayerAvailability, playTrack, pausePlayback, resumePlayback, onStateChange } from './wavelengthzPlayer.js';
-import { hookOffsetMs, createPlayProgress, isTrackEnd, RADIO_MAX_CONSECUTIVE, PLAY_THRESHOLD_MS } from './playHeuristics.js';
+import {
+  hookOffsetMs,
+  createPlayProgress,
+  isTrackEnd,
+  isDeviceGoneEnd,
+  radioAdvanceDelayMs,
+  RADIO_MAX_CONSECUTIVE,
+  PLAY_THRESHOLD_MS,
+} from './playHeuristics.js';
 import { api } from './app.js';
 import { showToast, showErrorToast } from './toast.js';
 
@@ -86,10 +94,55 @@ let radioPlayedCount = 0;
 // from a pause (see its comment -- the SDK has no end-of-track event).
 let lastSdkSnapshot = null;
 
+// The primary end-of-track signal: a timer for the track's own remaining
+// time, exactly like schedulePlayThreshold above and for exactly the same
+// reason -- player_state_changed fires on TRANSITIONS, not on a clock, so
+// anything that depends on a particular post-end transition arriving is
+// betting on Spotify's behavior at the end of a context.
+//
+// That bet loses. This app starts playback with a single-uri context
+// (wavelengthzPlayer.js's playTrack), and when a one-track context runs out
+// the SDK does not reliably emit the paused-at-position-0 state isTrackEnd
+// looks for -- it commonly emits `null` instead (the documented "this device
+// is no longer active" signal), which the state listener discards before any
+// heuristic sees it. Radio consequently never advanced in a real session,
+// despite the heuristic itself being correct about the states it does get.
+//
+// isTrackEnd is kept as a secondary signal rather than removed: when the SDK
+// *does* emit a clean ending it arrives sooner and more precisely than a
+// timer scheduled from a possibly-stale position. Both paths funnel through
+// advanceRadio, which is idempotent per track, so whichever fires first wins
+// and the other becomes a no-op.
+let radioAdvanceTimer = null;
+
+function clearRadioAdvanceTimer() {
+  if (radioAdvanceTimer !== null) {
+    clearTimeout(radioAdvanceTimer);
+    radioAdvanceTimer = null;
+  }
+}
+
+/**
+ * (Re)arm the clock-based end signal from the SDK's current position.
+ *
+ * Called on every playing state change, so a seek or a pause/resume re-bases
+ * it rather than leaving a timer aimed at the wrong moment.
+ */
+function scheduleRadioAdvance(spotifyId, positionMs, durationMs) {
+  clearRadioAdvanceTimer();
+  const delay = radioAdvanceDelayMs(positionMs, durationMs);
+  if (delay === null) return;
+  radioAdvanceTimer = setTimeout(() => {
+    radioAdvanceTimer = null;
+    advanceRadio(spotifyId);
+  }, delay);
+}
+
 function resetRadio() {
   radioQueue = [];
   radioPlayedCount = 0;
   lastSdkSnapshot = null;
+  clearRadioAdvanceTimer();
 }
 
 // Fire-and-forget: no queue simply means playback stops at the end of this
@@ -105,7 +158,18 @@ function loadRadioQueue(trackId) {
     .catch(() => {});
 }
 
-async function advanceRadio() {
+/**
+ * Roll into the next track by the same artist.
+ *
+ * `endedSpotifyId` is which track's ending is being reported. Two independent
+ * signals can report the same ending (the clock timer and the SDK's own
+ * state), and a stale timer can fire after the listener already moved on --
+ * so this is idempotent per track: once currentTrack has advanced past the
+ * one that ended, every further report for it is a no-op.
+ */
+async function advanceRadio(endedSpotifyId) {
+  if (endedSpotifyId && currentTrack?.spotifyId !== endedSpotifyId) return;
+  clearRadioAdvanceTimer();
   if (radioPlayedCount >= RADIO_MAX_CONSECUTIVE) return;
   const next = radioQueue.shift();
   if (!next) return;
@@ -122,6 +186,7 @@ export function _playTrackingStateForTests() {
     playedMs: playProgress ? playProgress.playedMs() : null,
     radioQueueLength: radioQueue.length,
     radioPlayedCount,
+    radioAdvanceArmed: radioAdvanceTimer !== null,
   };
 }
 let sdkListenerAttached = false;
@@ -366,6 +431,9 @@ async function startPlayback(track) {
   // stays recorded as an uncounted play, which is exactly the signal wanted.
   stopPlayTracking();
   lastSdkSnapshot = null;
+  // Any pending end signal belonged to the outgoing track. The first state
+  // event for the new one re-arms it.
+  clearRadioAdvanceTimer();
   currentTrack = track;
   mode = null; // renders the neutral loading state below, not a guess at sdk/iframe
   sdkState = null;
@@ -402,7 +470,19 @@ async function startPlayback(track) {
       if (!sdkListenerAttached) {
         sdkListenerAttached = true;
         onStateChange((state) => {
-          if (!currentTrack || !state) return;
+          if (!currentTrack) return;
+
+          // A null state is the SDK saying this device is no longer active --
+          // which is exactly what a finished single-uri context looks like,
+          // not only a transfer to another device. Discarding it outright is
+          // what kept radio from ever advancing in a real session. Treat it
+          // as an ending if this track had actually got somewhere; the
+          // per-track guard in advanceRadio makes a spurious one harmless.
+          if (!state) {
+            if (isDeviceGoneEnd(lastSdkSnapshot)) advanceRadio(lastSdkSnapshot.spotifyId);
+            return;
+          }
+
           if (state.track_window?.current_track?.id !== currentTrack.spotifyId) return;
           const wasPaused = !sdkState || sdkState.paused;
           sdkState = { paused: state.paused, position: state.position, duration: state.duration };
@@ -425,11 +505,19 @@ async function startPlayback(track) {
               schedulePlayThreshold();
             }
           }
+
+          // Re-base the clock-based end signal off this state. Armed only
+          // while actually playing, and cleared on pause, so a paused track
+          // never advances on its own -- and re-armed on resume/seek from the
+          // new position rather than leaving a timer aimed at a stale moment.
+          if (state.paused) clearRadioAdvanceTimer();
+          else scheduleRadioAdvance(currentTrack.spotifyId, state.position, state.duration);
+
           renderChrome();
 
           // Last, so the finished track's own threshold accounting above is
           // settled before the next one replaces all of it.
-          if (ended) advanceRadio();
+          if (ended) advanceRadio(snapshot.spotifyId);
         });
       }
       renderChrome();

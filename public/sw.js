@@ -240,7 +240,17 @@
 // it needs cannot be added to an existing token, and asking for write access
 // on the first consent screen is the wrong trade. connections.html/.js and
 // app.js all changed, and all three are precached.
-const CACHE_NAME = 'wavelengthz-shell-v43';
+// v44 fixes radio never advancing in a real session. v42's end-of-track
+// detection waited for the SDK to emit paused-at-position-0, but
+// player_state_changed fires on transitions, not on a clock -- and when a
+// single-uri context runs out the SDK commonly emits a null state ("device no
+// longer active") instead, which the listener discarded before any heuristic
+// saw it. End-of-track is now driven primarily by a timer for the track's own
+// remaining time (the same approach the 30-second threshold already used, for
+// the same reason), with the null state and the original paused-at-0
+// heuristic as backups. playerBar.js and playHeuristics.js both changed and
+// both are precached.
+const CACHE_NAME = 'wavelengthz-shell-v44';
 const APP_SHELL = [
   '/',
   '/app.js',

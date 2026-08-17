@@ -131,3 +131,55 @@ export function isTrackEnd(previous, next) {
   // pause at the very start, or the initial paused state before playback.
   return previous.position > 0;
 }
+
+// How long after a track's nominal end the clock-based signal fires. Enough
+// that a clean SDK ending (which arrives sooner and more precisely) is
+// preferred when it comes, and that small drift between the SDK's reported
+// position and real playback doesn't clip the last moment of a song.
+export const RADIO_ADVANCE_GRACE_MS = 1200;
+
+/**
+ * Milliseconds until the current track runs out, or null when that can't be
+ * known (no duration, or already past the end).
+ *
+ * This is the PRIMARY end-of-track signal, with isTrackEnd as backup -- the
+ * reverse of how radio originally shipped, and the reason it never advanced
+ * in a real session.
+ *
+ * player_state_changed fires on transitions, not on a clock. Depending on a
+ * specific post-end transition means depending on what Spotify does when a
+ * context runs out, and for the single-uri context this app starts playback
+ * with (wavelengthzPlayer.js's playTrack), what it commonly does is emit a
+ * null state -- "this device is no longer active" -- rather than the
+ * paused-at-position-0 that isTrackEnd looks for. A timer depends on none of
+ * that. Same reasoning playerBar's 30-second threshold already used a timer
+ * rather than waiting for an event reporting position >= threshold.
+ *
+ * @param {number} positionMs current playback position
+ * @param {number} durationMs track length, per the SDK
+ * @returns {number | null} delay to arm a timer with, or null for "can't tell"
+ */
+export function radioAdvanceDelayMs(positionMs, durationMs) {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return null;
+  if (!Number.isFinite(positionMs) || positionMs < 0) return null;
+  const remaining = durationMs - positionMs;
+  if (remaining <= 0) return null;
+  return remaining + RADIO_ADVANCE_GRACE_MS;
+}
+
+/**
+ * Whether a null SDK state should count as the current track ending.
+ *
+ * The SDK emits a null state when this device stops being the active one.
+ * That covers a transfer to another device AND a context simply running out,
+ * and nothing in the null state distinguishes them -- so the only usable
+ * signal is whether the track we were on had actually got somewhere.
+ *
+ * A false positive here costs nothing: it advances a radio session the
+ * listener started, on a track that really did just stop playing. Discarding
+ * it, which is what the original code did, cost radio entirely.
+ */
+export function isDeviceGoneEnd(lastSnapshot) {
+  if (!lastSnapshot) return false;
+  return lastSnapshot.position > 0;
+}

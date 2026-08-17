@@ -116,8 +116,8 @@ describe('connections page', () => {
 
     await app.init();
 
-    expect(app.sync.enabled).toBe(true);
-    expect(app.sync.pendingCount).toBe(7);
+    expect(app.sync!.enabled).toBe(true);
+    expect(app.sync!.pendingCount).toBe(7);
     vi.unstubAllGlobals();
   });
 
@@ -173,7 +173,7 @@ describe('connections page', () => {
 
     expect(app.info).toContain('300');
     expect(app.info).toContain('rest will follow');
-    expect(app.sync.pendingCount).toBe(25);
+    expect(app.sync!.pendingCount).toBe(25);
     expect(app.syncing).toBe(false);
     vi.unstubAllGlobals();
   });
@@ -228,7 +228,7 @@ describe('connections page', () => {
 
     await app.disableSync();
 
-    expect(app.sync.enabled).toBe(false);
+    expect(app.sync!.enabled).toBe(false);
     expect(app.info).toContain('stay there');
     vi.unstubAllGlobals();
   });
