@@ -291,7 +291,12 @@
 // its now-playing fetch rather than after -- an await loses the tap gesture
 // entirely, so focusing afterward could never have worked on iOS regardless
 // of scheduling. domUtils.js is new and precached.
-const CACHE_NAME = 'wavelengthz-shell-v50';
+// v51 adds a swipe-left-to-reveal-trash gesture to the player bar
+// (public/playerBar.js) for closing it, alongside the existing explicit X
+// button (issue #108: "align the radio player w/ the tracks view... maybe
+// make the radio a swipe left that exposes a trash can to close the
+// radio?"). No new precached files, but playerBar.js's content changed.
+const CACHE_NAME = 'wavelengthz-shell-v51';
 const APP_SHELL = [
   '/',
   '/app.js',
