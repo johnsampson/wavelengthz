@@ -18,6 +18,14 @@ export function createConnectionsApp() {
     sync: null,
     syncing: false,
 
+    // Following liked artists -- a separate destination with its own consent,
+    // its own toggle, and its own state. Deliberately not folded into `sync`:
+    // a follow is outward-facing where the playlist is private, so the UI
+    // must never be able to imply consent to one from the other.
+    /** @type {{enabled: boolean, connected: boolean, lastSyncedAt: number | null, pendingCount: number, followedCount: number} | null} */
+    follow: null,
+    following: false,
+
     async init() {
       try {
         const me = await api.me();
@@ -25,7 +33,9 @@ export function createConnectionsApp() {
         this.hasSpotify = me.hasSpotify ?? false;
 
         if (this.hasSpotify) {
-          this.sync = await api.playlistSync();
+          const [sync, follow] = await Promise.all([api.playlistSync(), api.followSync()]);
+          this.sync = sync;
+          this.follow = follow;
         }
 
         if (typeof window !== 'undefined') {
@@ -42,13 +52,18 @@ export function createConnectionsApp() {
             // any other action-triggered failure rather than sitting in
             // the page's own persistent inline banner.
             showErrorToast('That Spotify account is already linked to a different Wavelengthz account.');
+          } else if (params.get('follow_enabled') === '1') {
+            this.info = 'Following is on. Artists you like here will be followed on Spotify.';
+          } else if (params.get('follow_error') === 'denied') {
+            showErrorToast('Following needs permission to follow artists on Spotify. Nothing was changed.');
           } else if (params.get('sync_error') === 'denied') {
             // Spotify's consent screen was dismissed, or write access was
             // declined there. Nothing was enabled -- say so plainly rather
             // than leaving a toggle that looks on but can never write.
             showErrorToast('Playlist sync needs permission to create a playlist. Nothing was changed.');
           }
-          if (params.has('spotify_connected') || params.has('spotify_error') || params.has('sync_enabled') || params.has('sync_error')) {
+          const handledParams = ['spotify_connected', 'spotify_error', 'sync_enabled', 'sync_error', 'follow_enabled', 'follow_error'];
+          if (handledParams.some((p) => params.has(p))) {
             window.history.replaceState({}, '', '/settings/connections');
           }
         }
@@ -77,6 +92,45 @@ export function createConnectionsApp() {
         this.info = 'Playlist sync is off. Songs already in your playlist stay there.';
       } catch (e) {
         showErrorToast('Could not turn off playlist sync. Please try again.');
+      }
+    },
+
+    // Same shape as enableSync: the scope can't be added to an existing
+    // token, so there is nothing to POST to -- only the callback can turn
+    // this on, and only if Spotify actually granted it.
+    enableFollow() {
+      window.location.href = '/login/spotify?intent=follow';
+    },
+
+    async disableFollow() {
+      try {
+        this.follow = await api.disableFollowSync();
+        this.info = 'Following is off. Artists you already follow stay followed.';
+      } catch (e) {
+        showErrorToast('Could not turn off following. Please try again.');
+      }
+    },
+
+    async followNow() {
+      if (this.following) return;
+      this.following = true;
+      try {
+        const result = await api.runFollowSync();
+        this.follow = result.status;
+
+        if (result.needsReconnect) {
+          showErrorToast('Spotify revoked access for Wavelengthz. Turn following back on to reconnect.');
+        } else if (result.followed > 0) {
+          this.info = result.hasMore
+            ? `Followed ${result.followed} artists. The rest will follow automatically within the hour.`
+            : `Followed ${result.followed} ${result.followed === 1 ? 'artist' : 'artists'} on Spotify.`;
+        } else {
+          this.info = 'You already follow every artist you have liked here.';
+        }
+      } catch (e) {
+        showErrorToast('Could not follow those artists right now. Please try again.');
+      } finally {
+        this.following = false;
       }
     },
 

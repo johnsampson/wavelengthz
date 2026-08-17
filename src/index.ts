@@ -15,7 +15,9 @@ import { registerGroupRoutes } from './routes/groups';
 import { registerPlayerRoutes } from './routes/player';
 import { registerPlayRoutes } from './routes/plays';
 import { registerPlaylistSyncRoutes } from './routes/playlistSync';
+import { registerFollowSyncRoutes } from './routes/followSync';
 import { runScheduledPlaylistSync } from './lib/playlistSync';
+import { runScheduledFollowSync } from './lib/followSync';
 import { registerPushRoutes } from './routes/push';
 import { registerGenreBlockRoutes } from './routes/genreBlocks';
 import { registerPhoneRoutes } from './routes/phone';
@@ -48,6 +50,7 @@ registerGroupRoutes(router);
 registerPlayerRoutes(router);
 registerPlayRoutes(router);
 registerPlaylistSyncRoutes(router);
+registerFollowSyncRoutes(router);
 registerPushRoutes(router);
 registerGenreBlockRoutes(router);
 registerPhoneRoutes(router);
@@ -330,10 +333,16 @@ export default {
           .catch(report('scheduled:runHourlyGenreEnrichment'))
       );
     } else if (event.cron === '15 * * * *') {
+      // Both write-sync destinations share this tick. Chained rather than
+      // run in parallel: they hit the same app-wide Spotify write budget,
+      // and firing them together doubles the burst for no benefit -- neither
+      // is time-sensitive to the minute.
       ctx.waitUntil(
         runScheduledPlaylistSync(env)
-          .then(() => undefined)
           .catch(report('scheduled:runScheduledPlaylistSync'))
+          .then(() => runScheduledFollowSync(env))
+          .then(() => undefined)
+          .catch(report('scheduled:runScheduledFollowSync'))
       );
     } else if (event.cron === '30 */6 * * *') {
       // runIndex rotates which slice of SEED_GENRES this run advances (see

@@ -268,7 +268,14 @@
 // offered a Next page whenever the total was an exact multiple of the page
 // size, landing on an empty list. history.html and history.js both changed
 // and both are precached.
-const CACHE_NAME = 'wavelengthz-shell-v47';
+// v48 adds opt-in following of liked artists to /settings/connections, the
+// second Spotify write destination after v43's playlist sync. Its own scope,
+// its own consent trip (/login/spotify?intent=follow) and its own toggle --
+// a follow is outward-facing (it shows on the user's Spotify profile and
+// feeds Release Radar) where the playlist is private, so consenting to one
+// must never imply the other. connections.html/.js and app.js all changed
+// and all three are precached.
+const CACHE_NAME = 'wavelengthz-shell-v48';
 const APP_SHELL = [
   '/',
   '/app.js',

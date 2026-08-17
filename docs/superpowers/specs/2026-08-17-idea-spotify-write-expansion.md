@@ -24,7 +24,7 @@ Ranked by invasiveness — build order should follow it:
 | Destination | Scope | Status | Notes |
 |---|---|---|---|
 | Wavelengthz playlist | `playlist-modify-private` | **Shipped** (#97) | Safest: additive, self-contained, trivially deletable, barely touches recommendations. |
-| Follow artists | `user-follow-modify` | Not built | Outward-facing. Reasonable for **artist** right-swipes, which carry real intent. Its own toggle, off by default. |
+| Follow artists | `user-follow-modify` | **Shipped** (#106) | Outward-facing, so its own scope, consent trip and toggle. Artist right-swipes only. |
 | Liked Songs | `user-library-modify` | Not built | Most invasive — directly shapes their algorithm. Off by default, and better wired to an **explicit tap** (the player-bar heart) than to deck swipes at all. |
 | Export a match mixtape | `playlist-modify-private` | Not built | See below. |
 
