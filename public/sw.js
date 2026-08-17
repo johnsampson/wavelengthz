@@ -250,7 +250,13 @@
 // the same reason), with the null state and the original paused-at-0
 // heuristic as backups. playerBar.js and playHeuristics.js both changed and
 // both are precached.
-const CACHE_NAME = 'wavelengthz-shell-v44';
+// v45 makes the player's progress bar seekable -- tap or drag anywhere on it
+// to jump to that point in the song, with arrow-key support so it isn't
+// pointer-only. The bar keeps its 4px look but gets a ~20px touch target.
+// Seeking deliberately doesn't touch threshold accounting, which measures
+// playing time rather than position, so scrubbing can't fast-track a counted
+// play. playerBar.js and wavelengthzPlayer.js changed; both are precached.
+const CACHE_NAME = 'wavelengthz-shell-v45';
 const APP_SHELL = [
   '/',
   '/app.js',

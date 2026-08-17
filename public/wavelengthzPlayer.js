@@ -181,6 +181,19 @@ export async function resumePlayback() {
   return true;
 }
 
+// Jumps to an absolute position in whatever track is currently loaded.
+//
+// The SDK's own seek(), not the Web API's /seek endpoint: this device is
+// already the active one, and the SDK call round-trips locally rather than
+// through Spotify's HTTP API, so it doesn't spend app-wide rate limit budget
+// on something a listener may do repeatedly while scrubbing.
+export async function seekTo(positionMs) {
+  const connection = await getPlayer();
+  if (!connection) return false;
+  await connection.player.seek(Math.max(0, Math.floor(positionMs)));
+  return true;
+}
+
 // Subscribes to Spotify's own player_state_changed event -- position,
 // duration, and paused/playing state for whatever this device is currently
 // playing. A no-op if the player never connected; callers that only care

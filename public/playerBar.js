@@ -14,7 +14,7 @@
 // exactly this reason) -- ES module imports of the same URL resolve to the
 // same in-memory instance for the life of the document, so this state stays
 // intact across every client-side navigation.
-import { checkPlayerAvailability, playTrack, pausePlayback, resumePlayback, onStateChange } from './wavelengthzPlayer.js';
+import { checkPlayerAvailability, playTrack, pausePlayback, resumePlayback, seekTo, onStateChange } from './wavelengthzPlayer.js';
 import {
   hookOffsetMs,
   createPlayProgress,
@@ -214,6 +214,41 @@ export function pickMode(availability) {
   return availability?.available ? 'sdk' : 'iframe';
 }
 
+// How far an arrow-key press moves the playhead. Matches what most players
+// use, and is small enough that holding the key scrubs rather than jumps.
+export const SEEK_STEP_MS = 5_000;
+
+/**
+ * Absolute position a click at `clientX` on a progress bar of `rect` means.
+ *
+ * Pure, so the arithmetic that decides where playback jumps is testable
+ * without a DOM or a real SDK. Clamped at both ends: a click on the very edge
+ * of the hit area can land marginally outside the bar itself, and seeking to
+ * a negative position or past the end is never what was meant.
+ *
+ * @returns {number | null} position in ms, or null when duration is unusable
+ */
+export function seekTargetMs(clientX, rect, durationMs) {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return null;
+  if (!rect || !Number.isFinite(rect.width) || rect.width <= 0) return null;
+  const fraction = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+  return Math.round(fraction * durationMs);
+}
+
+/** Position after nudging by `deltaMs`, clamped to the track. */
+export function seekStepTargetMs(positionMs, deltaMs, durationMs) {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return null;
+  const base = Number.isFinite(positionMs) ? positionMs : 0;
+  return Math.min(durationMs, Math.max(0, base + deltaMs));
+}
+
+/** m:ss for aria-valuetext, so the bar announces something meaningful. */
+export function formatTime(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return '0:00';
+  const total = Math.floor(ms / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
@@ -293,15 +328,33 @@ export function renderPlayerChromeHtml(state) {
 
   if (mode === 'sdk') {
     const paused = !sdkState || sdkState.paused;
-    const pct = !sdkState || !sdkState.duration ? 0 : (sdkState.position / sdkState.duration) * 100;
+    const positionMs = sdkState?.position ?? 0;
+    const durationMs = sdkState?.duration ?? 0;
+    const pct = durationMs ? (positionMs / durationMs) * 100 : 0;
     return `
       <div class="mx-auto flex w-full max-w-md items-center gap-3 p-4">
         <img src="${imageUrl}" alt="" class="h-14 w-14 shrink-0 rounded object-cover ring-1 ring-white/10" />
         <div class="min-w-0 flex-1">
           ${marqueeSpan(name, 'text-sm font-medium text-neutral-100')}
           ${artistName ? marqueeSpan(artistName, 'text-xs text-neutral-400') : ''}
-          <div class="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-white/10">
-            <div class="h-full rounded-full bg-gradient-to-r from-brand-500 to-accent-500" style="width:${pct}%"></div>
+          <!-- Seekable. The -my-2/py-2 gives a ~20px tall touch target
+               without changing the bar's visual weight or the row's height;
+               a 4px-tall strip is impossible to hit accurately on a phone.
+               role=slider + arrow keys so this isn't pointer-only. -->
+          <div
+            data-action="seek"
+            role="slider"
+            tabindex="0"
+            aria-label="Seek"
+            aria-valuemin="0"
+            aria-valuemax="${Math.round(durationMs)}"
+            aria-valuenow="${Math.round(positionMs)}"
+            aria-valuetext="${formatTime(positionMs)} of ${formatTime(durationMs)}"
+            class="-my-2 mt-1.5 cursor-pointer py-2"
+          >
+            <div class="h-1 w-full overflow-hidden rounded-full bg-white/10">
+              <div class="h-full rounded-full bg-gradient-to-r from-brand-500 to-accent-500" style="width:${pct}%"></div>
+            </div>
           </div>
         </div>
         ${likeButton}
@@ -535,6 +588,29 @@ async function startPlayback(track) {
   renderChrome();
 }
 
+/**
+ * Jump to an absolute position in the current track.
+ *
+ * Deliberately does NOT touch playProgress. Threshold tracking measures
+ * accumulated PLAYING time, not position (see createPlayProgress), so
+ * scrubbing to 0:29 can't fast-track a counted play -- which is both correct
+ * accounting and the only version of this feature that isn't a way to
+ * manufacture streams.
+ *
+ * The radio end-of-track timer DOES need re-basing, and gets it for free: the
+ * SDK emits a state change after a seek, and the listener re-arms from the
+ * new position. This also updates sdkState optimistically so the bar tracks
+ * the pointer immediately rather than waiting for that round trip.
+ */
+export async function seek(positionMs) {
+  if (mode !== 'sdk' || positionMs === null) return;
+  if (sdkState) {
+    sdkState = { ...sdkState, position: positionMs };
+    renderChrome();
+  }
+  await seekTo(positionMs);
+}
+
 // SDK-mode only -- the iframe's own embedded controls handle play/pause
 // for the Free-tier path, so this is a no-op there.
 export async function togglePlayPause() {
@@ -582,10 +658,23 @@ export function mountPlayerBar() {
   const chromeRoot = document.getElementById('wl-player-chrome');
   if (!chromeRoot) return;
   chromeRoot.addEventListener('click', (e) => {
-    const action = e.target.closest('[data-action]')?.dataset.action;
+    const el = e.target.closest('[data-action]');
+    const action = el?.dataset.action;
     if (action === 'toggle') togglePlayPause();
     else if (action === 'hide') hide();
     else if (action === 'like') like();
+    else if (action === 'seek') seek(seekTargetMs(e.clientX, el.getBoundingClientRect(), sdkState?.duration));
+  });
+
+  // Arrow keys nudge the playhead, so seeking isn't pointer-only. Scoped to
+  // the seek control itself rather than the whole bar, so arrow keys
+  // elsewhere keep their normal meaning.
+  chromeRoot.addEventListener('keydown', (e) => {
+    if (e.target.closest('[data-action]')?.dataset.action !== 'seek') return;
+    const delta = e.key === 'ArrowRight' ? SEEK_STEP_MS : e.key === 'ArrowLeft' ? -SEEK_STEP_MS : null;
+    if (delta === null) return;
+    e.preventDefault(); // otherwise the page scrolls under the bar
+    seek(seekStepTargetMs(sdkState?.position, delta, sdkState?.duration));
   });
   renderChrome();
 }

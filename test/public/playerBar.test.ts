@@ -1,5 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { pickMode, renderPlayerChromeHtml, trackMatches, like, _setCurrentTrackForTests, _resetForTests } from '../../public/playerBar.js';
+import {
+  pickMode,
+  renderPlayerChromeHtml,
+  trackMatches,
+  like,
+  seekTargetMs,
+  seekStepTargetMs,
+  formatTime,
+  SEEK_STEP_MS,
+  _setCurrentTrackForTests,
+  _resetForTests,
+} from '../../public/playerBar.js';
 import { showToast, showErrorToast } from '../../public/toast.js';
 
 vi.mock('../../public/wavelengthzPlayer.js', () => ({
@@ -7,6 +18,7 @@ vi.mock('../../public/wavelengthzPlayer.js', () => ({
   playTrack: vi.fn(),
   pausePlayback: vi.fn(),
   resumePlayback: vi.fn(),
+  seekTo: vi.fn(),
   onStateChange: vi.fn(),
 }));
 vi.mock('../../public/toast.js', () => ({ showToast: vi.fn(), showErrorToast: vi.fn() }));
@@ -212,5 +224,107 @@ describe('like', () => {
 
     expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('like'));
     vi.unstubAllGlobals();
+  });
+});
+
+describe('seekTargetMs', () => {
+  const rect = { left: 100, width: 200 } as any;
+
+  it('maps a click to the matching position in the track', () => {
+    expect(seekTargetMs(200, rect, 180_000)).toBe(90_000); // halfway
+    expect(seekTargetMs(150, rect, 180_000)).toBe(45_000); // quarter
+  });
+
+  it('clamps a click that lands just outside the bar', () => {
+    // The hit area is padded taller than the bar, so an edge tap can be a
+    // pixel or two outside it. Seeking negative or past the end is never
+    // what was meant.
+    expect(seekTargetMs(90, rect, 180_000)).toBe(0);
+    expect(seekTargetMs(310, rect, 180_000)).toBe(180_000);
+  });
+
+  it('refuses to guess when the duration is unknown', () => {
+    expect(seekTargetMs(200, rect, null as any)).toBeNull();
+    expect(seekTargetMs(200, rect, 0)).toBeNull();
+    expect(seekTargetMs(200, rect, NaN)).toBeNull();
+  });
+
+  it('refuses to divide by a zero-width bar', () => {
+    // Happens if the bar is measured while hidden -- a real case during the
+    // router's page swap.
+    expect(seekTargetMs(200, { left: 0, width: 0 } as any, 180_000)).toBeNull();
+    expect(seekTargetMs(200, null as any, 180_000)).toBeNull();
+  });
+
+  it('always returns a whole number of milliseconds', () => {
+    expect(Number.isInteger(seekTargetMs(173, rect, 187_333))).toBe(true);
+  });
+});
+
+describe('seekStepTargetMs', () => {
+  it('nudges forward and back by the step', () => {
+    expect(seekStepTargetMs(60_000, SEEK_STEP_MS, 180_000)).toBe(65_000);
+    expect(seekStepTargetMs(60_000, -SEEK_STEP_MS, 180_000)).toBe(55_000);
+  });
+
+  it('clamps at both ends of the track', () => {
+    expect(seekStepTargetMs(2_000, -SEEK_STEP_MS, 180_000)).toBe(0);
+    expect(seekStepTargetMs(178_000, SEEK_STEP_MS, 180_000)).toBe(180_000);
+  });
+
+  it('treats an unknown position as the start', () => {
+    expect(seekStepTargetMs(undefined as any, SEEK_STEP_MS, 180_000)).toBe(5_000);
+  });
+
+  it('refuses to act without a duration', () => {
+    expect(seekStepTargetMs(60_000, SEEK_STEP_MS, undefined as any)).toBeNull();
+  });
+});
+
+describe('formatTime', () => {
+  it('formats as m:ss with a padded seconds field', () => {
+    expect(formatTime(0)).toBe('0:00');
+    expect(formatTime(9_000)).toBe('0:09');
+    expect(formatTime(65_000)).toBe('1:05');
+    expect(formatTime(600_000)).toBe('10:00');
+  });
+
+  it('degrades to 0:00 rather than NaN for unusable input', () => {
+    expect(formatTime(null as any)).toBe('0:00');
+    expect(formatTime(-1)).toBe('0:00');
+  });
+});
+
+describe('the seek control in rendered chrome', () => {
+  const sdkTrack = { spotifyId: 'sp1', id: 't1', name: 'Song', artistName: 'Band', imageUrl: 'i' };
+
+  it('exposes the progress bar as a real slider with the current position', () => {
+    const html = renderPlayerChromeHtml({
+      currentTrack: sdkTrack,
+      mode: 'sdk',
+      sdkState: { paused: false, position: 45_000, duration: 180_000 },
+    });
+
+    expect(html).toContain('data-action="seek"');
+    expect(html).toContain('role="slider"');
+    expect(html).toContain('aria-valuenow="45000"');
+    expect(html).toContain('aria-valuemax="180000"');
+    // Announced as time, not milliseconds.
+    expect(html).toContain('0:45 of 3:00');
+    // Focusable, or arrow-key seeking is unreachable.
+    expect(html).toContain('tabindex="0"');
+  });
+
+  it('renders a zero-width bar rather than NaN before the first state arrives', () => {
+    const html = renderPlayerChromeHtml({ currentTrack: sdkTrack, mode: 'sdk', sdkState: null });
+
+    expect(html).toContain('width:0%');
+    expect(html).not.toContain('NaN');
+  });
+
+  it('offers no seek control in iframe mode, which cannot be seeked', () => {
+    const html = renderPlayerChromeHtml({ currentTrack: sdkTrack, mode: 'iframe', sdkState: null });
+
+    expect(html).not.toContain('data-action="seek"');
   });
 });
