@@ -1093,3 +1093,88 @@ describe('GET /api/tracks/:id/radio', () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe('GET /api/artists/:id -- liked songs first (issue #72)', () => {
+  /** Seeds n catalog tracks for local-1 in rowid order t1..tn. */
+  async function seedTracks(n: number) {
+    for (let i = 1; i <= n; i++) {
+      await env.DB.prepare(
+        `INSERT INTO tracks (id, artist_id, spotify_id, name, source, approved, created_at, updated_at)
+         VALUES (?, 'local-1', ?, ?, 'spotify', 1, 1000, 1000)`
+      )
+        .bind(`t${i}`, `sp-t${i}`, `Track ${i}`)
+        .run();
+    }
+  }
+
+  async function like(userId: string, trackId: string, direction = 'right') {
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at)
+       VALUES (?, ?, 'track', ?, ?, 1000, 1000)`
+    )
+      .bind(crypto.randomUUID(), userId, trackId, direction)
+      .run();
+  }
+
+  async function trackIds(cookie: string, query = '') {
+    const res = await worker.fetch(
+      new Request(`http://localhost/api/artists/local-1${query}`, { headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    return body.tracks.map((t: any) => t.id);
+  }
+
+  it('puts the viewer liked tracks on top, keeping release order otherwise', async () => {
+    await seedTracks(4);
+    await like('u1', 't3');
+    const cookie = await cookieFor('u1');
+
+    expect(await trackIds(cookie)).toEqual(['t3', 't1', 't2', 't4']);
+  });
+
+  it('is per viewer -- one person liking a track does not reorder it for anyone else', async () => {
+    await seedTracks(3);
+    await insertTestUser(env.DB, { id: 'u2', spotifyId: 'sp2', createdAt: 1000, updatedAt: 1000 });
+    await like('u2', 't3');
+
+    expect(await trackIds(await cookieFor('u1'))).toEqual(['t1', 't2', 't3']);
+    expect(await trackIds(await cookieFor('u2'))).toEqual(['t3', 't1', 't2']);
+  });
+
+  it('pulls a liked track in even when it falls outside the requested window', async () => {
+    // The whole point of the feature is that your liked songs are visible.
+    // A list that silently omits one because it is track 5 of a 2-track page
+    // would be the wrong feature.
+    await seedTracks(5);
+    await like('u1', 't5');
+
+    const ids = await trackIds(await cookieFor('u1'), '?limit=2');
+    expect(ids[0]).toBe('t5');
+    expect(ids).toContain('t1');
+  });
+
+  it('does not treat a pass or a skip as a like', async () => {
+    await seedTracks(3);
+    await like('u1', 't3', 'left');
+    await like('u1', 't2', 'skip');
+
+    expect(await trackIds(await cookieFor('u1'))).toEqual(['t1', 't2', 't3']);
+  });
+
+  it('still reports the like direction on the reordered tracks', async () => {
+    await seedTracks(3);
+    await like('u1', 't2');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/artists/local-1', { headers: { Cookie: await cookieFor('u1') } }),
+      env,
+      {} as ExecutionContext
+    );
+    const body = await res.json<any>();
+
+    expect(body.tracks[0].id).toBe('t2');
+    expect(body.tracks[0].direction).toBe('right');
+  });
+});
