@@ -281,7 +281,15 @@
 // changed). Brand-new route and script, so both MUST be in APP_SHELL from
 // this version or a first visit 404s offline. Says nothing at all below a
 // noise floor rather than reporting a trend from two swipes.
-const CACHE_NAME = 'wavelengthz-shell-v49';
+// v50 fixes issue #108's "the thumb down icon is not right on track card":
+// artist.html's per-track Pass button rendered its thumbs-down SVG a size
+// smaller (h-4 w-4) than its sibling Play button (h-5 w-5) in the same h-9
+// w-9 circle -- the glyph itself was already correct (the same Feather
+// thumbs-down path the deck's own Pass button uses), just undersized. Also
+// replaces the per-track and per-artist Like buttons' raw "♥" text glyph
+// with the same heart SVG path the player bar and deck use, per the issue's
+// "align... same like/heart, etc." ask.
+const CACHE_NAME = 'wavelengthz-shell-v50';
 const APP_SHELL = [
   '/',
   '/app.js',
