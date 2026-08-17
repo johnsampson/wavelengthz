@@ -291,7 +291,15 @@
 // its now-playing fetch rather than after -- an await loses the tap gesture
 // entirely, so focusing afterward could never have worked on iOS regardless
 // of scheduling. domUtils.js is new and precached.
-// v51 clarifies that photos are genuinely optional at onboarding (issue
+// v51 fixes issue #108's "the thumb down icon is not right on track card":
+// artist.html's per-track Pass button rendered its thumbs-down SVG a size
+// smaller (h-4 w-4) than its sibling Play button (h-5 w-5) in the same h-9
+// w-9 circle -- the glyph itself was already correct (the same Feather
+// thumbs-down path the deck's own Pass button uses), just undersized. Also
+// replaces the per-track and per-artist Like buttons' raw "♥" text glyph
+// with the same heart SVG path the player bar and deck use, per the issue's
+// "align... same like/heart, etc." ask.
+// v52 clarifies that photos are genuinely optional at onboarding (issue
 // #108: "don't require photos on onboarding"). Nothing in onboarding.html's
 // submit() or POST /api/onboarding was ever actually gated on photo count --
 // the count next to a file-upload control right before Continue just read as
@@ -299,7 +307,7 @@
 // with a note that messaging (messagingGate.ts's MIN_PHOTOS) does need a few
 // eventually, said here so that isn't a surprise met for the first time deep
 // in Settings after onboarding is already done.
-const CACHE_NAME = 'wavelengthz-shell-v51';
+const CACHE_NAME = 'wavelengthz-shell-v52';
 const APP_SHELL = [
   '/',
   '/app.js',
