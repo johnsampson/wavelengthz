@@ -32,6 +32,55 @@
     <a href="/login/spotify?intent=connect" class="btn-primary block w-full text-center">Connect Spotify</a>
     <p class="mt-1 text-center text-xs text-neutral-500">Link your Spotify account for music-taste matching.</p>
   </div>
+
+  <!-- Playlist sync. Separate from the connection above on purpose: this is
+       the only thing in the app that WRITES to a Spotify account, and it's
+       opted into on its own, after sign-in, never bundled into it. -->
+  <div x-show="!loading && hasSpotify && sync" class="mx-auto mb-4 max-w-md rounded-2xl border border-white/10 bg-surface/60 p-4">
+    <h2 class="font-semibold text-neutral-100">Sync liked songs to Spotify</h2>
+    <p class="mt-1 text-sm text-neutral-400">
+      Adds every song you like here to a private <span class="font-medium text-neutral-300">Wavelengthz</span> playlist in your Spotify account.
+      Nothing else in your library is touched.
+    </p>
+
+    <template x-if="sync && !sync.enabled">
+      <div class="mt-3">
+        <button type="button" @click="enableSync()" class="btn-primary w-full">Turn on playlist sync</button>
+        <p class="mt-2 text-xs text-neutral-500">
+          Spotify will ask for permission to create a playlist. This is a separate approval from signing in --
+          we never ask for it at login.
+        </p>
+      </div>
+    </template>
+
+    <template x-if="sync && sync.enabled">
+      <div class="mt-3 space-y-3">
+        <p class="text-sm text-brand-400" role="status">
+          On<span x-show="sync.syncedCount > 0" x-text="` -- ${sync.syncedCount} songs synced`"></span>
+        </p>
+
+        <p x-show="sync.pendingCount > 0" class="text-sm text-neutral-300">
+          <span x-text="sync.pendingCount"></span>
+          <span x-text="sync.pendingCount === 1 ? 'liked song is not in your playlist yet.' : 'liked songs are not in your playlist yet.'"></span>
+        </p>
+
+        <div class="flex gap-2">
+          <button type="button" @click="syncNow()" :disabled="syncing" class="btn-primary flex-1 disabled:opacity-50">
+            <span x-text="syncing ? 'Syncing...' : 'Sync now'"></span>
+          </button>
+          <a x-show="sync.playlistUrl" :href="sync.playlistUrl" target="_blank" rel="noopener noreferrer"
+             class="btn-secondary flex-1 text-center">Open playlist</a>
+        </div>
+
+        <button type="button" @click="disableSync()" class="w-full text-center text-sm text-neutral-400 underline">
+          Turn off playlist sync
+        </button>
+        <p class="text-xs text-neutral-500">
+          Turning it off stops new songs from being added. Anything already in your playlist stays there.
+        </p>
+      </div>
+    </template>
+  </div>
   </div>
 
   <script type="module">

@@ -10,6 +10,7 @@ import {
   searchArtistsByGenre,
   SpotifyRateLimitError,
   SpotifyCooldownActiveError,
+  PLAYLIST_SYNC_SCOPE,
 } from '../../src/lib/spotify';
 
 const env = {
@@ -28,6 +29,28 @@ function fakeKv(initial: Record<string, string> = {}): KVNamespace {
 }
 
 describe('buildAuthUrl', () => {
+  it('never requests write access by default -- sign-in is read-only', () => {
+    // The whole point of PLAYLIST_SYNC_SCOPE living outside SCOPES: a first-
+    // time consent screen must not ask a stranger for permission to modify
+    // their Spotify account. Regression coverage for that specifically.
+    const scope = new URL(buildAuthUrl('state-abc', env)).searchParams.get('scope')!;
+    expect(scope).not.toContain(PLAYLIST_SYNC_SCOPE);
+    expect(scope).not.toContain('playlist-modify');
+    expect(scope).not.toContain('user-library-modify');
+    expect(scope).not.toContain('user-follow-modify');
+  });
+
+  it('adds an opt-in scope on top of the base set, never instead of it', () => {
+    // Spotify issues exactly the scopes asked for here, so an upgrade trip
+    // that dropped the base set would silently revoke streaming/playback
+    // access from an account that already had it.
+    const scope = new URL(buildAuthUrl('state-abc', env, undefined, [PLAYLIST_SYNC_SCOPE])).searchParams.get('scope')!;
+    expect(scope).toContain(PLAYLIST_SYNC_SCOPE);
+    expect(scope).toContain('user-top-read');
+    expect(scope).toContain('streaming');
+    expect(scope).toContain('user-read-private');
+  });
+
   it('builds a Spotify authorize URL with client id, redirect uri, scope, and state', () => {
     const url = new URL(buildAuthUrl('state-abc', env));
     expect(url.origin + url.pathname).toBe('https://accounts.spotify.com/authorize');

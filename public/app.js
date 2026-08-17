@@ -100,6 +100,9 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
     }),
+  playlistSync: () => request('/api/me/playlist-sync'),
+  disablePlaylistSync: () => request('/api/me/playlist-sync/disable', { method: 'POST' }),
+  runPlaylistSync: () => request('/api/me/playlist-sync/run', { method: 'POST' }),
   messagingStatus: () => request('/api/me/messaging-status'),
   /** @param {string} phoneNumber - E.164, e.g. "+15551234567" */
   startPhoneVerification: (phoneNumber) =>

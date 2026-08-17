@@ -1,5 +1,6 @@
 import type { IRequest, RouterType } from 'itty-router';
-import { buildAuthUrl, exchangeCodeForToken, fetchSpotifyProfile } from '../lib/spotify';
+import { PLAYLIST_SYNC_SCOPE, buildAuthUrl, exchangeCodeForToken, fetchSpotifyProfile } from '../lib/spotify';
+import { hasPlaylistScope, setSyncEnabled } from '../lib/playlistSync';
 import { encrypt } from '../lib/crypto';
 import { createSession, requestIsSecure, requestProtocol, getSessionUser } from '../lib/session';
 import { buildGoogleAuthUrl, exchangeGoogleCode, fetchGoogleProfile } from '../lib/google';
@@ -57,20 +58,33 @@ export function registerAuthRoutes(router: RouterType) {
     }
 
     const state = crypto.randomUUID();
+    const intent = url.searchParams.get('intent');
+
+    // ?intent=sync is the playlist-sync upgrade trip: same OAuth flow, but
+    // additionally requesting PLAYLIST_SYNC_SCOPE, which sign-in deliberately
+    // never asks for (see its comment in spotify.ts). A second consent round
+    // trip is unavoidable here -- a refresh cannot gain a scope the original
+    // consent didn't include -- so this exists to make that trip a deliberate,
+    // explained one rather than a mystery re-login.
+    const extraScopes = intent === 'sync' ? [PLAYLIST_SYNC_SCOPE] : [];
+
     // requestProtocol, not url.protocol: see the comment on requestIsSecure
     // in session.ts -- a Cloudflare Tunnel to a local instance reports http
     // here even when the public/browser side is https, and Spotify rejects
     // a non-loopback http redirect_uri outright.
-    const authUrl = buildAuthUrl(state, env, callbackUrlForHost(requestProtocol(request), url.host));
+    const authUrl = buildAuthUrl(state, env, callbackUrlForHost(requestProtocol(request), url.host), extraScopes);
     const secure = requestIsSecure(request);
 
     // ?intent=connect (from Settings' "Connect Spotify" action) marks this as
     // linking to the currently logged-in user rather than a fresh login --
-    // /callback reads this cookie to decide which path to take.
+    // /callback reads this cookie to decide which path to take. ?intent=sync
+    // takes that same linking path (it's always an already-logged-in user
+    // upgrading their own grant) and additionally lands back on the
+    // connections page with the sync result.
     const headers = new Headers({ Location: authUrl });
     headers.append('Set-Cookie', `wl_oauth_state=${state}; Path=/; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Lax; Max-Age=600`);
-    if (url.searchParams.get('intent') === 'connect') {
-      headers.append('Set-Cookie', `wl_oauth_intent=connect; Path=/; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Lax; Max-Age=600`);
+    if (intent === 'connect' || intent === 'sync') {
+      headers.append('Set-Cookie', `wl_oauth_intent=${intent}; Path=/; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Lax; Max-Age=600`);
     }
     return new Response(null, { status: 302, headers });
   });
@@ -216,7 +230,7 @@ export function registerAuthRoutes(router: RouterType) {
     const intentCookie = parseCookie(request, 'wl_oauth_intent');
     const clearIntentCookie = 'wl_oauth_intent=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0';
 
-    if (intentCookie === 'connect') {
+    if (intentCookie === 'connect' || intentCookie === 'sync') {
       const currentUser = await getSessionUser(request, env.DB);
       if (currentUser) {
         const claimedBy = await env.DB.prepare(
@@ -237,6 +251,23 @@ export function registerAuthRoutes(router: RouterType) {
           ).bind(crypto.randomUUID(), currentUser.id, profile.id, profile.email ?? null, now, now),
           tokenStatement(currentUser.id),
         ]);
+
+        if (intentCookie === 'sync') {
+          // Only flip sync on if Spotify actually granted the write scope --
+          // the consent screen has its own "Cancel"/partial-grant paths, and
+          // enabling sync against a grant that didn't happen would leave the
+          // UI claiming a state the token can't back. grantedScope is what
+          // Spotify returned for this exact exchange, so this is the
+          // authoritative answer, not an assumption.
+          const granted = hasPlaylistScope(grantedScope);
+          if (granted) await setSyncEnabled(env.DB, currentUser.id, true, now);
+
+          const headers = new Headers({
+            Location: granted ? '/settings/connections?sync_enabled=1' : '/settings/connections?sync_error=denied',
+          });
+          headers.append('Set-Cookie', clearIntentCookie);
+          return new Response(null, { status: 302, headers });
+        }
 
         const headers = new Headers({ Location: '/settings/connections?spotify_connected=1' });
         headers.append('Set-Cookie', clearIntentCookie);
