@@ -299,12 +299,20 @@
 // replaces the per-track and per-artist Like buttons' raw "♥" text glyph
 // with the same heart SVG path the player bar and deck use, per the issue's
 // "align... same like/heart, etc." ask.
-// v52 adds a swipe-left-to-reveal-trash gesture to the player bar
+// v52 clarifies that photos are genuinely optional at onboarding (issue
+// #108: "don't require photos on onboarding"). Nothing in onboarding.html's
+// submit() or POST /api/onboarding was ever actually gated on photo count --
+// the count next to a file-upload control right before Continue just read as
+// mandatory with nothing saying otherwise. Now explicitly labeled optional,
+// with a note that messaging (messagingGate.ts's MIN_PHOTOS) does need a few
+// eventually, said here so that isn't a surprise met for the first time deep
+// in Settings after onboarding is already done.
+// v53 adds a swipe-left-to-reveal-trash gesture to the player bar
 // (public/playerBar.js) for closing it, alongside the existing explicit X
 // button (issue #108: "align the radio player w/ the tracks view... maybe
 // make the radio a swipe left that exposes a trash can to close the
 // radio?"). No new precached files, but playerBar.js's content changed.
-const CACHE_NAME = 'wavelengthz-shell-v52';
+const CACHE_NAME = 'wavelengthz-shell-v53';
 const APP_SHELL = [
   '/',
   '/app.js',

@@ -105,8 +105,19 @@
       <input type="range" min="5" max="200" x-model.number="maxDistanceKm" class="accent-brand-500" />
     </label>
 
+    <!-- Genuinely optional at this step -- Continue below has never been
+         gated on photo count (issue #108: "don't require photos on
+         onboarding"). The count next to a file-upload control right before a
+         submit button reads as mandatory even when nothing enforces it, so
+         this makes the actual rule explicit both ways: free to skip now, but
+         messaging (messagingGate.ts's MIN_PHOTOS) does need some before two
+         people can talk -- said here so that gate isn't a surprise met for
+         the first time deep in Settings after onboarding is already done. -->
     <fieldset class="flex flex-col gap-2">
-      <legend class="field-label mb-1">Photos (<span x-text="photos.length"></span>/<span x-text="maxPhotos"></span>)</legend>
+      <legend class="field-label mb-1">Photos (<span x-text="photos.length"></span>/<span x-text="maxPhotos"></span>) -- optional</legend>
+      <p class="text-xs text-neutral-500">
+        Skip this for now if you'd rather -- you can add photos any time from Settings. You'll need at least a few before you can message anyone.
+      </p>
       <label
         class="btn-secondary inline-flex w-fit cursor-pointer items-center"
         :class="photos.length >= maxPhotos ? 'pointer-events-none opacity-50' : ''"
