@@ -1297,3 +1297,108 @@ describe('GET /api/tracks/:id/radio -- genre neighbours', () => {
     expect(await radio('t1')).toEqual([]);
   });
 });
+
+describe('GET /api/tracks/:id/radio -- excludes live recordings (issue #108)', () => {
+  async function artist(id: string) {
+    await env.DB.prepare(
+      `INSERT INTO artists (id, spotify_id, name, genres, source, approved, created_at, updated_at)
+       VALUES (?, ?, ?, '{}', 'spotify', 1, 1000, 1000)`
+    )
+      .bind(id, `sp-${id}`, `Artist ${id}`)
+      .run();
+  }
+
+  async function track(id: string, artistId: string, name: string) {
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, artist_id, spotify_id, name, source, approved, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'spotify', 1, 1000, 1000)`
+    )
+      .bind(id, artistId, `sp-${id}`, name)
+      .run();
+  }
+
+  async function radio(trackId: string, userId = 'u1') {
+    const res = await worker.fetch(
+      new Request(`http://localhost/api/tracks/${trackId}/radio`, { headers: { Cookie: await cookieFor(userId) } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(200);
+    return (await res.json<any>()).tracks.map((t: any) => t.id);
+  }
+
+  it('never queues a live recording from the same artist', async () => {
+    await artist('a1');
+    await track('t1', 'a1', 'Enjoy the Silence');
+    await track('t2', 'a1', 'Enjoy the Silence - Live');
+    await track('t3', 'a1', 'Personal Jesus');
+
+    expect(await radio('t1')).toEqual(['t3']);
+  });
+
+  it('does not exclude a track whose title legitimately contains the word "live"', async () => {
+    // The exact false-positive this heuristic exists to avoid.
+    await artist('a1');
+    await track('t1', 'a1', 'Enjoy the Silence');
+    await track('t2', 'a1', 'Live Forever');
+
+    expect(await radio('t1')).toEqual(['t2']);
+  });
+});
+
+describe('GET /api/artists/:id -- excludes live recordings (issue #108)', () => {
+  async function seedTrack(id: string, name: string) {
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, artist_id, spotify_id, name, source, approved, created_at, updated_at)
+       VALUES (?, 'local-1', ?, ?, 'spotify', 1, 1000, 1000)`
+    )
+      .bind(id, `sp-${id}`, name)
+      .run();
+  }
+
+  async function like(userId: string, trackId: string) {
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at)
+       VALUES (?, ?, 'track', ?, 'right', 1000, 1000)`
+    )
+      .bind(crypto.randomUUID(), userId, trackId)
+      .run();
+  }
+
+  async function trackIds(cookie: string) {
+    const res = await worker.fetch(
+      new Request('http://localhost/api/artists/local-1', { headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    return body.tracks.map((t: any) => t.id);
+  }
+
+  it('hides a live recording from the general browse list', async () => {
+    await seedTrack('t1', 'Enjoy the Silence');
+    await seedTrack('t2', 'Enjoy the Silence - Live');
+    await seedTrack('t3', 'Personal Jesus');
+
+    expect(await trackIds(await cookieFor('u1'))).toEqual(['t1', 't3']);
+  });
+
+  it('does NOT hide a live recording the viewer already liked', async () => {
+    // A track the user explicitly chose stays visible regardless of live
+    // status -- the point is decluttering browsing, never hiding something
+    // someone already picked.
+    await seedTrack('t1', 'Enjoy the Silence');
+    await seedTrack('t2', 'Enjoy the Silence - Live');
+    await like('u1', 't2');
+
+    const ids = await trackIds(await cookieFor('u1'));
+    expect(ids).toContain('t2');
+  });
+
+  it('does not hide a track whose title legitimately contains the word "live"', async () => {
+    await seedTrack('t1', 'Live Forever');
+
+    expect(await trackIds(await cookieFor('u1'))).toEqual(['t1']);
+  });
+});

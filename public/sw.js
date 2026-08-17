@@ -281,7 +281,17 @@
 // changed). Brand-new route and script, so both MUST be in APP_SHELL from
 // this version or a first visit 404s offline. Says nothing at all below a
 // noise floor rather than reporting a trend from two swipes.
-// v50 clarifies that photos are genuinely optional at onboarding (issue
+// v50 fixes issue #108's "search bar focus dies not open keyboard without a
+// 2nd click" on iOS Safari, in both the deck's artist search (index.js) and
+// the track-share picker (trackPicker.js) -- new public/domUtils.js's
+// focusAfterReveal() replaces a bare $nextTick(() => ...focus()) with
+// $nextTick + requestAnimationFrame, which keeps the focus() call inside the
+// browser's gesture-linked paint pipeline instead of a microtask iOS drops
+// the gesture link across. trackPicker.js's picker also now focuses BEFORE
+// its now-playing fetch rather than after -- an await loses the tap gesture
+// entirely, so focusing afterward could never have worked on iOS regardless
+// of scheduling. domUtils.js is new and precached.
+// v51 clarifies that photos are genuinely optional at onboarding (issue
 // #108: "don't require photos on onboarding"). Nothing in onboarding.html's
 // submit() or POST /api/onboarding was ever actually gated on photo count --
 // the count next to a file-upload control right before Continue just read as
@@ -289,7 +299,7 @@
 // with a note that messaging (messagingGate.ts's MIN_PHOTOS) does need a few
 // eventually, said here so that isn't a surprise met for the first time deep
 // in Settings after onboarding is already done.
-const CACHE_NAME = 'wavelengthz-shell-v50';
+const CACHE_NAME = 'wavelengthz-shell-v51';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -301,6 +311,7 @@ const APP_SHELL = [
   '/search.js',
   '/photos.js',
   '/toast.js',
+  '/domUtils.js',
   '/alpine.js',
   '/playerBar.js',
   '/wavelengthzPlayer.js',

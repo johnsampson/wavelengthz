@@ -4,6 +4,7 @@ import { getAuthedUser } from './auth.js';
 import { shouldSearch, debounce, loadStoredMode, storeMode, saveSearchState, takeSearchState } from './search.js';
 import { play, togglePlayPause, isCurrentTrack } from './playerBar.js';
 import { showErrorToast } from './toast.js';
+import { focusAfterReveal } from './domUtils.js';
 import { navigate } from './router.js';
 
 /** @typedef {{id?: string, itemType?: string, itemId?: string, name?: string, displayName?: string, imageUrl?: string, primaryPhotoUrl?: string, bio?: string, distanceLabel?: string, topGenres?: string[], anthemTrack?: {spotifyId: string, id?: string, name: string, artistName?: string | null, imageUrl?: string} | null, track?: {spotifyId: string, id: string, name: string, imageUrl?: string, durationMs?: number | null} | null}} Candidate */
@@ -199,12 +200,10 @@ export function createDeckApp() {
 
     openSearch() {
       this.showSearch = true;
-      // The plain `autofocus` attribute only fires once, on the initial
-      // (hidden) page load -- this element never re-parses when x-show
-      // later reveals it, so it silently did nothing. $nextTick waits for
-      // Alpine to actually flip the modal's `display` before focusing,
-      // otherwise .focus() on a still-hidden input is a no-op too.
-      this.$nextTick(() => this.$refs.searchInput?.focus());
+      // See domUtils.js's focusAfterReveal for why this isn't a plain
+      // $nextTick(() => ...focus()) -- that reliably needed a second tap on
+      // iOS Safari before opening the keyboard (issue #108).
+      focusAfterReveal(this.$nextTick.bind(this), this.$refs.searchInput);
     },
 
     closeSearch() {
