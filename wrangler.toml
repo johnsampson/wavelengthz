@@ -153,7 +153,13 @@ max_concurrency = 1
 # that grows the catalog unattended -- the weekly refresh above can only add
 # artists already present in some user's Spotify top-artists list, which on
 # a small user base runs dry after its first run.
-crons = ["0 3 * * *", "0 4 * * sun", "*/5 * * * *", "0 * * * *", "30 */6 * * *"]
+# "15 * * * *": hourly Spotify playlist sync (src/lib/playlistSync.ts) for
+# users who opted in. Hourly is deliberate rather than every-few-minutes: a
+# liked song showing up in someone's playlist within the hour is well within
+# what anyone would expect, and these are *write* calls against the same
+# app-wide Spotify limit everything else shares. At :15 so it collides with
+# neither the hourly genre enrichment (:00) nor catalog discovery (:30).
+crons = ["0 3 * * *", "0 4 * * sun", "*/5 * * * *", "0 * * * *", "30 */6 * * *", "15 * * * *"]
 
 [env.test]
 [[env.test.d1_databases]]

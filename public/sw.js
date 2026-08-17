@@ -233,7 +233,14 @@
 // playHeuristics' isTrackEnd, since the Web Playback SDK has no
 // end-of-track event -- and consecutive auto-advances are capped
 // (RADIO_MAX_CONSECUTIVE) so a forgotten tab can't play on indefinitely.
-const CACHE_NAME = 'wavelengthz-shell-v42';
+// v43 adds opt-in Spotify playlist sync to /settings/connections: liked songs
+// can now be exported to a private "Wavelengthz" playlist in the user's own
+// Spotify account. Enabling it is a separate, explicit consent trip
+// (/login/spotify?intent=sync) rather than part of sign-in -- the write scope
+// it needs cannot be added to an existing token, and asking for write access
+// on the first consent screen is the wrong trade. connections.html/.js and
+// app.js all changed, and all three are precached.
+const CACHE_NAME = 'wavelengthz-shell-v43';
 const APP_SHELL = [
   '/',
   '/app.js',

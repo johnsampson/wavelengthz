@@ -14,6 +14,8 @@ import { registerAccountRoutes } from './routes/account';
 import { registerGroupRoutes } from './routes/groups';
 import { registerPlayerRoutes } from './routes/player';
 import { registerPlayRoutes } from './routes/plays';
+import { registerPlaylistSyncRoutes } from './routes/playlistSync';
+import { runScheduledPlaylistSync } from './lib/playlistSync';
 import { registerPushRoutes } from './routes/push';
 import { registerGenreBlockRoutes } from './routes/genreBlocks';
 import { registerPhoneRoutes } from './routes/phone';
@@ -45,6 +47,7 @@ registerAccountRoutes(router);
 registerGroupRoutes(router);
 registerPlayerRoutes(router);
 registerPlayRoutes(router);
+registerPlaylistSyncRoutes(router);
 registerPushRoutes(router);
 registerGenreBlockRoutes(router);
 registerPhoneRoutes(router);
@@ -325,6 +328,12 @@ export default {
         runHourlyGenreEnrichment(env.DB, env.RATE_LIMIT_KV)
           .then(() => undefined)
           .catch(report('scheduled:runHourlyGenreEnrichment'))
+      );
+    } else if (event.cron === '15 * * * *') {
+      ctx.waitUntil(
+        runScheduledPlaylistSync(env)
+          .then(() => undefined)
+          .catch(report('scheduled:runScheduledPlaylistSync'))
       );
     } else if (event.cron === '30 */6 * * *') {
       // runIndex rotates which slice of SEED_GENRES this run advances (see

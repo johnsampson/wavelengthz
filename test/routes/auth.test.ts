@@ -24,6 +24,24 @@ describe('GET /login/spotify', () => {
     expect(setCookie).toContain('wl_oauth_state=');
   });
 
+  it('requests the playlist write scope only for ?intent=sync', async () => {
+    const plain = await worker.fetch(new Request('http://127.0.0.1:8787/login/spotify'), env, {} as ExecutionContext);
+    const plainScope = new URL(plain.headers.get('Location')!).searchParams.get('scope')!;
+    expect(plainScope).not.toContain('playlist-modify-private');
+
+    const sync = await worker.fetch(new Request('http://127.0.0.1:8787/login/spotify?intent=sync'), env, {} as ExecutionContext);
+    const syncScope = new URL(sync.headers.get('Location')!).searchParams.get('scope')!;
+    expect(syncScope).toContain('playlist-modify-private');
+    // Additive: the upgrade trip must not drop what the account already has.
+    expect(syncScope).toContain('streaming');
+  });
+
+  it('marks the sync upgrade trip with its own intent cookie', async () => {
+    const res = await worker.fetch(new Request('http://127.0.0.1:8787/login/spotify?intent=sync'), env, {} as ExecutionContext);
+    const cookies = res.headers.getAll('Set-Cookie').join('; ');
+    expect(cookies).toContain('wl_oauth_intent=sync');
+  });
+
   it('omits Secure on the state cookie over plain http', async () => {
     // Safari refuses to store a Secure cookie over http, even for
     // 127.0.0.1 -- unlike Chromium, which special-cases localhost. Local dev

@@ -221,16 +221,48 @@ const SCOPES = [
   'user-modify-playback-state',
 ].join(' ');
 
+// Deliberately NOT in SCOPES: this is the only scope in this app that grants
+// *write* access to someone's Spotify account, and it's requested solely by
+// the opt-in playlist sync (src/lib/playlistSync.ts), never at sign-in.
+//
+// Two reasons, and the first one is not a preference:
+//
+// 1. It can't be retrofitted anyway. Per the SCOPES comment above, adding a
+//    scope only affects new consents, and a refresh can never gain one. So
+//    every already-linked account needs a fresh /login round trip to grant
+//    this regardless of where it's requested -- the only real choice is
+//    whether that trip is an explained opt-in or an unexplained forced
+//    re-login.
+// 2. Bundling it into sign-in would turn the first consent screen a stranger
+//    ever sees from "see your top artists, play music" into "...and edit
+//    your playlists" -- asking for write access at the exact moment the user
+//    has the least reason to grant it.
+//
+// `playlist-modify-private` only (not -public): the playlist this app
+// creates is private, and a public playlist would additionally show up on
+// the user's profile for anyone who follows them -- an outward-facing side
+// effect nobody asked for by flipping a sync toggle.
+export const PLAYLIST_SYNC_SCOPE = 'playlist-modify-private';
+
 // redirectUri defaults to env.SPOTIFY_REDIRECT_URI, but callers on an
 // allowlisted alternate host (src/routes/auth.ts's SPOTIFY_ALLOWED_HOSTS)
 // pass their own host's callback URL instead -- Spotify's token exchange
 // later requires an exact match against whichever one was used here.
-export function buildAuthUrl(state: string, env: Env, redirectUri: string = env.SPOTIFY_REDIRECT_URI): string {
+export function buildAuthUrl(
+  state: string,
+  env: Env,
+  redirectUri: string = env.SPOTIFY_REDIRECT_URI,
+  // Additive only -- the base SCOPES are always requested, so an upgrade trip
+  // can never come back with *fewer* scopes than the account already had
+  // (Spotify issues exactly what's asked for here, so omitting the base set
+  // would silently downgrade a working account's streaming/playback access).
+  extraScopes: string[] = []
+): string {
   const url = new URL('https://accounts.spotify.com/authorize');
   url.searchParams.set('client_id', env.SPOTIFY_CLIENT_ID);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('redirect_uri', redirectUri);
-  url.searchParams.set('scope', SCOPES);
+  url.searchParams.set('scope', [SCOPES, ...extraScopes].join(' ').trim());
   url.searchParams.set('state', state);
   return url.toString();
 }
@@ -649,4 +681,83 @@ export async function fetchTrackById(token: string, trackId: string, kv?: KVName
   );
   if (!res.ok) throw new Error(`Spotify track fetch failed: ${res.status} ${await res.text()}`);
   return res.json<any>();
+}
+
+// --- Playlist writes -------------------------------------------------------
+//
+// The only endpoints in this file that MODIFY a user's Spotify account. All
+// three require PLAYLIST_SYNC_SCOPE (see its comment), which no account has
+// unless it explicitly opted into playlist sync -- so every caller must check
+// granted_scope first rather than discovering the 403 at runtime.
+
+// Carries the HTTP status so a caller can tell "this user revoked our write
+// access at Spotify's end" (401/403) apart from a transient failure, without
+// pattern-matching an error string. Only the write helpers below throw this --
+// every pre-existing read path in this file keeps its plain Error unchanged.
+export class SpotifyWriteError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'SpotifyWriteError';
+    this.status = status;
+  }
+}
+
+/** True for the two statuses that mean re-consent, not "try again later". */
+export function isSpotifyAuthFailure(error: unknown): boolean {
+  return error instanceof SpotifyWriteError && (error.status === 401 || error.status === 403);
+}
+
+export async function createPlaylist(
+  token: string,
+  spotifyUserId: string,
+  name: string,
+  description: string
+): Promise<{ id: string; external_urls?: { spotify?: string } }> {
+  const res = await spotifyFetch(`https://api.spotify.com/v1/users/${spotifyUserId}/playlists`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    // public:false is what PLAYLIST_SYNC_SCOPE's `-private` half authorizes,
+    // and is the point: this playlist should not appear on the user's public
+    // profile as a side effect of turning on a sync toggle.
+    body: JSON.stringify({ name, description, public: false }),
+  });
+  if (!res.ok) throw new SpotifyWriteError(res.status, `Spotify playlist create failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+// Spotify's own documented ceiling for this endpoint. Exported so the caller
+// can chunk to exactly this rather than duplicating the constant -- with a
+// backfill of several hundred liked tracks, the difference between one call
+// per 100 and one call per track is the difference between a handful of
+// requests and the kind of burst that trips the app-wide limit this whole
+// file exists to avoid.
+export const PLAYLIST_ADD_MAX_URIS = 100;
+
+export async function addTracksToPlaylist(token: string, playlistId: string, trackUris: string[]): Promise<void> {
+  if (trackUris.length === 0) return;
+  if (trackUris.length > PLAYLIST_ADD_MAX_URIS) {
+    throw new Error(`addTracksToPlaylist called with ${trackUris.length} uris, max is ${PLAYLIST_ADD_MAX_URIS}`);
+  }
+  const res = await spotifyFetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uris: trackUris }),
+  });
+  if (!res.ok) throw new SpotifyWriteError(res.status, `Spotify playlist add failed: ${res.status} ${await res.text()}`);
+}
+
+// Whether a playlist this app created still exists and is still ours to write
+// to. Spotify has no hard delete for playlists -- "deleting" one unfollows it,
+// after which GET still returns it but writes behave unpredictably -- so this
+// checks `owner.id` too, not just a 200. A 404 means the id is genuinely gone
+// and the caller should create a fresh playlist rather than error forever.
+export async function playlistIsWritable(token: string, playlistId: string, spotifyUserId: string): Promise<boolean> {
+  const res = await spotifyFetch(`https://api.spotify.com/v1/playlists/${playlistId}?fields=id,owner(id)`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 404) return false;
+  if (!res.ok) throw new SpotifyWriteError(res.status, `Spotify playlist fetch failed: ${res.status} ${await res.text()}`);
+  const data = await res.json<{ owner?: { id?: string } }>();
+  return data.owner?.id === spotifyUserId;
 }
