@@ -299,15 +299,23 @@
 // replaces the per-track and per-artist Like buttons' raw "♥" text glyph
 // with the same heart SVG path the player bar and deck use, per the issue's
 // "align... same like/heart, etc." ask.
-// v52 guards the two person-photo <img>s that could render with a null src
+// v52 clarifies that photos are genuinely optional at onboarding (issue
+// #108: "don't require photos on onboarding"). Nothing in onboarding.html's
+// submit() or POST /api/onboarding was ever actually gated on photo count --
+// the count next to a file-upload control right before Continue just read as
+// mandatory with nothing saying otherwise. Now explicitly labeled optional,
+// with a note that messaging (messagingGate.ts's MIN_PHOTOS) does need a few
+// eventually, said here so that isn't a surprise met for the first time deep
+// in Settings after onboarding is already done.
+// v53 guards the two person-photo <img>s that could render with a null src
 // (issue #108's "only show a photo if one exists"): the People-mode deck
 // card's primaryPhotoUrl and the match-modal's photoUrl, both null for a
 // candidate with no uploaded photos -- now genuinely possible for anyone who
-// skipped photos at onboarding (a recent onboarding-copy change made that
-// explicit). Each is now wrapped in x-if, matching the guard group.html
-// already uses for member face icons, rather than always rendering an <img>
-// with a dropped src attribute.
-const CACHE_NAME = 'wavelengthz-shell-v52';
+// skipped photos at onboarding (v52's change made that explicit). Each is
+// now wrapped in x-if, matching the guard group.html already uses for
+// member face icons, rather than always rendering an <img> with a dropped
+// src attribute.
+const CACHE_NAME = 'wavelengthz-shell-v53';
 const APP_SHELL = [
   '/',
   '/app.js',
