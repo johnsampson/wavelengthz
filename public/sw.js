@@ -299,7 +299,15 @@
 // replaces the per-track and per-artist Like buttons' raw "♥" text glyph
 // with the same heart SVG path the player bar and deck use, per the issue's
 // "align... same like/heart, etc." ask.
-const CACHE_NAME = 'wavelengthz-shell-v51';
+// v52 clarifies that photos are genuinely optional at onboarding (issue
+// #108: "don't require photos on onboarding"). Nothing in onboarding.html's
+// submit() or POST /api/onboarding was ever actually gated on photo count --
+// the count next to a file-upload control right before Continue just read as
+// mandatory with nothing saying otherwise. Now explicitly labeled optional,
+// with a note that messaging (messagingGate.ts's MIN_PHOTOS) does need a few
+// eventually, said here so that isn't a surprise met for the first time deep
+// in Settings after onboarding is already done.
+const CACHE_NAME = 'wavelengthz-shell-v52';
 const APP_SHELL = [
   '/',
   '/app.js',
