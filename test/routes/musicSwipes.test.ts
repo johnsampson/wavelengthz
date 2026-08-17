@@ -4,6 +4,9 @@ import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
 import { insertTestUser } from '../helpers/createUser';
 import { genresToObject } from '../../src/lib/genres';
+import { encrypt } from '../../src/lib/crypto';
+import { FOLLOW_SYNC_SCOPE } from '../../src/lib/spotify';
+import { setFollowSyncEnabled } from '../../src/lib/followSync';
 import worker from '../../src/index';
 
 beforeAll(async () => {
@@ -12,7 +15,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await env.DB.exec(
-    'DELETE FROM user_blocked_genres; DELETE FROM user_genres; DELETE FROM music_swipes; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM sessions; DELETE FROM tracks; DELETE FROM users; DELETE FROM artists;'
+    'DELETE FROM user_blocked_genres; DELETE FROM user_genres; DELETE FROM spotify_follow_sync_items; DELETE FROM spotify_follow_syncs; DELETE FROM music_swipes; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM sessions; DELETE FROM tracks; DELETE FROM users; DELETE FROM artists;'
   );
   // SWIPE_LIMIT (src/index.ts) is a real 30-per-60s cap, keyed by IP -- test
   // requests all share the same fallback 'unknown' IP, so without this a
@@ -395,6 +398,152 @@ describe('POST /api/swipe/music', () => {
     const res = await worker.fetch(new Request('http://localhost/api/candidates/music', { headers: { Cookie: cookie } }), env, ctx);
     const body = await res.json<any>();
     expect(body.candidates.some((c: any) => c.itemId === 'a1')).toBe(false);
+  });
+});
+
+describe('real-time follow sync on like (issue: "should happen on every like action around the site")', () => {
+  beforeEach(async () => {
+    await env.DB.prepare(
+      `INSERT INTO artists (id, spotify_id, name, genres, image_url, source, approved, created_at) VALUES ('fa1', 'sp-fa1', 'Follow Artist', '{}', 'https://img.example/fa1.jpg', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('ft1', 'sp-ft1', 'Follow Track', 'fa1', 'https://img.example/ft1.jpg', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(`UPDATE music_source_tokens SET access_token = ?, refresh_token = ?, granted_scope = ? WHERE user_id = 'u1'`)
+      .bind(
+        await encrypt('live-access-token', env.TOKEN_ENCRYPTION_KEY),
+        await encrypt('live-refresh-token', env.TOKEN_ENCRYPTION_KEY),
+        `user-top-read streaming ${FOLLOW_SYNC_SCOPE}`
+      )
+      .run();
+    await setFollowSyncEnabled(env.DB, 'u1', true, 1000);
+  });
+
+  /** Stubs only PUT /v1/me/following; anything else throws. */
+  function stubFollowFetch() {
+    const calls: Array<{ url: string; method: string }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+        const url = input.toString();
+        const method = init?.method ?? 'GET';
+        calls.push({ url, method });
+        if (url.includes('/me/following') && method === 'PUT') return new Response('', { status: 204 });
+        throw new Error(`unexpected Spotify call: ${method} ${url}`);
+      })
+    );
+    return calls;
+  }
+
+  it('follows the artist on Spotify in the background when liked directly, without delaying the response', async () => {
+    const calls = stubFollowFetch();
+    const pending: Promise<any>[] = [];
+    const capturingCtx = { waitUntil: (p: Promise<any>) => pending.push(p) } as unknown as ExecutionContext;
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/swipe/music', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_type: 'artist', item_id: 'fa1', direction: 'right' }),
+      }),
+      env,
+      capturingCtx
+    );
+    expect(res.status).toBe(200);
+    // Scheduled via ctx.waitUntil, not awaited inline -- the response above
+    // already landed before the Spotify call below is made.
+    expect(pending.length).toBe(1);
+    expect(calls.filter((c) => c.url.includes('/me/following')).length).toBe(0);
+
+    await Promise.all(pending);
+
+    expect(calls.some((c) => c.url.includes('/me/following') && c.method === 'PUT')).toBe(true);
+    const item = await env.DB
+      .prepare('SELECT * FROM spotify_follow_sync_items WHERE user_id = ? AND spotify_artist_id = ?')
+      .bind('u1', 'sp-fa1')
+      .first<any>();
+    expect(item).toBeTruthy();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('follows the artist when liked via the track-like cascade', async () => {
+    const calls = stubFollowFetch();
+    const pending: Promise<any>[] = [];
+    const capturingCtx = { waitUntil: (p: Promise<any>) => pending.push(p) } as unknown as ExecutionContext;
+    const cookie = await cookieFor('u1');
+
+    await worker.fetch(
+      new Request('http://localhost/api/swipe/music', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_type: 'track', item_id: 'ft1', direction: 'right' }),
+      }),
+      env,
+      capturingCtx
+    );
+    await Promise.all(pending);
+
+    expect(calls.some((c) => c.url.includes('/me/following') && c.method === 'PUT')).toBe(true);
+    const item = await env.DB
+      .prepare('SELECT * FROM spotify_follow_sync_items WHERE user_id = ? AND spotify_artist_id = ?')
+      .bind('u1', 'sp-fa1')
+      .first<any>();
+    expect(item).toBeTruthy();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('does not follow or unfollow anything on a left-swipe pass', async () => {
+    const calls = stubFollowFetch();
+    const pending: Promise<any>[] = [];
+    const capturingCtx = { waitUntil: (p: Promise<any>) => pending.push(p) } as unknown as ExecutionContext;
+    const cookie = await cookieFor('u1');
+
+    await worker.fetch(
+      new Request('http://localhost/api/swipe/music', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_type: 'artist', item_id: 'fa1', direction: 'left' }),
+      }),
+      env,
+      capturingCtx
+    );
+    await Promise.all(pending);
+
+    expect(calls.filter((c) => c.url.includes('/me/following')).length).toBe(0);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('fires from the History "Change" toggle too (PATCH /api/swipes/music/:id)', async () => {
+    const calls = stubFollowFetch();
+    const pending: Promise<any>[] = [];
+    const capturingCtx = { waitUntil: (p: Promise<any>) => pending.push(p) } as unknown as ExecutionContext;
+    const cookie = await cookieFor('u1');
+
+    // Starts as a pass, then gets "Changed" to a like from History -- a
+    // distinct code path from a fresh swipe.
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('sw1', 'u1', 'artist', 'fa1', 'left', 1000, 1000)`
+    ).run();
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/swipes/music/sw1', {
+        method: 'PATCH',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ direction: 'right' }),
+      }),
+      env,
+      capturingCtx
+    );
+    expect(res.status).toBe(200);
+    await Promise.all(pending);
+
+    expect(calls.some((c) => c.url.includes('/me/following') && c.method === 'PUT')).toBe(true);
+
+    vi.unstubAllGlobals();
   });
 });
 

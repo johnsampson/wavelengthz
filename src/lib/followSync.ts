@@ -194,6 +194,65 @@ export async function runFollowSync(env: Env, user: UserRow, now: number = Date.
 }
 
 /**
+ * Follow a single artist immediately, called from the swipe endpoints
+ * (src/routes/musicSwipes.ts) right when a right-swipe lands on an artist --
+ * directly, or via the track-like-cascades-to-artist-like path -- so
+ * following actually happens "when you like them here", matching
+ * connections.html's own copy, instead of only within the next hourly
+ * runScheduledFollowSync tick or a manual "Follow now" tap. Both of those
+ * remain as the safety net for whatever this misses (a failed call here, a
+ * user who enables sync after already having liked artists, a like that
+ * came in before this shipped) -- this is additive, not a replacement.
+ *
+ * Deliberately narrow, unlike runFollowSync: no batching, no hasMore, no
+ * last_synced_at bump (that timestamp means "the sweep ran", not "a follow
+ * happened"). Callers must never await this inline in a request handler --
+ * wrap it in ctx.waitUntil so a slow or failed Spotify call never delays or
+ * breaks the swipe itself; any failure here silently falls back to the
+ * hourly sweep, since no ledger row gets written on failure.
+ */
+export async function syncFollowForArtist(env: Env, user: UserRow, spotifyArtistId: string, now: number = Date.now()): Promise<void> {
+  if (!spotifyArtistId) return;
+  const db = env.DB;
+
+  const row = await getFollowSyncRow(db, user.id);
+  if (row?.enabled !== 1) return;
+
+  const account = await getSpotifyAccount(db, user.id);
+  if (!account || !hasFollowScope(account.granted_scope)) return;
+
+  // DB-first: skip the Spotify call entirely if this artist is already
+  // recorded as followed (an earlier like, or a prior sweep already got it).
+  const already = await db
+    .prepare('SELECT 1 FROM spotify_follow_sync_items WHERE user_id = ? AND spotify_artist_id = ?')
+    .bind(user.id, spotifyArtistId)
+    .first();
+  if (already) return;
+
+  try {
+    const token = await getValidAccessToken(user, env, db);
+    await followArtists(token, [spotifyArtistId]);
+    await db
+      .prepare(
+        `INSERT INTO spotify_follow_sync_items (id, user_id, spotify_artist_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, spotify_artist_id) DO NOTHING`
+      )
+      .bind(crypto.randomUUID(), user.id, spotifyArtistId, now, now)
+      .run();
+  } catch (error) {
+    if (isSpotifyAuthFailure(error)) {
+      await setFollowSyncEnabled(db, user.id, false, now);
+      return;
+    }
+    // Rate limit, transient network error, etc. -- swallowed here rather
+    // than surfaced to the swipe response. No ledger row was written, so
+    // this artist stays pending and the next hourly sweep picks it up.
+    console.error('syncFollowForArtist failed', error);
+  }
+}
+
+/**
  * Cron entry point. Sequential and per-user isolated, for the same reason
  * runScheduledPlaylistSync is: these are write calls against a shared
  * app-wide Spotify limit, and one user failing must not stop the rest.
