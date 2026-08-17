@@ -275,7 +275,13 @@
 // feeds Release Radar) where the playlist is private, so consenting to one
 // must never imply the other. connections.html/.js and app.js all changed
 // and all three are precached.
-const CACHE_NAME = 'wavelengthz-shell-v48';
+// v49 adds /wavelength: a monthly view of how the user's taste has shifted,
+// computed from music_swipes' own timestamps (user_genres holds running
+// totals with no history, so it can say what someone likes but never what
+// changed). Brand-new route and script, so both MUST be in APP_SHELL from
+// this version or a first visit 404s offline. Says nothing at all below a
+// noise floor rather than reporting a trend from two swipes.
+const CACHE_NAME = 'wavelengthz-shell-v49';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -325,6 +331,8 @@ const APP_SHELL = [
   '/settings/preferences.js',
   '/settings/notifications.js',
   '/settings/connections.js',
+  '/wavelength',
+  '/wavelength.js',
   '/notifications',
   '/groups',
   '/group',

@@ -40,6 +40,7 @@ describe('ROUTES', () => {
       '/settings/notifications',
       '/settings/preferences',
       '/settings/profile',
+      '/wavelength',
     ]);
   });
 });

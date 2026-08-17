@@ -10,10 +10,21 @@ import {
   MIN_PHOTOS,
   MIN_LIKED_SONGS,
 } from '../lib/messagingGate';
+import { getTasteDrift } from '../lib/tasteDrift';
 
 const TIME_RANGE = 'medium_term';
 
 export function registerMeRoutes(router: RouterType) {
+  // "Your wavelength moved toward ambient this month." Pure D1 -- computed
+  // from music_swipes' timestamps, since user_genres holds running totals
+  // with no history and so can say what someone likes but never what changed.
+  router.get('/api/me/taste-drift', async (request: Request, env: Env) => {
+    const user = await getSessionUser(request, env.DB);
+    if (!user) return new Response('Unauthorized', { status: 401 });
+
+    return Response.json(await getTasteDrift(env.DB, user.id));
+  });
+
   router.get('/api/me', async (request: Request, env: Env) => {
     const user = await getSessionUser(request, env.DB);
     if (!user) return new Response('Unauthorized', { status: 401 });
