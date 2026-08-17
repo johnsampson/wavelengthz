@@ -13,6 +13,7 @@ import {
   getClientCredentialsToken,
 } from '../lib/spotify';
 import { genresFromRow } from '../lib/genres';
+import { likedFirst, likedTrackIdsForArtist } from '../lib/trackOrdering';
 import { recordCatalogGenres } from '../lib/genreCatalog';
 import { upsertArtist, upsertTrack } from '../lib/catalogUpsert';
 import { haversineKm } from '../lib/scoring';
@@ -274,7 +275,34 @@ export function registerCatalogRoutes(router: RouterType) {
       resolvedTracks = await upsertResolvedTracks(env.DB, topTracks, artistRow.id, artistGenres, user.id, now);
     }
 
-    const trackInternalIds = resolvedTracks.map((t) => t.internalId);
+    // Issue #72: the viewer's liked songs go on top. Applied here, after the
+    // viewer-independent track assembly above, so that expensive part stays
+    // cacheable -- see src/lib/trackOrdering.ts's own comment.
+    const likedIds = await likedTrackIdsForArtist(env.DB, user.id, artistRow.id);
+
+    // A liked track can sit outside the window just fetched (liked track 45,
+    // then load a page showing 30). Pull those in explicitly rather than
+    // silently dropping them from a list whose whole point is "your liked
+    // songs are here". Pure D1 -- a liked track is already in the catalog.
+    const windowIds = new Set(resolvedTracks.map((t) => t.internalId));
+    const missingLikedIds = [...likedIds].filter((id) => !windowIds.has(id));
+    let extraLikedTracks: ResolvedTrack[] = [];
+    if (missingLikedIds.length > 0) {
+      const placeholders = missingLikedIds.map(() => '?').join(', ');
+      const extraRows = await env.DB.prepare(
+        `SELECT * FROM tracks WHERE id IN (${placeholders}) ORDER BY rowid ASC`
+      )
+        .bind(...missingLikedIds)
+        .all<any>();
+      extraLikedTracks = extraRows.results.map(rowToResolvedTrack);
+    }
+
+    // resolvedTracks itself is left alone -- hasMore below is a statement
+    // about how deep the catalog fetch got, and pulling extra liked tracks
+    // forward must not change that answer.
+    const displayTracks = likedFirst([...resolvedTracks, ...extraLikedTracks], likedIds);
+
+    const trackInternalIds = displayTracks.map((t) => t.internalId);
     const directions = new Map<string, string>();
     if (trackInternalIds.length > 0) {
       const placeholders = trackInternalIds.map(() => '?').join(', ');
@@ -334,7 +362,7 @@ export function registerCatalogRoutes(router: RouterType) {
         totalLikesInArea,
         direction: artistSwipe?.direction ?? null,
       },
-      tracks: resolvedTracks.map((t) => ({
+      tracks: displayTracks.map((t) => ({
         id: t.internalId,
         // The one deliberate exception to obfuscating everywhere: the
         // Spotify embed iframe (public/artist.html) can only play a real
