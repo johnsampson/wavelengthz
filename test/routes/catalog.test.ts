@@ -15,7 +15,7 @@ beforeEach(async () => {
   // and tracks references artists — deleting users/artists first trips the FK constraint
   // once a prior test has left a row with a non-null reference.
   await env.DB.exec(
-    'DELETE FROM genres; DELETE FROM music_swipes; DELETE FROM sessions; DELETE FROM tracks; DELETE FROM artists; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;'
+    'DELETE FROM genres; DELETE FROM artist_genres; DELETE FROM user_blocked_genres; DELETE FROM music_swipes; DELETE FROM sessions; DELETE FROM tracks; DELETE FROM artists; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;'
   );
   // fetchArtistTracksCached (src/routes/catalog.ts) caches GET /api/artists/:id's
   // track fetch in RATE_LIMIT_KV, keyed by spotify_id+limit -- since most tests
@@ -1176,5 +1176,124 @@ describe('GET /api/artists/:id -- liked songs first (issue #72)', () => {
 
     expect(body.tracks[0].id).toBe('t2');
     expect(body.tracks[0].direction).toBe('right');
+  });
+});
+
+describe('GET /api/tracks/:id/radio -- genre neighbours', () => {
+  async function artist(id: string, genres: string[]) {
+    await env.DB.prepare(
+      `INSERT INTO artists (id, spotify_id, name, genres, source, approved, created_at, updated_at)
+       VALUES (?, ?, ?, '{}', 'spotify', 1, 1000, 1000)`
+    )
+      .bind(id, `sp-${id}`, `Artist ${id}`)
+      .run();
+    for (const g of genres) {
+      await env.DB.prepare(
+        `INSERT INTO artist_genres (id, artist_id, mb_genre_id, name, count, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 1, 1000, 1000)`
+      )
+        .bind(crypto.randomUUID(), id, g, g)
+        .run();
+    }
+  }
+
+  async function track(id: string, artistId: string) {
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, artist_id, spotify_id, name, source, approved, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'spotify', 1, 1000, 1000)`
+    )
+      .bind(id, artistId, `sp-${id}`, `Track ${id}`)
+      .run();
+  }
+
+  async function radio(trackId: string, userId = 'u1') {
+    const res = await worker.fetch(
+      new Request(`http://localhost/api/tracks/${trackId}/radio`, { headers: { Cookie: await cookieFor(userId) } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(200);
+    return (await res.json<any>()).tracks.map((t: any) => t.id);
+  }
+
+  it('keeps playing the same artist first, before reaching for neighbours', async () => {
+    await artist('a1', ['synthpop']);
+    await artist('a2', ['synthpop']);
+    await track('t1', 'a1');
+    await track('t2', 'a1');
+    await track('n1', 'a2');
+
+    // t2 is a1's own, so it leads regardless of a2 sharing a genre.
+    expect((await radio('t1'))[0]).toBe('t2');
+  });
+
+  it('continues into a genre neighbour once the artist runs out', async () => {
+    await artist('a1', ['synthpop']);
+    await artist('a2', ['synthpop']);
+    await track('t1', 'a1'); // a1's only track
+    await track('n1', 'a2');
+
+    expect(await radio('t1')).toEqual(['n1']);
+  });
+
+  it('ranks a closer neighbour above one sharing a single genre', async () => {
+    await artist('a1', ['synthpop', 'newwave']);
+    await artist('close', ['synthpop', 'newwave']);
+    await artist('far', ['synthpop']);
+    await track('t1', 'a1');
+    await track('far1', 'far');
+    await track('close1', 'close');
+
+    expect((await radio('t1'))[0]).toBe('close1');
+  });
+
+  it('never returns an artist sharing no genre at all', async () => {
+    await artist('a1', ['synthpop']);
+    await artist('unrelated', ['bluegrass']);
+    await track('t1', 'a1');
+    await track('u1t', 'unrelated');
+
+    expect(await radio('t1')).toEqual([]);
+  });
+
+  it('honors a blocked genre -- autoplay must not smuggle one in', async () => {
+    // Blocking a genre has to mean not hearing it. A blocked genre arriving
+    // via autoplay is worse than one in the deck, since nobody chose it.
+    await artist('a1', ['synthpop']);
+    await artist('a2', ['synthpop', 'country']);
+    await track('t1', 'a1');
+    await track('n1', 'a2');
+    await env.DB.prepare(
+      `INSERT INTO user_blocked_genres (id, user_id, genre, created_at, updated_at) VALUES (?, 'u1', 'country', 1000, 1000)`
+    )
+      .bind(crypto.randomUUID())
+      .run();
+
+    expect(await radio('t1')).toEqual([]);
+  });
+
+  it('makes no Spotify call', async () => {
+    const fetchMock = vi.fn(async () => { throw new Error('radio must not call Spotify'); });
+    vi.stubGlobal('fetch', fetchMock);
+    await artist('a1', ['synthpop']);
+    await artist('a2', ['synthpop']);
+    await track('t1', 'a1');
+    await track('n1', 'a2');
+
+    expect(await radio('t1')).toEqual(['n1']);
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('skips a neighbour track with no Spotify id, which cannot be played', async () => {
+    await artist('a1', ['synthpop']);
+    await artist('a2', ['synthpop']);
+    await track('t1', 'a1');
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, artist_id, spotify_id, name, source, approved, created_at, updated_at)
+       VALUES ('n1', 'a2', NULL, 'No Spotify Id', 'spotify', 1, 1000, 1000)`
+    ).run();
+
+    expect(await radio('t1')).toEqual([]);
   });
 });

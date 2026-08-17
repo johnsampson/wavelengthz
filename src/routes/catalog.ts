@@ -114,6 +114,70 @@ async function upsertResolvedTracks(
   return resolved;
 }
 
+
+interface RadioRow {
+  id: string;
+  spotify_id: string;
+  name: string;
+  album_image_url: string | null;
+  duration_ms: number | null;
+  artist_name: string | null;
+}
+
+/**
+ * Tracks by OTHER artists sharing a genre with this one, for when an artist's
+ * own catalog runs out mid-radio.
+ *
+ * Built entirely from this app's own `artist_genres` data. Spotify removed
+ * both endpoints that would make cross-artist continuation easy --
+ * /v1/recommendations and /v1/artists/{id}/related-artists are
+ * Extended-Quota-only since November 2024 (see docs/spotify-extended-quota.md)
+ * -- so there is no recommender to call even if spending the quota were
+ * acceptable. One D1 query, zero Spotify calls, same as the same-artist path.
+ *
+ * Ranked by how many genres an artist shares with the current one, so the
+ * closest neighbours come first and a single incidental genre overlap ranks
+ * last. Ties break on rowid, matching every other track ordering in this
+ * codebase.
+ *
+ * Honors user_blocked_genres. Blocking a genre has to mean not hearing it --
+ * a blocked genre arriving via autoplay would be a worse violation of that
+ * than one appearing in the deck, since nobody chose it.
+ */
+async function genreNeighbourTracks(
+  db: D1Database,
+  userId: string,
+  artistInternalId: string,
+  limit: number
+): Promise<RadioRow[]> {
+  if (limit <= 0) return [];
+
+  const rows = await db
+    .prepare(
+      `SELECT t.id, t.spotify_id, t.name, t.album_image_url, t.duration_ms, a.name AS artist_name,
+              COUNT(DISTINCT ag.mb_genre_id) AS shared
+       FROM artist_genres ag
+       JOIN artist_genres mine ON mine.mb_genre_id = ag.mb_genre_id AND mine.artist_id = ?
+       JOIN artists a ON a.id = ag.artist_id
+       JOIN tracks t ON t.artist_id = a.id
+       WHERE ag.artist_id != ?
+         AND a.approved = 1
+         AND t.spotify_id IS NOT NULL AND t.spotify_id != ''
+         AND NOT EXISTS (
+           SELECT 1 FROM artist_genres blocked
+           WHERE blocked.artist_id = a.id
+             AND blocked.name IN (SELECT genre FROM user_blocked_genres WHERE user_id = ?)
+         )
+       GROUP BY t.id
+       ORDER BY shared DESC, t.rowid ASC
+       LIMIT ?`
+    )
+    .bind(artistInternalId, artistInternalId, userId, limit)
+    .all<RadioRow & { shared: number }>();
+
+  return rows.results;
+}
+
 export function registerCatalogRoutes(router: RouterType) {
   router.get('/api/artists/search', async (request: Request, env: Env) => {
     const user = await getSessionUser(request, env.DB);
@@ -427,10 +491,24 @@ export function registerCatalogRoutes(router: RouterType) {
        LIMIT ?`
     )
       .bind(current.artist_id, current.id, RADIO_QUEUE_LIMIT)
-      .all<{ id: string; spotify_id: string; name: string; album_image_url: string | null; duration_ms: number | null; artist_name: string | null }>();
+      .all<RadioRow>();
+
+    // Same artist first, always. Only once their catalog is exhausted does
+    // radio reach for neighbours -- so the common case is unchanged and a
+    // listener who picked an artist keeps hearing that artist.
+    let tracks = rows.results;
+    if (tracks.length < RADIO_QUEUE_LIMIT) {
+      const neighbours = await genreNeighbourTracks(
+        env.DB,
+        user.id,
+        current.artist_id,
+        RADIO_QUEUE_LIMIT - tracks.length
+      );
+      tracks = [...tracks, ...neighbours];
+    }
 
     return Response.json({
-      tracks: rows.results.map((r) => ({
+      tracks: tracks.map((r) => ({
         id: r.id,
         spotifyId: r.spotify_id,
         name: r.name,
