@@ -192,8 +192,23 @@
 // message in the thread. Also adds an unscoped one-step song search
 // (GET /api/tracks/search with no artist_id) -- previously finding a song
 // required picking its artist first, which is far too much friction for
-// something sent mid-conversation.
-const CACHE_NAME = 'wavelengthz-shell-v39';
+// something sent mid-conversation. v40 fixes two things v39 shipped
+// broken. (1) The chat threads never actually scrolled: <body> was
+// min-h-dvh (a floor, not a height), so the flex column grew to fit every
+// message and the message list's own overflow-y-auto never engaged --
+// scrollToBottom() was setting scrollTop on an element that wasn't a scroll
+// container, so a newly-sent message landed below the fold. Both threads are
+// now h-dvh + overflow-hidden with a min-h-0 list, and scrollToBottom()
+// re-pins once each not-yet-loaded album image settles (a shared track's art
+// has no intrinsic height until it loads, which was landing the scroll
+// short). (2) The fetch handler now passes ignoreSearch for navigation
+// requests -- see its own comment: every precached route that takes a query
+// string (/messages?matchId=, /match?id=, /artist?id=, /profile?id=,
+// /group?id=) was missing the cache for its HTML while still serving that
+// page's .js FROM the cache, so a release that changed both left an
+// installed PWA running new markup against a stale script. router.js's
+// import() also fails soft now instead of rejecting unhandled.
+const CACHE_NAME = 'wavelengthz-shell-v40';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -289,8 +304,27 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // ignoreSearch for navigations specifically: caches.match() compares the
+  // FULL url including the query string, but almost every real visit to a
+  // precached route carries one (/messages?matchId=, /match?id=, /artist?id=,
+  // /profile?id=, /group?id=). So those routes were precached and then never
+  // actually served from cache -- every visit fell through to the network for
+  // its HTML while the SAME page's .js kept being served from cache. That
+  // skew is invisible until a release changes both: the browser then runs new
+  // markup against a stale script (or the reverse), which is exactly how a
+  // freshly-shipped feature can work in a normal browser tab and be broken in
+  // an already-installed PWA. It also meant those routes never actually
+  // worked offline despite being in APP_SHELL.
+  //
+  // Scoped to request.mode === 'navigate' -- a document request is the only
+  // kind where the query string is a parameter to the same shell rather than
+  // part of the resource's identity, so ignoring it anywhere else could serve
+  // the wrong asset for a genuinely cache-busted URL.
+  const isNavigation = event.request.mode === 'navigate';
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
+    caches
+      .match(event.request, isNavigation ? { ignoreSearch: true } : undefined)
+      .then((cached) => cached || fetch(event.request))
   );
 });
 

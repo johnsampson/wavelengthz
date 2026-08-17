@@ -147,7 +147,17 @@ export function createGroupApp() {
 
     scrollToBottom() {
       const list = document.getElementById('group-message-list');
-      if (list) list.scrollTop = list.scrollHeight;
+      if (!list) return;
+      list.scrollTop = list.scrollHeight;
+      // A shared track's album art has no intrinsic size until it loads, so
+      // the scroll above lands short the moment a track message is involved
+      // -- the list grows underneath it. Re-pin to the bottom as each
+      // not-yet-loaded image settles. { once: true } per image, and only for
+      // images still pending, so this adds no ongoing listeners.
+      for (const img of list.querySelectorAll('img')) {
+        if (img.complete) continue;
+        img.addEventListener('load', () => { list.scrollTop = list.scrollHeight; }, { once: true });
+      }
     },
 
     canRecall(message) {
