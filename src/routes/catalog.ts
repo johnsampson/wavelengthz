@@ -36,6 +36,12 @@ const ARTIST_PROFILE_TRACK_LIMIT = 30;
 // subrequest limit PR #18 was written to avoid re-hitting.
 const ARTIST_PROFILE_TRACK_MAX_LIMIT = 90;
 
+// How many follow-on tracks GET /api/tracks/:id/radio hands the player at
+// once. Fetched a single time when playback starts, then advanced through
+// client-side, so this is the whole cost of a radio session -- one small D1
+// query, no matter how long someone listens.
+const RADIO_QUEUE_LIMIT = 20;
+
 // fetchArtistTracks is the expensive part of this route -- up to ~11
 // Spotify calls, one albums-list call plus one per album (see spotifyFetch's
 // own comment in lib/spotify.ts) -- and nothing about its result is
@@ -356,6 +362,54 @@ export function registerCatalogRoutes(router: RouterType) {
       hasMore: quickPath
         ? resolvedTracks.length > 0
         : resolvedTracks.length === trackLimit && trackLimit < ARTIST_PROFILE_TRACK_MAX_LIMIT,
+    });
+  });
+
+  // Radio continuation: more tracks by the same artist, for the player to
+  // roll into when the current one ends. Given the internal id of whatever is
+  // playing, not an artist id -- the player bar only ever holds a track.
+  //
+  // Pure D1, zero Spotify calls. The catalog already has these rows (a track
+  // can only be playing because it came from the catalog in the first place),
+  // so this is exactly the DB-first case CLAUDE.md describes: nothing here
+  // may reach for a token, and an artist whose tracks are only partly
+  // backfilled simply yields a shorter queue rather than triggering a fetch.
+  //
+  // Ordered by rowid like GET /api/artists/:id's own track list, so radio
+  // plays an artist in the same order their page shows them rather than an
+  // arbitrary one. Returns an empty list -- never an error -- for a track
+  // with no catalog row (a deck anthem comes straight from a user's cached
+  // Spotify top-tracks and has none), which the client treats as "no radio
+  // for this one".
+  router.get('/api/tracks/:id/radio', async (request: IRequest, env: Env) => {
+    const user = await getSessionUser(request, env.DB);
+    if (!user) return new Response('Unauthorized', { status: 401 });
+
+    const current = await env.DB.prepare('SELECT id, artist_id FROM tracks WHERE id = ?')
+      .bind(request.params.id)
+      .first<{ id: string; artist_id: string }>();
+    if (!current) return Response.json({ tracks: [] });
+
+    const rows = await env.DB.prepare(
+      `SELECT t.id, t.spotify_id, t.name, t.album_image_url, t.duration_ms, a.name AS artist_name
+       FROM tracks t
+       LEFT JOIN artists a ON a.id = t.artist_id
+       WHERE t.artist_id = ? AND t.id != ?
+       ORDER BY t.rowid ASC
+       LIMIT ?`
+    )
+      .bind(current.artist_id, current.id, RADIO_QUEUE_LIMIT)
+      .all<{ id: string; spotify_id: string; name: string; album_image_url: string | null; duration_ms: number | null; artist_name: string | null }>();
+
+    return Response.json({
+      tracks: rows.results.map((r) => ({
+        id: r.id,
+        spotifyId: r.spotify_id,
+        name: r.name,
+        artistName: r.artist_name,
+        imageUrl: r.album_image_url,
+        durationMs: r.duration_ms,
+      })),
     });
   });
 
