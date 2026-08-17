@@ -128,14 +128,15 @@ describe('GET /api/candidates/music', () => {
 
   it('includes a representative track for an artist candidate, when one already exists in the catalog', async () => {
     await env.DB.prepare(
-      `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('t1', 'sp-t1', 'Track One', 'a1', 'https://img.example/t1.jpg', 'seed', 1, 1000)`
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, duration_ms, source, approved, created_at) VALUES ('t1', 'sp-t1', 'Track One', 'a1', 'https://img.example/t1.jpg', 180000, 'seed', 1, 1000)`
     ).run();
     const cookie = await cookieFor('u1');
     const req = new Request('http://localhost/api/candidates/music?limit=10', { headers: { Cookie: cookie } });
     const res = await worker.fetch(req, env, ctx);
     const body = await res.json<any>();
     const a1 = body.candidates.find((c: any) => c.itemId === 'a1');
-    expect(a1.track).toEqual({ id: 't1', spotifyId: 'sp-t1', name: 'Track One', imageUrl: 'https://img.example/t1.jpg' });
+    // durationMs rides along so the player can start at the hook (migrations/0022).
+    expect(a1.track).toEqual({ id: 't1', spotifyId: 'sp-t1', name: 'Track One', imageUrl: 'https://img.example/t1.jpg', durationMs: 180000 });
   });
 
   it('reports track: null for an artist candidate with no cataloged tracks', async () => {

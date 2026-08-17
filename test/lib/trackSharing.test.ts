@@ -145,7 +145,7 @@ describe('loadSharedTracks', () => {
       `INSERT INTO artists (id, spotify_id, name, genres, source, approved, created_at) VALUES ('a1', 'sp-a1', 'The Artist', '{}', 'seed', 1, 1000)`
     ).run();
     await env.DB.prepare(
-      `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('t1', 'sp-t1', 'Song One', 'a1', 'https://img/t1.jpg', 'seed', 1, 1000)`
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, duration_ms, source, approved, created_at) VALUES ('t1', 'sp-t1', 'Song One', 'a1', 'https://img/t1.jpg', 210000, 'seed', 1, 1000)`
     ).run();
   });
 
@@ -157,6 +157,7 @@ describe('loadSharedTracks', () => {
       name: 'Song One',
       artistName: 'The Artist',
       imageUrl: 'https://img/t1.jpg',
+      durationMs: 210000,
     });
   });
 
