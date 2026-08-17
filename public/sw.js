@@ -267,7 +267,9 @@
 // rather than inferred -- the old "a full page means there's more" heuristic
 // offered a Next page whenever the total was an exact multiple of the page
 // size, landing on an empty list. history.html and history.js both changed
-// and both are precached.
+// and both are precached. The Tracks tab is also relabelled "Songs", which
+// closes the issue #2 ask for People/Artists/Songs and stops the tab
+// disagreeing with the count under it.
 const CACHE_NAME = 'wavelengthz-shell-v47';
 const APP_SHELL = [
   '/',
