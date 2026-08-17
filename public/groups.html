@@ -43,7 +43,20 @@
         <div class="min-w-0">
           <a :href="`/group?id=${g.id}`" class="block truncate font-semibold text-neutral-100" x-text="g.name"></a>
           <p class="truncate text-sm text-neutral-400" x-text="g.topic || g.locationLabel"></p>
-          <p class="text-xs text-neutral-500"><span x-text="g.memberCount"></span>/8 members</p>
+          <div class="mt-1 flex items-center gap-2">
+            <!-- Overlapping face stack (issue #2). -space-x-2 tucks each
+                 photo under the previous one; the ring separates them
+                 against the card so they read as a stack rather than a
+                 smudge. Empty for a group whose members have no approved
+                 photo yet, in which case the count below stands alone. -->
+            <div class="flex -space-x-2" x-show="g.memberFaces.length">
+              <template x-for="url in g.memberFaces" :key="url">
+                <img :src="url" alt="" loading="lazy"
+                     class="h-6 w-6 rounded-full object-cover ring-2 ring-surface" />
+              </template>
+            </div>
+            <p class="text-xs text-neutral-500"><span x-text="g.memberCount"></span>/8 members</p>
+          </div>
         </div>
         <button type="button" class="btn-secondary shrink-0" x-show="!g.isMember" @click="join(g)">Join</button>
         <a :href="`/group?id=${g.id}`" class="btn-ghost shrink-0" x-show="g.isMember">Open</a>
