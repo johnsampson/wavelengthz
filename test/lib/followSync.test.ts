@@ -11,6 +11,7 @@ import {
   runFollowSync,
   runScheduledFollowSync,
   setFollowSyncEnabled,
+  syncFollowForArtist,
 } from '../../src/lib/followSync';
 import { FOLLOW_SYNC_SCOPE, PLAYLIST_SYNC_SCOPE } from '../../src/lib/spotify';
 
@@ -241,6 +242,88 @@ describe('runFollowSync', () => {
 
     // The 50 that landed are recorded, so a retry sends only the other 25.
     expect(await countPendingArtists(env.DB, 'u1')).toBe(25);
+  });
+});
+
+describe('syncFollowForArtist', () => {
+  it('makes no Spotify call when following is disabled', async () => {
+    const user = await seedUser('u1');
+    const calls = stubSpotify();
+
+    await syncFollowForArtist(env, user, 'sp-a1');
+
+    expect(calls).toHaveLength(0);
+  });
+
+  it('makes no Spotify call when only the playlist scope was granted', async () => {
+    const user = await seedUser('u1', `streaming ${PLAYLIST_SYNC_SCOPE}`);
+    await setFollowSyncEnabled(env.DB, 'u1', true, 1000);
+    const calls = stubSpotify();
+
+    await syncFollowForArtist(env, user, 'sp-a1');
+
+    expect(calls).toHaveLength(0);
+  });
+
+  it('follows the artist immediately and records it in the ledger', async () => {
+    const user = await seedUser('u1');
+    await setFollowSyncEnabled(env.DB, 'u1', true, 1000);
+    const calls = stubSpotify();
+
+    await syncFollowForArtist(env, user, 'sp-a1', 5000);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].body.ids).toEqual(['sp-a1']);
+    const item = await env.DB.prepare('SELECT * FROM spotify_follow_sync_items WHERE user_id = ? AND spotify_artist_id = ?')
+      .bind('u1', 'sp-a1')
+      .first<any>();
+    expect(item).toBeTruthy();
+  });
+
+  it('is idempotent -- skips the Spotify call entirely for an artist already in the ledger', async () => {
+    const user = await seedUser('u1');
+    await setFollowSyncEnabled(env.DB, 'u1', true, 1000);
+    stubSpotify();
+    await syncFollowForArtist(env, user, 'sp-a1', 2000);
+
+    const calls = stubSpotify();
+    await syncFollowForArtist(env, user, 'sp-a1', 3000);
+
+    expect(calls).toHaveLength(0);
+  });
+
+  it('does nothing for an empty/missing spotify id', async () => {
+    const user = await seedUser('u1');
+    await setFollowSyncEnabled(env.DB, 'u1', true, 1000);
+    const calls = stubSpotify();
+
+    await syncFollowForArtist(env, user, '');
+
+    expect(calls).toHaveLength(0);
+  });
+
+  it('turns following off when Spotify revokes access, without throwing', async () => {
+    const user = await seedUser('u1');
+    await setFollowSyncEnabled(env.DB, 'u1', true, 1000);
+    stubSpotify({ status: 403 });
+
+    await expect(syncFollowForArtist(env, user, 'sp-a1')).resolves.toBeUndefined();
+
+    const row = await env.DB.prepare('SELECT enabled FROM spotify_follow_syncs WHERE user_id = ?').bind('u1').first<any>();
+    expect(row.enabled).toBe(0);
+  });
+
+  it('swallows a transient failure without throwing, leaving the artist pending for the next sweep', async () => {
+    const user = await seedUser('u1');
+    await setFollowSyncEnabled(env.DB, 'u1', true, 1000);
+    await likeArtist('u1', 'a1', 'sp-a1', 2000);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 500 })));
+
+    await expect(syncFollowForArtist(env, user, 'sp-a1')).resolves.toBeUndefined();
+
+    // No ledger row was written, so the hourly sweep still has this artist
+    // as pending -- nothing was lost, just delayed.
+    expect(await countPendingArtists(env.DB, 'u1')).toBe(1);
   });
 });
 

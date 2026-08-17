@@ -1,8 +1,10 @@
 import type { RouterType, IRequest } from 'itty-router';
 import { getSessionUser } from '../lib/session';
+import type { UserRow } from '../lib/session';
 import { genresFromRow } from '../lib/genres';
 import { topUpArtistsForUser } from '../lib/artistTopUp';
 import { isLiveTrackName } from '../lib/trackFilters';
+import { syncFollowForArtist } from '../lib/followSync';
 
 async function genresForItem(db: D1Database, itemType: 'artist' | 'track', itemId: string): Promise<string[]> {
   const row =
@@ -14,6 +16,39 @@ async function genresForItem(db: D1Database, itemType: 'artist' | 'track', itemI
           .first<{ genres: string }>();
   if (!row) return [];
   return genresFromRow(row.genres);
+}
+
+// The artist's Spotify id behind a swiped item -- itself for an artist swipe,
+// its parent artist's for a track swipe (mirroring genresForItem/
+// likeArtistForTrack's own item_type branching). Used only to hand off to
+// syncFollowForArtist below; a null/missing spotify_id (an artist with no
+// catalog Spotify id, in practice never true for anything reachable via the
+// deck/search, but not guaranteed by the schema) just means there is nothing
+// to follow.
+async function resolveArtistSpotifyId(db: D1Database, itemType: 'artist' | 'track', itemId: string): Promise<string | null> {
+  const row =
+    itemType === 'artist'
+      ? await db.prepare('SELECT spotify_id FROM artists WHERE id = ?').bind(itemId).first<{ spotify_id: string | null }>()
+      : await db
+          .prepare('SELECT a.spotify_id as spotify_id FROM tracks t JOIN artists a ON a.id = t.artist_id WHERE t.id = ?')
+          .bind(itemId)
+          .first<{ spotify_id: string | null }>();
+  return row?.spotify_id ?? null;
+}
+
+// Fire-and-forget hand-off to the real-time follow sync (issue: "sync artist
+// like to follow on Spotify... should happen on every like action around the
+// site"). Called from both right-swipe transition points below via
+// ctx.waitUntil -- never awaited inline, so a slow or failed Spotify call
+// never delays or breaks the swipe response itself. syncFollowForArtist
+// already no-ops instantly (no Spotify call) for a user who hasn't enabled
+// follow sync, so this is cheap to call unconditionally on every like.
+function fireFollowSync(env: Env, ctx: ExecutionContext, user: UserRow, itemType: 'artist' | 'track', itemId: string, now: number): void {
+  ctx.waitUntil(
+    resolveArtistSpotifyId(env.DB, itemType, itemId)
+      .then((spotifyArtistId) => (spotifyArtistId ? syncFollowForArtist(env, user, spotifyArtistId, now) : undefined))
+      .catch((error) => console.error('fireFollowSync failed', error))
+  );
 }
 
 // Liking a song is treated as liking its artist too -- one-directional only:
@@ -252,7 +287,7 @@ export function registerMusicSwipeRoutes(router: RouterType) {
     });
   });
 
-  router.post('/api/swipe/music', async (request: Request, env: Env) => {
+  router.post('/api/swipe/music', async (request: Request, env: Env, ctx: ExecutionContext) => {
     const user = await getSessionUser(request, env.DB);
     if (!user) return new Response('Unauthorized', { status: 401 });
 
@@ -293,6 +328,10 @@ export function registerMusicSwipeRoutes(router: RouterType) {
       await applyGenreAffinity(env.DB, user.id, genres, item_type, 1, now);
       if (item_type === 'track') await likeArtistForTrack(env.DB, user.id, item_id, now);
       if (previous?.direction === 'left') await applyGenrePass(env.DB, user.id, genres, -1, now);
+      // Real-time Spotify follow sync (issue: "should happen on every like
+      // action around the site") -- fire-and-forget, never delays this
+      // response. No-ops instantly for anyone without follow sync enabled.
+      fireFollowSync(env, ctx, user, item_type, item_id, now);
     } else if (direction === 'left' && previous?.direction !== 'left') {
       const genres = await genresForItem(env.DB, item_type, item_id);
       if (previous?.direction === 'right') await applyGenreAffinity(env.DB, user.id, genres, item_type, -1, now);
@@ -349,7 +388,7 @@ export function registerMusicSwipeRoutes(router: RouterType) {
     return Response.json({ swipes: rows.results, total: totalRow?.c ?? 0 });
   });
 
-  router.patch('/api/swipes/music/:id', async (request: IRequest, env: Env) => {
+  router.patch('/api/swipes/music/:id', async (request: IRequest, env: Env, ctx: ExecutionContext) => {
     const user = await getSessionUser(request, env.DB);
     if (!user) return new Response('Unauthorized', { status: 401 });
 
@@ -382,6 +421,7 @@ export function registerMusicSwipeRoutes(router: RouterType) {
       await applyGenreAffinity(env.DB, user.id, genres, swipe.item_type, 1, now);
       if (swipe.item_type === 'track') await likeArtistForTrack(env.DB, user.id, swipe.item_id, now);
       if (swipe.direction === 'left') await applyGenrePass(env.DB, user.id, genres, -1, now);
+      fireFollowSync(env, ctx, user, swipe.item_type, swipe.item_id, now);
     } else if (direction === 'left' && swipe.direction !== 'left') {
       const genres = await genresForItem(env.DB, swipe.item_type, swipe.item_id);
       if (swipe.direction === 'right') await applyGenreAffinity(env.DB, user.id, genres, swipe.item_type, -1, now);
