@@ -21,6 +21,14 @@ function scrollToTop() {
 // History (e.g. from an artist's own history entry) always dropped back to
 // the People tab regardless of which one the user actually had open.
 const HISTORY_MODE_KEY = 'wl_history_mode';
+
+// What each tab is counting, so the total reads as "143 artists" rather than
+// a bare number. Keyed by the same mode values setMode stores.
+const HISTORY_NOUNS = {
+  people: { singular: 'person', plural: 'people' },
+  artist: { singular: 'artist', plural: 'artists' },
+  track: { singular: 'song', plural: 'songs' },
+};
 const VALID_MODES = ['people', 'artist', 'track'];
 // No localStorage in this project's Workers-runtime test environment
 // unless a test explicitly stubs one -- same guard shape as scrollToTop
@@ -40,9 +48,21 @@ export function createHistoryApp(storage = typeof localStorage !== 'undefined' ?
     error: null,
     offset: 0,
     hasNext: false,
+    // Count of everything matching the current tab + direction filter, not
+    // just the page on screen (issue #2). null while unknown, so the header
+    // shows nothing rather than a misleading 0 before the first load.
+    total: null,
     directionFilter: null, // null = all, otherwise 'left' | 'right'
     get hasPrev() {
       return this.offset > 0;
+    },
+
+    /** e.g. "143 artists" -- empty while unknown so nothing flashes. */
+    get totalLabel() {
+      if (this.total == null) return '';
+      const noun = this.directionFilter === 'blocked' ? 'blocked' : HISTORY_NOUNS[this.mode] ?? 'items';
+      if (this.directionFilter === 'blocked') return `${this.total} blocked`;
+      return `${this.total} ${this.total === 1 ? noun.singular : noun.plural}`;
     },
 
     async init() {
@@ -82,10 +102,16 @@ export function createHistoryApp(storage = typeof localStorage !== 'undefined' ?
           const res = await api.blocks();
           this.swipes = res.blocks.map((b) => ({ id: b.userId, name: b.displayName, direction: 'blocked' }));
           this.hasNext = false; // no pagination for blocks -- lists are expected to stay small
+          this.total = res.blocks.length;
         } else {
           const res = await api.swipeHistory(this.mode, PAGE_SIZE, this.offset, this.directionFilter);
           this.swipes = res.swipes;
-          this.hasNext = res.swipes.length === PAGE_SIZE;
+          this.total = res.total ?? null;
+          // Now exact rather than inferred. The old `length === PAGE_SIZE`
+          // heuristic offered a Next page whenever the total happened to be
+          // a multiple of PAGE_SIZE, landing the user on an empty list.
+          this.hasNext =
+            res.total == null ? res.swipes.length === PAGE_SIZE : this.offset + res.swipes.length < res.total;
         }
       } catch (e) {
         const message = 'Could not load your swipe history. Please try again.';

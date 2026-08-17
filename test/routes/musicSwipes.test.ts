@@ -947,3 +947,67 @@ describe('GET /api/swipes/music and PATCH', () => {
     expect(after.updated_at).toBe(before.updated_at);
   });
 });
+
+describe('GET /api/swipes/music -- total (issue #2)', () => {
+  it('counts everything matching, not just the page returned', async () => {
+    for (let i = 0; i < 25; i++) {
+      await env.DB.prepare(
+        `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at)
+         VALUES (?, 'u1', 'artist', ?, 'right', ?, ?)`
+      )
+        .bind(`s${i}`, `a${i}`, 1000 + i, 1000 + i)
+        .run();
+    }
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/swipes/music?limit=10&item_type=artist', { headers: { Cookie: await cookieFor('u1') } }),
+      env,
+      {} as ExecutionContext
+    );
+    const body = await res.json<any>();
+
+    expect(body.swipes).toHaveLength(10);
+    expect(body.total).toBe(25);
+  });
+
+  it('respects the direction and item_type filters', async () => {
+    const rows: Array<[string, string, string]> = [
+      ['s1', 'artist', 'right'],
+      ['s2', 'artist', 'left'],
+      ['s3', 'track', 'right'],
+    ];
+    for (const [id, type, dir] of rows) {
+      await env.DB.prepare(
+        `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at)
+         VALUES (?, 'u1', ?, ?, ?, 1000, 1000)`
+      )
+        .bind(id, type, `item-${id}`, dir)
+        .run();
+    }
+    const cookie = await cookieFor('u1');
+
+    const liked = await (await worker.fetch(
+      new Request('http://localhost/api/swipes/music?item_type=artist&direction=right', { headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    )).json<any>();
+    // "247 songs" while filtered to likes has to mean 247 LIKED songs.
+    expect(liked.total).toBe(1);
+
+    const allArtists = await (await worker.fetch(
+      new Request('http://localhost/api/swipes/music?item_type=artist', { headers: { Cookie: cookie } }),
+      env,
+      {} as ExecutionContext
+    )).json<any>();
+    expect(allArtists.total).toBe(2);
+  });
+
+  it('is zero for a user with no swipes', async () => {
+    const res = await worker.fetch(
+      new Request('http://localhost/api/swipes/music', { headers: { Cookie: await cookieFor('u1') } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect((await res.json<any>()).total).toBe(0);
+  });
+});
