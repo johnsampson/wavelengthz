@@ -66,6 +66,10 @@ interface ResolvedTrack {
   name: string;
   imageUrl: string | null;
   previewUrl: string | null;
+  // Drives the player's hook-offset choice (public/playHeuristics.js). Null
+  // for a row stored before migrations/0022 started capturing it -- the
+  // player just starts such a track at 0:00.
+  durationMs: number | null;
 }
 
 function rowToResolvedTrack(row: any): ResolvedTrack {
@@ -75,6 +79,7 @@ function rowToResolvedTrack(row: any): ResolvedTrack {
     name: row.name,
     imageUrl: row.album_image_url,
     previewUrl: row.preview_url,
+    durationMs: row.duration_ms ?? null,
   };
 }
 
@@ -96,6 +101,7 @@ async function upsertResolvedTracks(
       name: track.name,
       imageUrl: track.album?.images?.[0]?.url ?? null,
       previewUrl: track.preview_url ?? null,
+      durationMs: track.duration_ms ?? null,
     });
   }
   return resolved;
@@ -332,6 +338,7 @@ export function registerCatalogRoutes(router: RouterType) {
         name: t.name,
         imageUrl: t.imageUrl,
         previewUrl: t.previewUrl,
+        durationMs: t.durationMs,
         direction: directions.get(t.internalId) ?? null,
       })),
       // Heuristic, not an exact count: getting back exactly as many tracks as

@@ -154,7 +154,7 @@ export function registerMusicSwipeRoutes(router: RouterType) {
         ? `LEFT JOIN tracks rt ON rt.id = (SELECT id FROM tracks WHERE artist_id = ${table}.id ORDER BY rowid ASC LIMIT 1)`
         : '';
     const trackPreviewSelect =
-      itemType === 'artist' ? `, rt.id as track_id, rt.spotify_id as track_spotify_id, rt.name as track_name, rt.album_image_url as track_image_url` : '';
+      itemType === 'artist' ? `, rt.id as track_id, rt.spotify_id as track_spotify_id, rt.name as track_name, rt.album_image_url as track_image_url, rt.duration_ms as track_duration_ms` : '';
 
     const queryCandidates = () =>
       env.DB.prepare(
@@ -174,6 +174,7 @@ export function registerMusicSwipeRoutes(router: RouterType) {
         track_spotify_id?: string | null;
         track_name?: string | null;
         track_image_url?: string | null;
+        track_duration_ms?: number | null;
       }>();
 
     let rows = await queryCandidates();
@@ -230,7 +231,9 @@ export function registerMusicSwipeRoutes(router: RouterType) {
         // liking it via the player bar cascades to likeArtistForTrack's
         // artist-like/genre-affinity bonus, unlike a raw Spotify-sourced
         // track id.
-        track: r.track_id ? { id: r.track_id, spotifyId: r.track_spotify_id, name: r.track_name, imageUrl: r.track_image_url } : null,
+        track: r.track_id
+          ? { id: r.track_id, spotifyId: r.track_spotify_id, name: r.track_name, imageUrl: r.track_image_url, durationMs: r.track_duration_ms ?? null }
+          : null,
       })),
     });
   });

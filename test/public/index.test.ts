@@ -154,11 +154,12 @@ describe('deck app', () => {
     vi.stubGlobal('window', fakeWindow());
     vi.mocked(isCurrentTrack).mockReturnValue(false);
     const app = createDeckApp();
-    app.current = { name: 'Some Artist', track: { spotifyId: 'sp1', id: 't1', name: 'Song', imageUrl: 'img' } };
+    app.current = { name: 'Some Artist', track: { spotifyId: 'sp1', id: 't1', name: 'Song', imageUrl: 'img', durationMs: 180000 } };
 
     await app.togglePreviewTrack();
 
-    expect(play).toHaveBeenCalledWith({ spotifyId: 'sp1', id: 't1', name: 'Song', artistName: 'Some Artist', imageUrl: 'img' });
+    // durationMs rides along so the bar can start at the hook rather than 0:00.
+    expect(play).toHaveBeenCalledWith({ spotifyId: 'sp1', id: 't1', name: 'Song', artistName: 'Some Artist', imageUrl: 'img', durationMs: 180000 });
   });
 
   it('togglePreviewTrack is a no-op when the current card has no catalog track', async () => {

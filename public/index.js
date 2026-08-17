@@ -6,7 +6,7 @@ import { play, togglePlayPause, isCurrentTrack } from './playerBar.js';
 import { showErrorToast } from './toast.js';
 import { navigate } from './router.js';
 
-/** @typedef {{id?: string, itemType?: string, itemId?: string, name?: string, displayName?: string, imageUrl?: string, primaryPhotoUrl?: string, bio?: string, distanceLabel?: string, topGenres?: string[], anthemTrack?: {spotifyId: string, id?: string, name: string, artistName?: string | null, imageUrl?: string} | null, track?: {spotifyId: string, id: string, name: string, imageUrl?: string} | null}} Candidate */
+/** @typedef {{id?: string, itemType?: string, itemId?: string, name?: string, displayName?: string, imageUrl?: string, primaryPhotoUrl?: string, bio?: string, distanceLabel?: string, topGenres?: string[], anthemTrack?: {spotifyId: string, id?: string, name: string, artistName?: string | null, imageUrl?: string} | null, track?: {spotifyId: string, id: string, name: string, imageUrl?: string, durationMs?: number | null} | null}} Candidate */
 
 // Extracted from index.html's inline script -- see matches.js's comment for
 // why (same reasoning, same shape). Also adds destroy(), same new
@@ -141,8 +141,8 @@ export function createDeckApp() {
         await togglePlayPause();
         return;
       }
-      const { spotifyId, id, name, imageUrl } = this.current.track;
-      await play({ spotifyId, id, name, artistName: this.current.name, imageUrl });
+      const { spotifyId, id, name, imageUrl, durationMs } = this.current.track;
+      await play({ spotifyId, id, name, artistName: this.current.name, imageUrl, durationMs: durationMs ?? null });
     },
 
     async decide(direction) {

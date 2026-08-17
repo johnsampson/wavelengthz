@@ -16,6 +16,10 @@ export interface SpotifyTrackLike {
   name: string;
   album?: { images?: Array<{ url: string }> };
   preview_url?: string | null;
+  // Present on every Spotify track payload this app fetches; captured
+  // (migrations/0022) so the player can pick a hook offset proportional to
+  // the real length rather than a fixed number of seconds.
+  duration_ms?: number | null;
 }
 
 export interface UpsertResult {
@@ -75,11 +79,11 @@ export async function upsertTrack(
   const id = crypto.randomUUID();
   const result = await db
     .prepare(
-      `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, preview_url, source, added_by_user_id, approved, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, preview_url, duration_ms, source, added_by_user_id, approved, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
        ON CONFLICT(spotify_id) DO NOTHING`
     )
-    .bind(id, track.id, track.name, artistInternalId, track.album?.images?.[0]?.url ?? null, track.preview_url ?? null, source, addedByUserId, now, now)
+    .bind(id, track.id, track.name, artistInternalId, track.album?.images?.[0]?.url ?? null, track.preview_url ?? null, track.duration_ms ?? null, source, addedByUserId, now, now)
     .run();
 
   if (result.meta.changes > 0) return { id, inserted: true };

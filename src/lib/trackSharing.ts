@@ -114,6 +114,7 @@ export interface SharedTrackView {
   name: string;
   artistName: string | null;
   imageUrl: string | null;
+  durationMs: number | null;
 }
 
 /**
@@ -131,13 +132,13 @@ export async function loadSharedTracks(db: D1Database, trackIds: string[]): Prom
   const placeholders = unique.map(() => '?').join(', ');
   const rows = await db
     .prepare(
-      `SELECT t.id, t.spotify_id, t.name, t.album_image_url, a.name AS artist_name
+      `SELECT t.id, t.spotify_id, t.name, t.album_image_url, t.duration_ms, a.name AS artist_name
        FROM tracks t
        LEFT JOIN artists a ON a.id = t.artist_id
        WHERE t.id IN (${placeholders})`
     )
     .bind(...unique)
-    .all<{ id: string; spotify_id: string; name: string; album_image_url: string | null; artist_name: string | null }>();
+    .all<{ id: string; spotify_id: string; name: string; album_image_url: string | null; duration_ms: number | null; artist_name: string | null }>();
 
   for (const row of rows.results) {
     byId.set(row.id, {
@@ -146,6 +147,7 @@ export async function loadSharedTracks(db: D1Database, trackIds: string[]): Prom
       name: row.name,
       artistName: row.artist_name,
       imageUrl: row.album_image_url,
+      durationMs: row.duration_ms,
     });
   }
   return byId;
