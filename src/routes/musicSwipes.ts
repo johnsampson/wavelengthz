@@ -321,7 +321,18 @@ export function registerMusicSwipeRoutes(router: RouterType) {
       .bind(...[user.id, ...(directionFilter ? [direction] : []), ...(itemTypeFilter ? [itemType] : []), limit, offset])
       .all<any>();
 
-    return Response.json({ swipes: rows.results });
+    // Total under the SAME filters as the page above, not a grand total --
+    // History shows it beside a specific tab and direction filter, so
+    // "247 songs" while filtered to likes has to mean 247 liked songs.
+    // Also lets the client page precisely instead of inferring "there is
+    // more" from a full page, which is wrong on an exact multiple.
+    const totalRow = await env.DB.prepare(
+      `SELECT COUNT(*) as c FROM music_swipes ms WHERE ms.user_id = ? ${directionFilter} ${itemTypeFilter}`
+    )
+      .bind(...[user.id, ...(directionFilter ? [direction] : []), ...(itemTypeFilter ? [itemType] : [])])
+      .first<{ c: number }>();
+
+    return Response.json({ swipes: rows.results, total: totalRow?.c ?? 0 });
   });
 
   router.patch('/api/swipes/music/:id', async (request: IRequest, env: Env) => {

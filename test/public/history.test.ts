@@ -371,3 +371,89 @@ describe('history mode persistence', () => {
     expect(reloaded.mode).toBe('artist');
   });
 });
+
+describe('history totals (issue #2)', () => {
+  function stubHistory(swipes: any[], total: number | undefined) {
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
+      return new Response(JSON.stringify({ swipes, total }), { status: 200 });
+    }));
+  }
+
+  it('labels the total with the noun for the current tab', async () => {
+    stubHistory([{ id: 's1' }], 143);
+    const app = createHistoryApp(fakeStorage({ wl_history_mode: 'artist' }));
+
+    await app.load();
+
+    expect(app.total).toBe(143);
+    expect(app.totalLabel).toBe('143 artists');
+  });
+
+  it('singularizes a count of one', async () => {
+    stubHistory([{ id: 's1' }], 1);
+    const app = createHistoryApp(fakeStorage({ wl_history_mode: 'track' }));
+
+    await app.load();
+
+    expect(app.totalLabel).toBe('1 song');
+  });
+
+  it('uses each tab own noun', async () => {
+    stubHistory([], 4);
+    const people = createHistoryApp(fakeStorage({ wl_history_mode: 'people' }));
+    await people.load();
+    expect(people.totalLabel).toBe('4 people');
+
+    const tracks = createHistoryApp(fakeStorage({ wl_history_mode: 'track' }));
+    await tracks.load();
+    expect(tracks.totalLabel).toBe('4 songs');
+  });
+
+  it('shows nothing rather than a misleading zero before the first load', () => {
+    const app = createHistoryApp(fakeStorage({ wl_history_mode: 'artist' }));
+
+    expect(app.total).toBeNull();
+    expect(app.totalLabel).toBe('');
+  });
+
+  it('reports zero honestly once loaded', async () => {
+    stubHistory([], 0);
+    const app = createHistoryApp(fakeStorage({ wl_history_mode: 'artist' }));
+
+    await app.load();
+
+    expect(app.totalLabel).toBe('0 artists');
+  });
+
+  it('pages exactly on the total rather than guessing from a full page', async () => {
+    // The old heuristic offered Next whenever a page came back full, so a
+    // total that was an exact multiple of the page size landed the user on
+    // an empty list.
+    stubHistory(new Array(20).fill(0).map((_, i) => ({ id: `s${i}` })), 20);
+    const app = createHistoryApp(fakeStorage({ wl_history_mode: 'artist' }));
+
+    await app.load();
+
+    expect(app.hasNext).toBe(false);
+  });
+
+  it('still offers the next page when there genuinely is more', async () => {
+    stubHistory(new Array(20).fill(0).map((_, i) => ({ id: `s${i}` })), 45);
+    const app = createHistoryApp(fakeStorage({ wl_history_mode: 'artist' }));
+
+    await app.load();
+
+    expect(app.hasNext).toBe(true);
+  });
+
+  it('falls back to the old heuristic if a cached client gets no total', async () => {
+    stubHistory(new Array(20).fill(0).map((_, i) => ({ id: `s${i}` })), undefined);
+    const app = createHistoryApp(fakeStorage({ wl_history_mode: 'artist' }));
+
+    await app.load();
+
+    expect(app.hasNext).toBe(true);
+    expect(app.totalLabel).toBe('');
+  });
+});

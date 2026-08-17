@@ -261,7 +261,14 @@
 // header shows the same for its own members. Photos come from the existing
 // position-0 + moderation-approved rule, now shared via src/lib/photos.ts.
 // groups.html and group.html both changed and both are precached.
-const CACHE_NAME = 'wavelengthz-shell-v46';
+// v47 puts a total on History (issue #2): each tab now shows how many
+// people/artists/songs match the current tab and direction filter, counted
+// server-side under the same filters as the page. Paging also became exact
+// rather than inferred -- the old "a full page means there's more" heuristic
+// offered a Next page whenever the total was an exact multiple of the page
+// size, landing on an empty list. history.html and history.js both changed
+// and both are precached.
+const CACHE_NAME = 'wavelengthz-shell-v47';
 const APP_SHELL = [
   '/',
   '/app.js',

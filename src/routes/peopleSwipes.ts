@@ -451,7 +451,15 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
        LIMIT ? OFFSET ?`
     ).bind(...[me.id, ...(directionFilter ? [direction] : []), limit, offset]).all<any>();
 
-    return Response.json({ swipes: rows.results });
+    // Same filters as the page above -- see the equivalent comment on
+    // GET /api/swipes/music.
+    const totalRow = await env.DB.prepare(
+      `SELECT COUNT(*) as c FROM people_swipes ps WHERE ps.swiper_id = ? ${directionFilter}`
+    )
+      .bind(...[me.id, ...(directionFilter ? [direction] : [])])
+      .first<{ c: number }>();
+
+    return Response.json({ swipes: rows.results, total: totalRow?.c ?? 0 });
   });
 
   router.patch('/api/swipes/people/:id', async (request: IRequest, env: Env) => {
