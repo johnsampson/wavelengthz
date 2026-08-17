@@ -307,7 +307,15 @@
 // with a note that messaging (messagingGate.ts's MIN_PHOTOS) does need a few
 // eventually, said here so that isn't a surprise met for the first time deep
 // in Settings after onboarding is already done.
-const CACHE_NAME = 'wavelengthz-shell-v52';
+// v53 guards the two person-photo <img>s that could render with a null src
+// (issue #108's "only show a photo if one exists"): the People-mode deck
+// card's primaryPhotoUrl and the match-modal's photoUrl, both null for a
+// candidate with no uploaded photos -- now genuinely possible for anyone who
+// skipped photos at onboarding (v52's change made that explicit). Each is
+// now wrapped in x-if, matching the guard group.html already uses for
+// member face icons, rather than always rendering an <img> with a dropped
+// src attribute.
+const CACHE_NAME = 'wavelengthz-shell-v53';
 const APP_SHELL = [
   '/',
   '/app.js',
