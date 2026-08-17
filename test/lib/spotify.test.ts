@@ -487,6 +487,24 @@ describe('fetchArtistTracks', () => {
     expect(elapsed).toBeLessThan(200);
     vi.unstubAllGlobals();
   });
+
+  it('excludes live recordings at ingestion (issue #108)', async () => {
+    stubSpotify({
+      albums: [{ id: 'album-1', images: [] }],
+      albumTracks: {
+        'album-1': [
+          { id: 't1', name: 'Enjoy the Silence', preview_url: null, artists: [{ id: 'artist-1' }] },
+          { id: 't2', name: 'Enjoy the Silence - Live', preview_url: null, artists: [{ id: 'artist-1' }] },
+          { id: 't3', name: 'Live Forever', preview_url: null, artists: [{ id: 'artist-1' }] },
+        ],
+      },
+    });
+
+    const tracks = await fetchArtistTracks('token', 'artist-1', 10);
+
+    expect(tracks.map((t: any) => t.name)).toEqual(['Enjoy the Silence', 'Live Forever']);
+    vi.unstubAllGlobals();
+  });
 });
 
 describe('fetchArtistTracksQuick', () => {
@@ -678,6 +696,35 @@ describe('fetchArtistTracksQuick', () => {
     const tracks = await fetchArtistTracksQuick('token', 'artist-1', kv);
 
     expect(tracks).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('excludes live recordings at ingestion (issue #108)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('/artists/') && url.includes('/albums')) {
+          return new Response(JSON.stringify({ items: [{ id: 'album-1', images: [] }] }), { status: 200 });
+        }
+        if (url.includes('/albums/album-1/tracks')) {
+          return new Response(
+            JSON.stringify({
+              items: [
+                { id: 't1', name: 'Personal Jesus', preview_url: null, artists: [{ id: 'artist-1' }] },
+                { id: 't2', name: 'Personal Jesus (Live)', preview_url: null, artists: [{ id: 'artist-1' }] },
+              ],
+            }),
+            { status: 200 }
+          );
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+
+    const tracks = await fetchArtistTracksQuick('token', 'artist-1');
+
+    expect(tracks.map((t: any) => t.name)).toEqual(['Personal Jesus']);
     vi.unstubAllGlobals();
   });
 });

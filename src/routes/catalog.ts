@@ -14,6 +14,7 @@ import {
 } from '../lib/spotify';
 import { genresFromRow } from '../lib/genres';
 import { likedFirst, likedTrackIdsForArtist } from '../lib/trackOrdering';
+import { isLiveTrackName } from '../lib/trackFilters';
 import { recordCatalogGenres } from '../lib/genreCatalog';
 import { upsertArtist, upsertTrack } from '../lib/catalogUpsert';
 import { haversineKm } from '../lib/scoring';
@@ -175,7 +176,12 @@ async function genreNeighbourTracks(
     .bind(artistInternalId, artistInternalId, userId, limit)
     .all<RadioRow & { shared: number }>();
 
-  return rows.results;
+  // Same live-recording exclusion as the same-artist queue above -- see its
+  // comment. Filtered after the SQL LIMIT, same accepted trade-off as
+  // fetchArtistTracksQuick in spotify.ts: a request for `limit` tracks can
+  // come back with fewer once live recordings are excluded, rather than
+  // over-fetching to compensate.
+  return rows.results.filter((r) => !isLiveTrackName(r.name));
 }
 
 export function registerCatalogRoutes(router: RouterType) {
@@ -363,8 +369,24 @@ export function registerCatalogRoutes(router: RouterType) {
 
     // resolvedTracks itself is left alone -- hasMore below is a statement
     // about how deep the catalog fetch got, and pulling extra liked tracks
-    // forward must not change that answer.
-    const displayTracks = likedFirst([...resolvedTracks, ...extraLikedTracks], likedIds);
+    // forward (or filtering out live recordings, next) must not change that
+    // answer.
+    //
+    // Live recordings are hidden from the general browse list (issue #108),
+    // except a track the viewer has already liked, which stays visible
+    // regardless -- matching the "liked songs are always shown" guarantee
+    // trackOrdering.ts's likedFirst already makes. Checked against `likedIds`
+    // directly here, not just via extraLikedTracks: a liked live track that
+    // already falls INSIDE the normally-fetched window (the common case --
+    // extraLikedTracks only covers ones pulled in from OUTSIDE it) would
+    // otherwise get filtered out here and never added back. Catalog rows
+    // stored before this fix shipped (or added via some path other than
+    // fetchArtistTracks/fetchArtistTracksQuick, which now filter these at
+    // ingestion) are exactly why this can't be ingestion-only.
+    const displayTracks = likedFirst(
+      [...resolvedTracks.filter((t) => likedIds.has(t.internalId) || !isLiveTrackName(t.name)), ...extraLikedTracks],
+      likedIds
+    );
 
     const trackInternalIds = displayTracks.map((t) => t.internalId);
     const directions = new Map<string, string>();
@@ -496,7 +518,13 @@ export function registerCatalogRoutes(router: RouterType) {
     // Same artist first, always. Only once their catalog is exhausted does
     // radio reach for neighbours -- so the common case is unchanged and a
     // listener who picked an artist keeps hearing that artist.
-    let tracks = rows.results;
+    //
+    // Live recordings are excluded here too (issue #108) -- chaining radio
+    // into a live re-recording of a song the listener just heard the studio
+    // version of is exactly the noise this issue is about, and radio is
+    // autoplay by definition, so there's no "only if I already liked it"
+    // exception the way the artist page's browse list has one.
+    let tracks = rows.results.filter((r) => !isLiveTrackName(r.name));
     if (tracks.length < RADIO_QUEUE_LIMIT) {
       const neighbours = await genreNeighbourTracks(
         env.DB,

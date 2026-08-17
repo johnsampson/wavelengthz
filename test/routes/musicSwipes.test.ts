@@ -286,6 +286,40 @@ describe('GET /api/candidates/music', () => {
 
     vi.unstubAllGlobals();
   });
+
+  it('excludes a live recording from track candidates (issue #108)', async () => {
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('t1', 'Track One', 'a1', 'https://img.example/t1.jpg', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('t2', 'Track One - Live', 'a1', 'https://img.example/t2.jpg', 'seed', 1, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+
+    const req = new Request('http://localhost/api/candidates/music?item_type=track&limit=10', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, ctx);
+    const body = await res.json<any>();
+
+    expect(body.candidates.map((c: any) => c.itemId)).toContain('t1');
+    expect(body.candidates.map((c: any) => c.itemId)).not.toContain('t2');
+  });
+
+  it('does not filter artist candidates by their own name matching the live pattern', async () => {
+    // ${table}.name in the underlying query is the ARTIST's name for artist
+    // candidates -- the live-recording heuristic has no business examining
+    // it. An artist whose name would trip the heuristic if it were wrongly
+    // applied here must still come through untouched.
+    await env.DB.prepare(
+      `INSERT INTO artists (id, name, genres, image_url, source, approved, created_at) VALUES ('a4', 'The Band - Live', '{}', 'https://img.example/a4.jpg', 'seed', 1, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+
+    const req = new Request('http://localhost/api/candidates/music?limit=10', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, ctx);
+    const body = await res.json<any>();
+
+    expect(body.candidates.map((c: any) => c.itemId)).toContain('a4');
+  });
 });
 
 describe('POST /api/swipe/music', () => {

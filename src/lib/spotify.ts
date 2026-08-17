@@ -1,4 +1,5 @@
 import { markSpotifyCooldown, isSpotifyCoolingDown } from './spotifyThrottle';
+import { isLiveTrackName } from './trackFilters';
 
 export interface SpotifyTokenResponse {
   access_token: string;
@@ -581,7 +582,16 @@ export async function fetchArtistTracks(
   // Belt-and-suspenders: a release where this artist is the album artist
   // should credit them on every track, but this costs nothing and matches
   // the same defensive check the old search-based path needed for real.
-  return tracks.filter((track) => track.artists?.some((a: any) => a.id === artistId));
+  //
+  // Also drops live recordings here, at ingestion, so they never make it
+  // into the catalog at all (issue #108: with a thin catalog, an artist's
+  // live re-recordings of the same handful of songs can crowd out their
+  // actual studio catalog on the artist page, in radio, and in deck
+  // candidates -- see trackFilters.ts's own comment). Same trade-off this
+  // function's own `.slice(0, limit)` above already makes: a request for N
+  // tracks can come back with fewer than N once tracks that don't belong
+  // are filtered out, rather than over-fetching to compensate.
+  return tracks.filter((track) => track.artists?.some((a: any) => a.id === artistId) && !isLiveTrackName(track.name));
 }
 
 // Only the single most recent release, and only enough tracks from it to
@@ -610,7 +620,9 @@ export async function fetchArtistTracksQuick(
   // many tracks come back, the same defense-in-depth reasoning as
   // fetchArtistTracks' own `.slice(0, limit)` above.
   const tracks = (await fetchAlbumTracksWithArt(token, albums[0], trackCount, kv)).slice(0, trackCount);
-  return tracks.filter((track) => track.artists?.some((a: any) => a.id === artistId));
+  // See fetchArtistTracks' matching comment above -- same live-recording
+  // exclusion, at ingestion, for the quick/first-view path too.
+  return tracks.filter((track) => track.artists?.some((a: any) => a.id === artistId) && !isLiveTrackName(track.name));
 }
 
 export async function searchArtistsByName(token: string, query: string, limit: number) {
