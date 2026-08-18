@@ -51,8 +51,16 @@ export const api = {
     request('/api/artists', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ spotifyArtistId }) }),
   messages: (matchId) => request(`/api/matches/${matchId}/messages`),
   // Unscoped one-step song search (no artist_id) -- backs the track picker
-  // in message threads. The artist-scoped form is artistTrackSearch below.
+  // in message threads and the deck's own song-search (index.js).
+  // The artist-scoped form is artistTrackSearch below.
   trackSearch: (q) => request(`/api/tracks/search?q=${encodeURIComponent(q)}`),
+  // Persists a live (not-yet-cataloged) Spotify search result into the
+  // tracks table -- see GET /api/tracks/search's `inCatalog: false` shape.
+  // Requires an internal artistId already in the catalog -- createArtist
+  // above if the artist itself is new too (index.js's selectTrack does
+  // exactly that).
+  createTrack: (spotifyTrackId, artistId) =>
+    request('/api/tracks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ spotifyTrackId, artistId }) }),
   // What the caller is currently playing on Spotify, for the one-tap share.
   // Resolves to { playing: null } whenever there's nothing shareable.
   nowPlaying: () => request('/api/me/now-playing'),

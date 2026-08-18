@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createDeckApp, preloadCandidateImage } from '../../public/index.js';
-import { showErrorToast } from '../../public/toast.js';
+import { showToast, showErrorToast } from '../../public/toast.js';
 import { play, togglePlayPause, isCurrentTrack } from '../../public/playerBar.js';
 import { attachSwipeDeck } from '../../public/swipe.js';
 import { navigate } from '../../public/router.js';
 
-vi.mock('../../public/toast.js', () => ({ showErrorToast: vi.fn() }));
+vi.mock('../../public/toast.js', () => ({ showToast: vi.fn(), showErrorToast: vi.fn() }));
 vi.mock('../../public/playerBar.js', () => ({
   play: vi.fn(),
   togglePlayPause: vi.fn(),
@@ -32,6 +32,7 @@ function stubApi(handler: (path: string) => Response) {
 }
 
 beforeEach(() => {
+  vi.mocked(showToast).mockClear();
   vi.mocked(showErrorToast).mockClear();
   vi.mocked(play).mockClear();
   vi.mocked(togglePlayPause).mockClear();
@@ -441,6 +442,128 @@ describe('deck app', () => {
 
     expect(navigate).not.toHaveBeenCalled();
     expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('artist'));
+    vi.unstubAllGlobals();
+  });
+
+  // issue #108: "I often try to find and like a track and I'm unable to" --
+  // search only ever looked up artists, with no way to find a specific song.
+  it('setSearchType switches to track search and re-runs immediately against the typed query', async () => {
+    const fetchMock = vi.fn(async (path: string) =>
+      path.startsWith('/api/tracks/search')
+        ? new Response(JSON.stringify({ results: [{ spotifyTrackId: 't1', name: 'Song' }] }), { status: 200 })
+        : new Response('not found', { status: 404 })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createDeckApp();
+    app.searchQuery = 'land';
+
+    app.setSearchType('track');
+    await vi.waitFor(() => expect(app.searchResults).toHaveLength(1));
+
+    expect(app.searchType).toBe('track');
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/tracks/search?q=land'), expect.anything());
+    vi.unstubAllGlobals();
+  });
+
+  it('setSearchType is a no-op when already on that type -- no redundant search', () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createDeckApp();
+
+    app.setSearchType('artist');
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('runSearch calls the track endpoint, not the artist one, once searchType is track', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ results: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createDeckApp();
+    app.searchType = 'track';
+    app.searchQuery = 'landslide';
+
+    await app.runSearch();
+
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/tracks/search'), expect.anything());
+    vi.unstubAllGlobals();
+  });
+
+  it('selectTrack likes an already-cataloged track directly, with no catalog round trip', async () => {
+    const fetchMock = vi.fn(async (path: string) =>
+      path === '/api/swipe/music' ? new Response(JSON.stringify({ ok: true }), { status: 200 }) : new Response('unexpected', { status: 500 })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createDeckApp();
+    app.showSearch = true;
+
+    await app.selectTrack({ id: 't1', name: 'Landslide', inCatalog: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/swipe/music',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ item_type: 'track', item_id: 't1', direction: 'right' }) })
+    );
+    expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('Landslide') }));
+    expect(app.showSearch).toBe(false); // closeSearch() ran
+    vi.unstubAllGlobals();
+  });
+
+  it('selectTrack catalogs the artist then the track before liking one that is not yet cataloged', async () => {
+    const calls: string[] = [];
+    const fetchMock = vi.fn(async (path: string, init?: any) => {
+      calls.push(path);
+      if (path === '/api/artists') return new Response(JSON.stringify({ artistId: 'new-a1' }), { status: 200 });
+      if (path === '/api/tracks') {
+        expect(JSON.parse(init.body)).toEqual({ spotifyTrackId: 'sp-t1', artistId: 'new-a1' });
+        return new Response(JSON.stringify({ trackId: 'new-t1' }), { status: 200 });
+      }
+      if (path === '/api/swipe/music') return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      return new Response('unexpected', { status: 500 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createDeckApp();
+
+    await app.selectTrack({ spotifyTrackId: 'sp-t1', spotifyArtistId: 'sp-a1', name: 'New Song', inCatalog: false });
+
+    expect(calls).toEqual(['/api/artists', '/api/tracks', '/api/swipe/music']);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/swipe/music',
+      expect.objectContaining({ body: JSON.stringify({ item_type: 'track', item_id: 'new-t1', direction: 'right' }) })
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it('selectTrack growls a toast and does not swipe when cataloging fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
+    const app = createDeckApp();
+
+    await app.selectTrack({ spotifyTrackId: 'sp-t1', spotifyArtistId: 'sp-a1', name: 'New Song', inCatalog: false });
+
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('song'));
+    expect(showToast).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('selectTrack ignores a second tap while the first is still in flight', async () => {
+    let resolveSwipe: (() => void) | null = null;
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/swipe/music') {
+        await new Promise<void>((resolve) => {
+          resolveSwipe = resolve;
+        });
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      return new Response('unexpected', { status: 500 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createDeckApp();
+
+    const first = app.selectTrack({ id: 't1', name: 'Landslide', inCatalog: true });
+    const second = app.selectTrack({ id: 't1', name: 'Landslide', inCatalog: true });
+    resolveSwipe!();
+    await Promise.all([first, second]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
   });
 });

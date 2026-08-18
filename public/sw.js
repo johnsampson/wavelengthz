@@ -329,7 +329,15 @@
 // it still has a full swipe's worth of dwell time as queue[0], same
 // reasoning as the existing artist-profile prefetch just below it in that
 // function. No new precached files, but index.js's content changed.
-const CACHE_NAME = 'wavelengthz-shell-v55';
+// v56 adds a Songs tab to the deck's search modal (issue #108: "I often try
+// to find and like a track and I'm unable to" -- search only ever looked up
+// artists by name, with no way to find a specific song at all). Tapping a
+// song result likes it directly (POST /api/swipe/music) rather than
+// navigating anywhere, cataloging the artist/track first if either isn't
+// already in D1 (GET /api/tracks/search's unscoped form now also reports
+// spotifyArtistId for exactly this). No new precached files, but
+// app.js/index.html/index.js's content changed.
+const CACHE_NAME = 'wavelengthz-shell-v56';
 const APP_SHELL = [
   '/',
   '/app.js',
