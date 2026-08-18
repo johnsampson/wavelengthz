@@ -320,7 +320,13 @@
 // button (issue #108: "align the radio player w/ the tracks view... maybe
 // make the radio a swipe left that exposes a trash can to close the
 // radio?"). No new precached files, but playerBar.js's content changed.
-const CACHE_NAME = 'wavelengthz-shell-v54';
+// v55 widens wavelengthzPlayer.js's SDK connect-handshake timeout (8s ->
+// 15s) -- a paid (Premium) account on a slow-but-working connection was
+// permanently downgrading to the read-only iframe for the whole page load
+// because the handshake genuinely needed more than 8s, not because
+// anything was actually broken. No new precached files, but
+// wavelengthzPlayer.js's content changed.
+const CACHE_NAME = 'wavelengthz-shell-v55';
 const APP_SHELL = [
   '/',
   '/app.js',
