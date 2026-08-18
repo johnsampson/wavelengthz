@@ -320,7 +320,20 @@
 // button (issue #108: "align the radio player w/ the tracks view... maybe
 // make the radio a swipe left that exposes a trash can to close the
 // radio?"). No new precached files, but playerBar.js's content changed.
-const CACHE_NAME = 'wavelengthz-shell-v54';
+// v55 adds public/tapFeedback.js, wired into every page's bootstrap script:
+// this app already defines active:scale-*/active:bg-* Tailwind states on
+// nearly everything tappable (btn-primary/btn-secondary/btn-ghost/
+// btn-danger, pill-toggle, nav.js's tab bar), but iOS Safari never applies
+// :active on a plain tap unless some touch listener is registered
+// somewhere on the page -- a long-documented WebKit quirk nothing in this
+// app ever worked around, so none of those already-authored states had ever
+// actually fired on iOS. One no-op touchstart listener fixes all of them at
+// once. Also fires a short (10ms) haptic buzz via the Vibration API on a
+// real button tap -- a no-op on iOS (Safari has never implemented the
+// Vibration API at all, so this is real feedback only on Android). New
+// precached file, so it must be in APP_SHELL from this version or an
+// already-installed user's next visit 404s on the import.
+const CACHE_NAME = 'wavelengthz-shell-v55';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -333,6 +346,7 @@ const APP_SHELL = [
   '/photos.js',
   '/toast.js',
   '/domUtils.js',
+  '/tapFeedback.js',
   '/alpine.js',
   '/playerBar.js',
   '/wavelengthzPlayer.js',
