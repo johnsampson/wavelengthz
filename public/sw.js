@@ -320,7 +320,16 @@
 // button (issue #108: "align the radio player w/ the tracks view... maybe
 // make the radio a swipe left that exposes a trash can to close the
 // radio?"). No new precached files, but playerBar.js's content changed.
-const CACHE_NAME = 'wavelengthz-shell-v54';
+// v55 fixes issue #108's "on a slower connection after you slid the artist
+// to the left the artist picture reappears for a brief second before the
+// next artist picture shows" -- swipe.js's attachSwipeDeck reuses the same
+// <img> element across cards, so a not-yet-loaded next image left the
+// PREVIOUS candidate's photo visibly showing until it finished downloading.
+// index.js's showNext() now preloads the upcoming candidate's image while
+// it still has a full swipe's worth of dwell time as queue[0], same
+// reasoning as the existing artist-profile prefetch just below it in that
+// function. No new precached files, but index.js's content changed.
+const CACHE_NAME = 'wavelengthz-shell-v55';
 const APP_SHELL = [
   '/',
   '/app.js',

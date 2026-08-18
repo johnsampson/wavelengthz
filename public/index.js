@@ -9,6 +9,36 @@ import { navigate } from './router.js';
 
 /** @typedef {{id?: string, itemType?: string, itemId?: string, name?: string, displayName?: string, imageUrl?: string, primaryPhotoUrl?: string, bio?: string, distanceLabel?: string, topGenres?: string[], anthemTrack?: {spotifyId: string, id?: string, name: string, artistName?: string | null, imageUrl?: string} | null, track?: {spotifyId: string, id: string, name: string, imageUrl?: string, durationMs?: number | null} | null}} Candidate */
 
+/**
+ * Warms the browser's image cache for a candidate about to become `current`,
+ * so the actual `:src` swap in showNext() below resolves from cache instead
+ * of a fresh network fetch. Exists because swipe.js's attachSwipeDeck reuses
+ * the same `<img>` element across cards in place -- until a newly assigned
+ * `src` finishes loading, the element keeps rendering whatever it last
+ * successfully decoded, so on a slow connection the PREVIOUS candidate's
+ * photo visibly reappears, centered, for a moment before the real one loads
+ * in (issue #108: "on a slower connection... the artist picture reappears
+ * for a brief second... let's not do that"). Called while the candidate
+ * still has a full swipe's worth of dwell time as `queue[0]`, same
+ * "prefetch ahead of an actual visit" reasoning as showNext()'s existing
+ * artist-profile prefetch, just for the image itself rather than catalog
+ * data -- and unlike that one, this runs in both modes, since the flash
+ * this fixes affects People-mode photos and Music-mode artist art equally.
+ *
+ * Guarded for `Image` being undefined -- true in this test pool
+ * (@cloudflare/vitest-pool-workers has no browser globals at all), same
+ * reasoning as domUtils.js's raf().
+ *
+ * @param {Candidate | undefined} candidate
+ * @param {'music' | 'people'} mode
+ */
+export function preloadCandidateImage(candidate, mode) {
+  if (typeof Image === 'undefined') return;
+  const url = mode === 'music' ? candidate?.imageUrl : candidate?.primaryPhotoUrl;
+  if (!url) return;
+  new Image().src = url;
+}
+
 // Extracted from index.html's inline script -- see matches.js's comment for
 // why (same reasoning, same shape). Also adds destroy(), same new
 // requirement the router introduces as messages.js/group.js's poll timers:
@@ -113,6 +143,8 @@ export function createDeckApp() {
           this.detachSwipe = attachSwipeDeck(card, { onSwipe: (dir) => this.decide(dir) });
         }
       });
+      preloadCandidateImage(this.queue[0], this.mode);
+
       // Music mode only: GET /api/artists/:id can be slow for a
       // not-yet-fully-cataloged artist (src/routes/catalog.ts's
       // quick-fetch/backfill path, itself a live Spotify round-trip).

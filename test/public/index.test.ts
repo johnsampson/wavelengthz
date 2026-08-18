@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createDeckApp } from '../../public/index.js';
+import { createDeckApp, preloadCandidateImage } from '../../public/index.js';
 import { showErrorToast } from '../../public/toast.js';
 import { play, togglePlayPause, isCurrentTrack } from '../../public/playerBar.js';
 import { attachSwipeDeck } from '../../public/swipe.js';
@@ -309,6 +309,64 @@ describe('deck app', () => {
     vi.unstubAllGlobals();
   });
 
+  // issue #108: "on a slower connection after you slid the artist to the
+  // left the artist picture reappears for a brief second before the next
+  // artist picture shows." swipe.js's attachSwipeDeck reuses the same <img>
+  // element across cards, so a not-yet-loaded next image leaves the
+  // PREVIOUS one visible until it finishes downloading -- these confirm
+  // showNext() preloads the upcoming candidate's image while it still has a
+  // full swipe's worth of dwell time as queue[0], same as the artist-profile
+  // prefetch just below it, but for the image in both modes.
+  it('showNext preloads the next queued image in Music mode', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { getElementById: vi.fn(() => null) });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('not found', { status: 404 })));
+    const urls: string[] = [];
+    class FakeImage {
+      set src(v: string) {
+        urls.push(v);
+      }
+    }
+    vi.stubGlobal('Image', FakeImage);
+    const app = createDeckApp();
+    app.mode = 'music';
+    (app as any).$nextTick = (fn: () => void) => fn();
+    app.queue = [
+      { itemType: 'artist', itemId: 'a1', name: 'First', imageUrl: 'https://img.example/a1.jpg' },
+      { itemType: 'artist', itemId: 'a2', name: 'Second', imageUrl: 'https://img.example/a2.jpg' },
+    ];
+
+    await app.showNext();
+
+    expect(urls).toEqual(['https://img.example/a2.jpg']);
+    vi.unstubAllGlobals();
+  });
+
+  it('showNext preloads the next queued photo in People mode', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { getElementById: vi.fn(() => null) });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('not found', { status: 404 })));
+    const urls: string[] = [];
+    class FakeImage {
+      set src(v: string) {
+        urls.push(v);
+      }
+    }
+    vi.stubGlobal('Image', FakeImage);
+    const app = createDeckApp();
+    app.mode = 'people';
+    (app as any).$nextTick = (fn: () => void) => fn();
+    app.queue = [
+      { id: 'u1', displayName: 'First', primaryPhotoUrl: 'https://img.example/u1.jpg' },
+      { id: 'u2', displayName: 'Second', primaryPhotoUrl: 'https://img.example/u2.jpg' },
+    ];
+
+    await app.showNext();
+
+    expect(urls).toEqual(['https://img.example/u2.jpg']);
+    vi.unstubAllGlobals();
+  });
+
   it('setMode persists the choice and reloads the queue without stopping playback', async () => {
     const storage = fakeStorage();
     vi.stubGlobal('localStorage', storage);
@@ -383,6 +441,62 @@ describe('deck app', () => {
 
     expect(navigate).not.toHaveBeenCalled();
     expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('artist'));
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('preloadCandidateImage', () => {
+  function stubImage() {
+    const urls: string[] = [];
+    class FakeImage {
+      set src(v: string) {
+        urls.push(v);
+      }
+    }
+    vi.stubGlobal('Image', FakeImage);
+    return urls;
+  }
+
+  it('preloads the artist image in Music mode, not the (absent) photo field', () => {
+    const urls = stubImage();
+
+    preloadCandidateImage({ itemId: 'a1', imageUrl: 'https://img.example/a1.jpg' } as any, 'music');
+
+    expect(urls).toEqual(['https://img.example/a1.jpg']);
+    vi.unstubAllGlobals();
+  });
+
+  it('preloads the person photo in People mode, not the artist image field', () => {
+    const urls = stubImage();
+
+    preloadCandidateImage({ id: 'u1', primaryPhotoUrl: 'https://img.example/u1.jpg', imageUrl: 'https://img.example/wrong.jpg' } as any, 'people');
+
+    expect(urls).toEqual(['https://img.example/u1.jpg']);
+    vi.unstubAllGlobals();
+  });
+
+  it('does nothing for a candidate with no relevant image url (e.g. a photo-less person)', () => {
+    const urls = stubImage();
+
+    preloadCandidateImage({ id: 'u1' } as any, 'people');
+
+    expect(urls).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+
+  it('does nothing for an undefined candidate -- the empty-queue case', () => {
+    const urls = stubImage();
+
+    expect(() => preloadCandidateImage(undefined, 'music')).not.toThrow();
+
+    expect(urls).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+
+  it('does not throw when Image is undefined, same as this test pool', () => {
+    vi.stubGlobal('Image', undefined);
+
+    expect(() => preloadCandidateImage({ imageUrl: 'https://img.example/a.jpg' } as any, 'music')).not.toThrow();
     vi.unstubAllGlobals();
   });
 });
