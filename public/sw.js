@@ -320,7 +320,20 @@
 // button (issue #108: "align the radio player w/ the tracks view... maybe
 // make the radio a swipe left that exposes a trash can to close the
 // radio?"). No new precached files, but playerBar.js's content changed.
-// v55 fixes issue #108's "on a slower connection after you slid the artist
+// v55 fixes "wrong logo on Add to Home Screen": public/icons/icon-{180,192,
+// 512}.png (added in v35) carried real alpha transparency -- the corners
+// AND the crown/heart mark itself were literally cutouts, not solid pixels
+// (confirmed by inspecting the alpha channel directly), which is exactly
+// what v35's own commit flagged as a placeholder needing a follow-up
+// ("iOS pre-16 will still fill the transparent regions white/black
+// depending on system theme... a proper opaque-background version is
+// expected to replace these files later"). Apple's guidance is explicit:
+// home-screen icons must carry no alpha channel at all. Reconstructed all
+// three as flat opaque PNGs (brand pink square, solid white mark, using the
+// original alpha channel purely as a stencil for where each color goes) --
+// same visual design, just actually opaque now. No new precached files,
+// but their content changed.
+// v56 fixes issue #108's "on a slower connection after you slid the artist
 // to the left the artist picture reappears for a brief second before the
 // next artist picture shows" -- swipe.js's attachSwipeDeck reuses the same
 // <img> element across cards, so a not-yet-loaded next image left the
@@ -329,7 +342,7 @@
 // it still has a full swipe's worth of dwell time as queue[0], same
 // reasoning as the existing artist-profile prefetch just below it in that
 // function. No new precached files, but index.js's content changed.
-const CACHE_NAME = 'wavelengthz-shell-v55';
+const CACHE_NAME = 'wavelengthz-shell-v56';
 const APP_SHELL = [
   '/',
   '/app.js',
