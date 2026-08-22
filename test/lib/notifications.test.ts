@@ -318,4 +318,110 @@ describe('notifyMessage', () => {
     sendWebPushSpy.mockRestore();
     vi.unstubAllGlobals();
   });
+
+  it('names the sender and the track in a shared-song push', async () => {
+    await env.DB.prepare(`UPDATE users SET display_name = 'Jordan' WHERE id = 'u2'`).run();
+    await env.DB.prepare(`UPDATE users SET email = NULL WHERE id = 'u1'`).run();
+    await insertPushSubscription(env.DB, 'u1', 'https://push.example/u1-device');
+    await env.DB.prepare(
+      `INSERT INTO artists (id, name, genres, source, approved, created_at) VALUES ('art-song', 'The Artist', '[]', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, source, approved, created_at) VALUES ('trk-song', 'sp-trk-song', 'The Song', 'art-song', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO messages (id, match_id, sender_id, body, track_id, created_at) VALUES ('msg1', 'm1', 'u2', '', 'trk-song', 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO notifications (id, user_id, type, related_id, created_at) VALUES ('n3', 'u1', 'message', 'msg1', 1000)`
+    ).run();
+    const sendWebPushSpy = vi.spyOn(webPush, 'sendWebPush').mockResolvedValue({ ok: true });
+
+    await notifyMessage(env.DB, { ...VAPID_TEST_ENV, RESEND_API_KEY: 'k', RESEND_FROM_ADDRESS: 'f@x.com' } as any, 'msg1', 'u1');
+
+    expect(sendWebPushSpy).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ title: 'Jordan sent you a song', body: 'The Song by The Artist' }),
+      expect.anything()
+    );
+
+    sendWebPushSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it('names the sender in a plain text message push', async () => {
+    await env.DB.prepare(`UPDATE users SET display_name = 'Jordan' WHERE id = 'u2'`).run();
+    await env.DB.prepare(`UPDATE users SET email = NULL WHERE id = 'u1'`).run();
+    await insertPushSubscription(env.DB, 'u1', 'https://push.example/u1-device');
+    await env.DB.prepare(`INSERT INTO messages (id, match_id, sender_id, body, created_at) VALUES ('msg1', 'm1', 'u2', 'hi', 1000)`).run();
+    await env.DB.prepare(
+      `INSERT INTO notifications (id, user_id, type, related_id, created_at) VALUES ('n3', 'u1', 'message', 'msg1', 1000)`
+    ).run();
+    const sendWebPushSpy = vi.spyOn(webPush, 'sendWebPush').mockResolvedValue({ ok: true });
+
+    await notifyMessage(env.DB, { ...VAPID_TEST_ENV, RESEND_API_KEY: 'k', RESEND_FROM_ADDRESS: 'f@x.com' } as any, 'msg1', 'u1');
+
+    expect(sendWebPushSpy).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ title: 'New message from Jordan' }),
+      expect.anything()
+    );
+
+    sendWebPushSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it('falls back to a generic sender label when the sender has no display_name set', async () => {
+    // u2 (this file's beforeEach) is created with no displayName -- same
+    // fallback text public/messages.js and matches.ts's otherDisplayName
+    // already use, so a push never contradicts what the thread shows.
+    const sendWebPushSpy = vi.spyOn(webPush, 'sendWebPush').mockResolvedValue({ ok: true });
+    await env.DB.prepare(`UPDATE users SET email = NULL WHERE id = 'u1'`).run();
+    await insertPushSubscription(env.DB, 'u1', 'https://push.example/u1-device');
+    await env.DB.prepare(`INSERT INTO messages (id, match_id, sender_id, body, created_at) VALUES ('msg1', 'm1', 'u2', 'hi', 1000)`).run();
+    await env.DB.prepare(
+      `INSERT INTO notifications (id, user_id, type, related_id, created_at) VALUES ('n3', 'u1', 'message', 'msg1', 1000)`
+    ).run();
+
+    await notifyMessage(env.DB, { ...VAPID_TEST_ENV, RESEND_API_KEY: 'k', RESEND_FROM_ADDRESS: 'f@x.com' } as any, 'msg1', 'u1');
+
+    expect(sendWebPushSpy).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ title: 'New message from Wavelengthz user' }),
+      expect.anything()
+    );
+
+    sendWebPushSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it('escapes HTML in the sender name and track title in the email fallback', async () => {
+    // Both a display_name and a Spotify track/artist name are
+    // user/third-party controlled text now interpolated into an HTML email
+    // body -- unescaped, either could break the markup or inject content.
+    await env.DB.prepare(`UPDATE users SET display_name = '<b>Jordan</b>' WHERE id = 'u2'`).run();
+    await env.DB.prepare(
+      `INSERT INTO artists (id, name, genres, source, approved, created_at) VALUES ('art-xss', '<i>Artist</i>', '[]', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, source, approved, created_at) VALUES ('trk-xss', 'sp-trk-xss', '<script>alert(1)</script>', 'art-xss', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO messages (id, match_id, sender_id, body, track_id, created_at) VALUES ('msg1', 'm1', 'u2', '', 'trk-xss', 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO notifications (id, user_id, type, related_id, created_at) VALUES ('n3', 'u1', 'message', 'msg1', 1000)`
+    ).run();
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await notifyMessage(env.DB, { RESEND_API_KEY: 'k', RESEND_FROM_ADDRESS: 'f@x.com' } as any, 'msg1', 'u1');
+
+    const sentBody = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    expect(sentBody.html).not.toContain('<script>');
+    expect(sentBody.html).toContain('&lt;script&gt;');
+    expect(sentBody.html).toContain('&lt;b&gt;Jordan&lt;/b&gt;');
+
+    vi.unstubAllGlobals();
+  });
 });

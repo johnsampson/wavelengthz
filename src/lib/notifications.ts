@@ -1,5 +1,6 @@
 import { sendEmail } from './email';
 import { sendWebPush } from './webPush';
+import { loadSharedTracks } from './trackSharing';
 
 // A match is only surfaced -- bell badge, /notifications list, and the email
 // below -- some delay after it's created, so the person who just matched has
@@ -15,6 +16,28 @@ import { sendWebPush } from './webPush';
 // if it's ever unset. Takes `env` rather than being a plain constant so it
 // can vary per environment without a code change.
 const DEFAULT_MATCH_NOTIFICATION_DELAY_MINUTES = 5;
+
+// notifyMessage below is the first place this file interpolates
+// user-controlled text (a display_name, a Spotify track/artist name) into an
+// HTML email body rather than a plain-text push payload -- escape before
+// embedding so a display name or track title containing HTML can't break the
+// markup or inject content into a transactional email.
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case '&':
+        return '&amp;';
+      case '<':
+        return '&lt;';
+      case '>':
+        return '&gt;';
+      case '"':
+        return '&quot;';
+      default:
+        return '&#39;';
+    }
+  });
+}
 
 export function getMatchNotificationDelayMs(env: Env): number {
   const minutes = Number(env.MATCH_NOTIFICATION_DELAY_MINUTES ?? DEFAULT_MATCH_NOTIFICATION_DELAY_MINUTES);
@@ -130,30 +153,47 @@ export async function notifyMessage(db: D1Database, env: Env, messageId: string,
   // lands the recipient on a broken, empty conversation view instead of the
   // actual match they were messaged from.
   const message = await db
-    .prepare('SELECT match_id, track_id FROM messages WHERE id = ?')
+    .prepare('SELECT match_id, track_id, sender_id FROM messages WHERE id = ?')
     .bind(messageId)
-    .first<{ match_id: string; track_id: string | null }>();
+    .first<{ match_id: string; track_id: string | null; sender_id: string }>();
 
-  // A shared song gets its own copy. It's the single warmest notification
-  // this app sends -- concrete, unhurried, and about the other person rather
-  // than about you -- so it's worth not burying under the generic "new
-  // message" line.
+  // Same fallback text public/messages.js already uses for a sender with no
+  // display_name set (see matches.ts's otherDisplayName), so the name in a
+  // push/email never contradicts what the thread itself shows.
+  const sender = message
+    ? await db.prepare('SELECT display_name FROM users WHERE id = ?').bind(message.sender_id).first<{ display_name: string | null }>()
+    : null;
+  const senderName = sender?.display_name || 'Wavelengthz user';
+
+  // A shared song gets its own copy, naming both the sender and the track --
+  // it's the single warmest notification this app sends, concrete and
+  // specific rather than a generic "you have a message" -- so it's worth not
+  // burying either detail behind a tap.
   const isTrack = !!message?.track_id;
+  let trackLabel: string | null = null;
+  if (isTrack && message?.track_id) {
+    const tracks = await loadSharedTracks(db, [message.track_id]);
+    const track = tracks.get(message.track_id);
+    if (track) trackLabel = track.artistName ? `${track.name} by ${track.artistName}` : track.name;
+  }
+
   const pushed = await sendPushToUser(db, env, recipientId, {
-    title: isTrack ? 'Someone sent you a song' : 'New message on Wavelengthz',
-    body: isTrack ? 'Open the app to hear it.' : 'Open the app to read it.',
+    title: isTrack ? `${senderName} sent you a song` : `New message from ${senderName}`,
+    body: isTrack ? trackLabel ?? 'Open the app to hear it.' : 'Open the app to read it.',
     url: message ? `/messages?matchId=${message.match_id}` : '/messages',
   });
 
   // See notifyMatch's comment: email is the fallback channel, only sent
   // when push wasn't attempted at all, and gated on the user's own opt-out.
   if (!pushed && recipient.email && recipient.email_notifications_enabled) {
+    const safeSenderName = escapeHtml(senderName);
+    const safeTrackLabel = trackLabel ? escapeHtml(trackLabel) : null;
     await sendEmail(env, {
       to: recipient.email,
-      subject: isTrack ? 'Someone sent you a song on Wavelengthz' : 'New message on Wavelengthz',
+      subject: isTrack ? `${senderName} sent you a song on Wavelengthz` : `New message from ${senderName} on Wavelengthz`,
       html: isTrack
-        ? `<p>Someone shared a song with you. Open the app to hear it.</p>`
-        : `<p>You have a new message. Open the app to read it.</p>`,
+        ? `<p>${safeSenderName} shared${safeTrackLabel ? ` "${safeTrackLabel}"` : ' a song'} with you. Open the app to hear it.</p>`
+        : `<p>You have a new message from ${safeSenderName}. Open the app to read it.</p>`,
     });
   }
 
