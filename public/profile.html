@@ -286,11 +286,13 @@
 
   <script type="module">
     import { mountHeader, mountNav } from '/nav.js';
+    import { installTapFeedback } from '/tapFeedback.js';
     import { createPersonProfileApp } from '/personProfile.js';
     import { mountPlayerBar } from '/playerBar.js';
     import '/router.js';
     mountHeader();
     mountNav();
+    installTapFeedback();
     mountPlayerBar();
 
     window.pageApp = createPersonProfileApp;

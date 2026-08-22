@@ -74,10 +74,12 @@
   <script type="module">
     import { createSettingsApp } from '/settings.js';
     import { mountHeader, mountNav } from '/nav.js';
+    import { installTapFeedback } from '/tapFeedback.js';
     import { mountPlayerBar } from '/playerBar.js';
     import '/router.js';
     mountHeader();
     mountNav();
+    installTapFeedback();
     mountPlayerBar();
 
     window.pageApp = createSettingsApp;
