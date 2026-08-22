@@ -12,7 +12,20 @@ import {
 } from '../lib/messagingGate';
 import { getTasteDrift } from '../lib/tasteDrift';
 
-const TIME_RANGE = 'medium_term';
+// Spotify's three time_range values mean very different things: short_term
+// is ~4 weeks, medium_term ~6 months, long_term "calculated from several
+// years of data and including all new data as it becomes available" -- i.e.
+// genuine, stable all-time favorites (issue #72: "Top artists on Spotify.
+// Looks like that's pulling recent listens"). medium_term is exactly that
+// complaint -- it's weighted toward whatever the last 6 months of listening
+// looked like, not a real "top artists" identity, and since this profile is
+// fetched from Spotify exactly once per user and never refreshed (see the
+// `if (!profile)` guard below), whichever 6-month window happened to be
+// current the day someone connected Spotify is what they're stuck with
+// permanently. long_term is the closest thing Spotify's API has to "this
+// person's actual taste," matching what "top artists" is supposed to mean
+// everywhere this profile is displayed/used for scoring.
+const TIME_RANGE = 'long_term';
 
 export function registerMeRoutes(router: RouterType) {
   // "Your wavelength moved toward ambient this month." Pure D1 -- computed

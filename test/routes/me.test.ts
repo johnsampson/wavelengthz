@@ -34,34 +34,32 @@ describe('GET /api/me', () => {
     const { cookie } = await createSession(env.DB, 'u1');
     const sessionId = cookie.split(';')[0].split('=')[1];
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo) => {
-        const url = input.toString();
-        if (url.includes('top/artists')) {
-          return new Response(
-            JSON.stringify({ items: [{ id: 'a1', name: 'Artist One', genres: ['pop'], images: [{ url: 'https://img.example/a1.jpg' }] }] }),
-            { status: 200 }
-          );
-        }
-        if (url.includes('top/tracks')) {
-          return new Response(
-            JSON.stringify({
-              items: [
-                {
-                  id: 't1',
-                  name: 'Track One',
-                  artists: [{ name: 'Track Artist' }],
-                  album: { images: [{ url: 'https://img.example/t1.jpg' }] },
-                },
-              ],
-            }),
-            { status: 200 }
-          );
-        }
-        throw new Error(`unexpected fetch ${url}`);
-      })
-    );
+    const fetchMock = vi.fn(async (input: RequestInfo) => {
+      const url = input.toString();
+      if (url.includes('top/artists')) {
+        return new Response(
+          JSON.stringify({ items: [{ id: 'a1', name: 'Artist One', genres: ['pop'], images: [{ url: 'https://img.example/a1.jpg' }] }] }),
+          { status: 200 }
+        );
+      }
+      if (url.includes('top/tracks')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 't1',
+                name: 'Track One',
+                artists: [{ name: 'Track Artist' }],
+                album: { images: [{ url: 'https://img.example/t1.jpg' }] },
+              },
+            ],
+          }),
+          { status: 200 }
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     const req = new Request('http://localhost/api/me', { headers: { Cookie: `wl_session=${sessionId}` } });
     const res = await worker.fetch(req, env, {} as ExecutionContext);
@@ -71,8 +69,18 @@ describe('GET /api/me', () => {
     expect(body.user.spotify_avatar_url).toBe('https://img.example/avatar.jpg');
     expect(body.musicProfile.top_artists).toContain('a1');
 
+    // Regression (issue #72): "Top artists on Spotify. Looks like that's
+    // pulling recent listens" -- medium_term (~6 months) reads as recent
+    // listening, not real top-artist identity. long_term is Spotify's
+    // several-years affinity signal, the actual "top artists" semantics.
+    const artistsCallUrl = fetchMock.mock.calls.find((c) => c[0].toString().includes('top/artists'))![0].toString();
+    const tracksCallUrl = fetchMock.mock.calls.find((c) => c[0].toString().includes('top/tracks'))![0].toString();
+    expect(artistsCallUrl).toContain('time_range=long_term');
+    expect(tracksCallUrl).toContain('time_range=long_term');
+
     const row = await env.DB.prepare('SELECT * FROM music_profiles WHERE user_id = ?').bind('u1').first<any>();
     expect(row).toBeTruthy();
+    expect(row.time_range).toBe('long_term');
     const topArtists = JSON.parse(row.top_artists);
     expect(topArtists[0]).toEqual({ artist_id: 'a1', rank: 1, name: 'Artist One', imageUrl: 'https://img.example/a1.jpg' });
     const topTracks = JSON.parse(row.top_tracks);
