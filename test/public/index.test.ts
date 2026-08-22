@@ -623,3 +623,48 @@ describe('preloadCandidateImage', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('daily drop banner', () => {
+  it('loadDailyDropPrompt sets the prompt text and answered flag', async () => {
+    stubApi((path) => {
+      if (path === '/api/daily-drop')
+        return new Response(
+          JSON.stringify({ prompt: { id: 'p1', text: "What's on repeat right now?" }, myAnswer: { name: 'Song' }, answerCount: 3 }),
+          { status: 200 }
+        );
+      return new Response('not found', { status: 404 });
+    });
+    const app = createDeckApp();
+
+    await app.loadDailyDropPrompt();
+
+    expect(app.dailyDropPrompt).toEqual({ text: "What's on repeat right now?", answered: true });
+  });
+
+  it('loadDailyDropPrompt fails silently, leaving the banner hidden', async () => {
+    stubApi(() => new Response('nope', { status: 500 }));
+    const app = createDeckApp();
+
+    await expect(app.loadDailyDropPrompt()).resolves.toBeUndefined();
+    expect(app.dailyDropPrompt).toBeNull();
+  });
+
+  it('init() fetches the banner prompt (fire-and-forget, never blocks the deck)', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { getElementById: vi.fn(() => null) });
+    stubApi((path) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
+      if (path.startsWith('/api/candidates/')) return new Response(JSON.stringify({ candidates: [] }), { status: 200 });
+      if (path === '/api/daily-drop')
+        return new Response(JSON.stringify({ prompt: { id: 'p1', text: 'Prompt text' }, myAnswer: null, answerCount: 0 }), { status: 200 });
+      return new Response('not found', { status: 404 });
+    });
+    const app = createDeckApp();
+    (app as any).$nextTick = (fn: () => void) => fn();
+
+    await app.init();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(app.dailyDropPrompt).toEqual({ text: 'Prompt text', answered: false });
+  });
+});

@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wavelengthz — The Daily Drop</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/tailwind.css" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+</head>
+<body class="min-h-dvh bg-base text-neutral-50 p-4 pb-app">
+  <div id="wl-header-root"></div>
+  <div id="wl-app-root" x-data="pageApp()">
+  <a href="/" class="mx-auto mb-2 block max-w-md text-sm text-neutral-400">&larr; Deck</a>
+  <h1 class="mx-auto mb-1 max-w-md text-2xl font-bold">The Daily Drop</h1>
+
+  <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
+  <p x-show="loading" class="mx-auto max-w-md text-sm text-neutral-500">Loading today's prompt...</p>
+
+  <template x-if="!loading && prompt">
+    <div class="mx-auto max-w-md space-y-4">
+      <div class="card p-4">
+        <p class="text-lg font-semibold text-brand-400" x-text="prompt.text"></p>
+        <p class="mt-2 text-xs text-neutral-500">
+          <span x-show="answerCount === 0">Be the first to answer today.</span>
+          <span x-show="answerCount === 1" x-text="myAnswer ? 'Just you so far -- check back later.' : '1 person has answered so far.'"></span>
+          <span x-show="answerCount > 1" x-text="answerCount + ' people have answered so far.'"></span>
+        </p>
+      </div>
+
+      <!-- Already answered: show it, playable, with a way to change it. -->
+      <div x-show="myAnswer" class="card flex items-center gap-3 p-3">
+        <img :src="myAnswer && myAnswer.imageUrl" :alt="myAnswer && myAnswer.name" class="h-12 w-12 shrink-0 rounded object-cover ring-1 ring-white/10" />
+        <button type="button" class="min-w-0 flex-1 text-left" @click="playTrack(myAnswer)">
+          <span class="block truncate text-neutral-100" x-text="myAnswer && myAnswer.name"></span>
+          <span class="block truncate text-xs text-neutral-400" x-text="myAnswer && myAnswer.artistName"></span>
+        </button>
+        <span class="shrink-0 text-xs text-neutral-500">Your answer</span>
+      </div>
+
+      <div class="card p-4">
+        <label for="dropSearchInput" class="mb-2 block text-sm font-semibold text-neutral-200">
+          <span x-text="myAnswer ? 'Change your answer' : 'Answer with a song'"></span>
+        </label>
+        <input
+          id="dropSearchInput"
+          type="text"
+          x-model="searchQuery"
+          @input="onSearchInput()"
+          placeholder="Search for a song..."
+          aria-label="Search for a song"
+          class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-neutral-100 placeholder-neutral-500 focus:border-brand-400 focus:outline-none"
+        />
+        <p x-show="searching" class="mt-2 text-xs text-neutral-500">Searching...</p>
+        <ul x-show="!searching && searchResults.length" class="mt-3 space-y-2">
+          <template x-for="result in searchResults" :key="result.id || result.spotifyTrackId">
+            <li>
+              <button
+                type="button"
+                class="card flex w-full items-center gap-3 p-3 text-left transition active:scale-[0.98] active:bg-white/5 disabled:pointer-events-none disabled:opacity-50"
+                :disabled="submitting"
+                @click="selectAnswer(result)"
+              >
+                <img :src="result.imageUrl" :alt="result.name" class="h-10 w-10 shrink-0 rounded object-cover ring-1 ring-white/10" />
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-neutral-100" x-text="result.name"></span>
+                  <span class="block truncate text-xs text-neutral-400" x-text="result.artistName"></span>
+                </span>
+              </button>
+            </li>
+          </template>
+        </ul>
+        <p x-show="!searching && searchQuery.trim().length >= 3 && !searchResults.length" class="mt-3 text-xs text-neutral-500">
+          No songs found.
+        </p>
+      </div>
+
+      <div>
+        <h2 class="mb-2 text-sm font-semibold text-neutral-200">Today's answers</h2>
+        <p x-show="!answersLoading && !answers.length" class="text-sm text-neutral-500">
+          <span x-show="myAnswer">Nobody else has answered yet -- check back later.</span>
+          <span x-show="!myAnswer">Answer today's prompt to see what everyone else picked.</span>
+        </p>
+        <ul x-show="answers.length" class="space-y-2">
+          <template x-for="entry in answers" :key="entry.userId">
+            <li class="card flex items-center gap-3 p-3">
+              <button type="button" class="flex min-w-0 flex-1 items-center gap-3 text-left" @click="viewProfile(entry.userId)">
+                <img :src="entry.photoUrl" :alt="entry.displayName" class="h-10 w-10 shrink-0 rounded-full object-cover ring-1 ring-white/10" />
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-neutral-100" x-text="entry.displayName"></span>
+                  <span class="block truncate text-xs text-neutral-400" x-text="entry.track.name + ' — ' + entry.track.artistName"></span>
+                </span>
+              </button>
+              <button
+                type="button"
+                class="shrink-0 rounded-full p-2 text-brand-400 active:scale-95"
+                :aria-label="isCurrentTrack(entry.track.spotifyId) ? 'Pause' : 'Play'"
+                @click="playTrack(entry.track)"
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor" class="h-5 w-5">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              </button>
+            </li>
+          </template>
+        </ul>
+      </div>
+    </div>
+  </template>
+  </div>
+
+  <script type="module">
+    import { createDropApp } from '/drop.js';
+    import { mountHeader, mountNav } from '/nav.js';
+    import { installTapFeedback } from '/tapFeedback.js';
+    import { mountPlayerBar } from '/playerBar.js';
+    import '/router.js';
+    mountHeader();
+    mountNav();
+    installTapFeedback();
+    mountPlayerBar();
+
+    window.pageApp = createDropApp;
+  </script>
+  <script defer src="/alpine.js"></script>
+  <div id="wl-player-root" class="wl-gpu-layer fixed inset-x-0 z-10" style="bottom: var(--wl-nav-h)">
+    <div id="wl-player-chrome" class="border-t border-white/10 bg-surface/90 backdrop-blur-lg"></div>
+    <div id="wl-player-iframe-host" class="hidden border-t border-white/10 bg-surface/90 backdrop-blur-lg"></div>
+  </div>
+  <div id="wl-nav-root"></div>
+</body>
+</html>

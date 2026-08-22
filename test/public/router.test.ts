@@ -26,6 +26,7 @@ describe('ROUTES', () => {
     expect(Object.keys(ROUTES).sort()).toEqual([
       '/',
       '/artist',
+      '/drop',
       '/group',
       '/groups',
       '/history',

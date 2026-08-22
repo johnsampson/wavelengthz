@@ -33,7 +33,10 @@ const RECENT_MUSIC_LIMIT = 10;
 // Two friends-seekers match each other regardless of gender; everyone else
 // keeps today's exact reciprocity untouched. Params, in order: me.seeking,
 // me.seeking, me.gender.
-const RECIPROCITY_SQL = `(u.seeking = 'friends' AND ? = 'friends') OR (u.gender = ? AND u.seeking = ?)`;
+// Exported for src/routes/dailyDrop.ts's browse-list query, which needs the
+// exact same "who am I allowed to be shown as a potential match" filter --
+// duplicating this SQL fragment risks it drifting out of sync with this one.
+export const RECIPROCITY_SQL = `(u.seeking = 'friends' AND ? = 'friends') OR (u.gender = ? AND u.seeking = ?)`;
 
 // Symmetric to musicSwipes.ts's own blockedGenreFilter, applied here so a
 // genre `me` has explicitly hidden from their music deck (user_blocked_
@@ -56,7 +59,7 @@ const GENRE_BLOCK_FILTER = `AND NOT EXISTS (
   SELECT 1 FROM music_profiles mp, json_each(mp.top_genres) je
   WHERE mp.user_id = u.id AND je.value IN (SELECT genre FROM user_blocked_genres WHERE user_id = ?)
 )`;
-function reciprocityParams(me: Pick<UserRow, 'gender' | 'seeking'>): [string, string, string] {
+export function reciprocityParams(me: Pick<UserRow, 'gender' | 'seeking'>): [string, string, string] {
   return [me.seeking!, me.seeking!, me.gender!];
 }
 

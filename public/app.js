@@ -178,4 +178,14 @@ export const api = {
     request('/api/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(subscription) }),
   pushUnsubscribe: (endpoint) =>
     request('/api/push/unsubscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint }) }),
+  // Today's prompt + my own answer (if any) + how many people have answered
+  // so far -- the last is shown even before answering, as a "this is alive"
+  // signal (public/drop.js).
+  dailyDrop: () => request('/api/daily-drop'),
+  // `track` is the raw Spotify track object, same shape shareTrack sends --
+  // the server resolves it into the catalog in one round trip
+  // (src/lib/trackSharing.ts's resolveSharedTrack).
+  submitDailyDropAnswer: (track) =>
+    request('/api/daily-drop/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track }) }),
+  dailyDropAnswers: () => request('/api/daily-drop/answers'),
 };
