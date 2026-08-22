@@ -22,7 +22,19 @@ const SDK_SRC = 'https://sdk.scdn.co/spotify-player.js';
 // Spotify's own device-ready handshake is normally fast, but this guards
 // against a CSP misconfiguration or a Spotify-side outage hanging a caller
 // forever instead of falling back to the iframe within a reasonable time.
-const CONNECT_TIMEOUT_MS = 8000;
+//
+// Deliberately generous, not "fast": this only starts counting once loadSdk()
+// has already resolved (the script itself has no timeout of its own -- a
+// slow load just takes as long as it takes), so it exclusively bounds the
+// handshake phase -- getOAuthToken's own round trip to this app's backend,
+// plus Spotify's own device-registration negotiation. A Premium (paying)
+// account on a genuinely slow-but-working connection was hitting this at the
+// original 8s value and silently, permanently downgrading to the read-only
+// iframe for that whole page load -- worse than just waiting a few more
+// seconds, especially for exactly the users this feature exists for. Widened
+// so a slow handshake has real room to actually finish; a truly broken one
+// (misconfiguration/outage) still falls back, just a bit later.
+export const CONNECT_TIMEOUT_MS = 15000;
 
 let sdkLoadPromise = null;
 let connectionPromise = null;

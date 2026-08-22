@@ -363,7 +363,13 @@
 // Vibration API at all, so this is real feedback only on Android). New
 // precached file, so it must be in APP_SHELL from this version or an
 // already-installed user's next visit 404s on the import.
-const CACHE_NAME = 'wavelengthz-shell-v58';
+// v59 widens wavelengthzPlayer.js's SDK connect-handshake timeout (8s ->
+// 15s) -- a paid (Premium) account on a slow-but-working connection was
+// permanently downgrading to the read-only iframe for the whole page load
+// because the handshake genuinely needed more than 8s, not because
+// anything was actually broken. No new precached files, but
+// wavelengthzPlayer.js's content changed.
+const CACHE_NAME = 'wavelengthz-shell-v59';
 const APP_SHELL = [
   '/',
   '/app.js',
