@@ -333,7 +333,24 @@
 // original alpha channel purely as a stencil for where each color goes) --
 // same visual design, just actually opaque now. No new precached files,
 // but their content changed.
-// v56 adds public/tapFeedback.js, wired into every page's bootstrap script:
+// v56 fixes issue #108's "on a slower connection after you slid the artist
+// to the left the artist picture reappears for a brief second before the
+// next artist picture shows" -- swipe.js's attachSwipeDeck reuses the same
+// <img> element across cards, so a not-yet-loaded next image left the
+// PREVIOUS candidate's photo visibly showing until it finished downloading.
+// index.js's showNext() now preloads the upcoming candidate's image while
+// it still has a full swipe's worth of dwell time as queue[0], same
+// reasoning as the existing artist-profile prefetch just below it in that
+// function. No new precached files, but index.js's content changed.
+// v57 adds a Songs tab to the deck's search modal (issue #108: "I often try
+// to find and like a track and I'm unable to" -- search only ever looked up
+// artists by name, with no way to find a specific song at all). Tapping a
+// song result likes it directly (POST /api/swipe/music) rather than
+// navigating anywhere, cataloging the artist/track first if either isn't
+// already in D1 (GET /api/tracks/search's unscoped form now also reports
+// spotifyArtistId for exactly this). No new precached files, but
+// app.js/index.html/index.js's content changed.
+// v58 adds public/tapFeedback.js, wired into every page's bootstrap script:
 // this app already defines active:scale-*/active:bg-* Tailwind states on
 // nearly everything tappable (btn-primary/btn-secondary/btn-ghost/
 // btn-danger, pill-toggle, nav.js's tab bar), but iOS Safari never applies
@@ -346,13 +363,13 @@
 // Vibration API at all, so this is real feedback only on Android). New
 // precached file, so it must be in APP_SHELL from this version or an
 // already-installed user's next visit 404s on the import.
-// v57 widens wavelengthzPlayer.js's SDK connect-handshake timeout (8s ->
+// v59 widens wavelengthzPlayer.js's SDK connect-handshake timeout (8s ->
 // 15s) -- a paid (Premium) account on a slow-but-working connection was
 // permanently downgrading to the read-only iframe for the whole page load
 // because the handshake genuinely needed more than 8s, not because
 // anything was actually broken. No new precached files, but
 // wavelengthzPlayer.js's content changed.
-const CACHE_NAME = 'wavelengthz-shell-v57';
+const CACHE_NAME = 'wavelengthz-shell-v59';
 const APP_SHELL = [
   '/',
   '/app.js',
