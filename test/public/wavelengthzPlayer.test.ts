@@ -6,6 +6,7 @@ import {
   pausePlayback,
   resumePlayback,
   _resetForTests,
+  CONNECT_TIMEOUT_MS,
 } from '../../public/wavelengthzPlayer.js';
 
 function stubPlayerTokenFetch(response: any, extra?: (url: string, init: any) => Response | null) {
@@ -139,6 +140,41 @@ describe('getPlayer', () => {
 
     expect(PlayerCtor).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
+  });
+
+  // Issue: a paid (Premium) account on a slow-but-working connection was
+  // seeing the read-only iframe fallback instead of the real player --
+  // traced to this timeout firing before a genuinely slow handshake (not a
+  // broken one) had a chance to finish.
+  it('falls back to null once CONNECT_TIMEOUT_MS elapses without a ready/error event', async () => {
+    vi.useFakeTimers();
+    stubPlayerTokenFetch({ available: true, accessToken: 'tok' });
+    const fakePlayer = fakeSpotifyPlayer();
+    // connect() deliberately fires nothing -- a handshake stuck on a slow
+    // connection, neither succeeding nor failing within the window.
+    vi.stubGlobal('window', { Spotify: { Player: vi.fn(function () { return fakePlayer; }) } });
+
+    const resultPromise = getPlayer();
+    await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS);
+
+    await expect(resultPromise).resolves.toBeNull();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('still resolves to {player, deviceId} if ready fires just before the timeout would have', async () => {
+    vi.useFakeTimers();
+    stubPlayerTokenFetch({ available: true, accessToken: 'tok' });
+    const fakePlayer = fakeSpotifyPlayer();
+    vi.stubGlobal('window', { Spotify: { Player: vi.fn(function () { return fakePlayer; }) } });
+
+    const resultPromise = getPlayer();
+    await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS - 1000);
+    fakePlayer.fire('ready', { device_id: 'dev1' });
+
+    await expect(resultPromise).resolves.toEqual({ player: fakePlayer, deviceId: 'dev1' });
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 });
 
