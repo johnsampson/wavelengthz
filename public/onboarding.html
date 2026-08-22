@@ -155,6 +155,9 @@
     import { requireAuth } from '/auth.js';
     import { MAX_PHOTOS, uploadPhotoFile } from '/photos.js';
     import { showErrorToast } from '/toast.js';
+    import { installTapFeedback } from '/tapFeedback.js';
+
+    installTapFeedback();
 
     window.onboardingApp = function () {
       return {
