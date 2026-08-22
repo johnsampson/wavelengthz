@@ -2,6 +2,7 @@ import type { RouterType } from 'itty-router';
 import { getSessionUser } from '../lib/session';
 import { computeAge } from '../lib/age';
 import { containsBlockedWord } from '../lib/messageFilter';
+import { grantInviteCodes } from '../lib/inviteCodes';
 
 interface OnboardingBody {
   display_name: string;
@@ -188,6 +189,23 @@ export function registerOnboardingRoutes(router: RouterType) {
       now,
       user.id
     ).run();
+
+    // The entire self-balancing mechanism (docs/superpowers/specs/2026-08-09-
+    // gender-balanced-invite-gate-design.md): the moment someone finishes
+    // onboarding for the first time, they're handed codes that only work for
+    // the OPPOSITE gender they just declared -- gender is validated against
+    // GENDER_OPTIONS ('male'/'female') a few lines up, so it's never the
+    // 'friends'-only seeking value this check would otherwise mishandle.
+    // Gated on the pre-update `user.onboarded_at == null` (this transition,
+    // not every later Settings save through this same endpoint) so it fires
+    // exactly once per account, ever.
+    if (user.onboarded_at == null) {
+      // body.gender, not the `gender` local -- already validated as a member
+      // of GENDER_OPTIONS above, and always what `gender` equals in this
+      // branch, but referencing it directly avoids relying on TS narrowing
+      // through the ternary that assigned `gender`.
+      await grantInviteCodes(env.DB, user.id, body.gender, now);
+    }
 
     return Response.json({ ok: true });
   });

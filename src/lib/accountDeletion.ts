@@ -73,6 +73,16 @@ export async function hardDeleteUser(env: Env, userId: string): Promise<void> {
   await env.DB.prepare('UPDATE artists SET added_by_user_id = NULL, updated_at = ? WHERE added_by_user_id = ?').bind(now, userId).run();
   await env.DB.prepare('UPDATE tracks SET added_by_user_id = NULL, updated_at = ? WHERE added_by_user_id = ?').bind(now, userId).run();
 
+  // Same reasoning as artists/tracks above -- invite_codes this user issued
+  // (still redeemable by someone else) or redeemed (a historical record of
+  // who joined via what) both outlive the user; both FK columns are
+  // nullable, so null them rather than leaving them dangling. `users.
+  // invited_by_code_id` needs no equivalent handling: it's an outbound
+  // reference on the row about to be deleted, not an inbound one that would
+  // block the DELETE below.
+  await env.DB.prepare('UPDATE invite_codes SET created_by_user_id = NULL, updated_at = ? WHERE created_by_user_id = ?').bind(now, userId).run();
+  await env.DB.prepare('UPDATE invite_codes SET redeemed_by_user_id = NULL, updated_at = ? WHERE redeemed_by_user_id = ?').bind(now, userId).run();
+
   await env.DB.prepare('DELETE FROM auth_identities WHERE user_id = ?').bind(userId).run();
   await env.DB.prepare('DELETE FROM music_source_tokens WHERE user_id = ?').bind(userId).run();
   await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(userId).run();

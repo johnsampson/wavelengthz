@@ -11,7 +11,9 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await env.DB.exec('DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM sessions; DELETE FROM users;');
+  await env.DB.exec(
+    'DELETE FROM invite_codes; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM sessions; DELETE FROM users;'
+  );
   await insertTestUser(env.DB, {
     id: 'u1',
     spotifyId: 'sp1',
@@ -680,6 +682,56 @@ describe('POST /api/onboarding', () => {
       const row = await env.DB.prepare('SELECT age_min, age_max FROM users WHERE id = ?').bind('u1').first<any>();
       expect(row.age_min).toBe(selfAge);
       expect(row.age_max).toBe(selfAge + 9);
+    });
+  });
+
+  describe('invite code grant on first completion (migrations/0026)', () => {
+    const completePayload = (overrides: Record<string, unknown>) => ({
+      display_name: 'Jordan',
+      date_of_birth: '1995-01-01',
+      location_label: 'Austin, TX',
+      gender: 'male',
+      seeking: 'female',
+      intent: 'something_casual',
+      lat: 30.27,
+      lng: -97.74,
+      ...overrides,
+    });
+    const post = (cookie: string, payload: Record<string, unknown>) =>
+      worker.fetch(
+        new Request('http://localhost/api/onboarding', {
+          method: 'POST',
+          headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }),
+        env,
+        {} as ExecutionContext
+      );
+
+    it('grants INVITE_CODES_PER_MEMBER codes targeting the opposite gender on first completion', async () => {
+      const cookie = await sessionCookieFor('u1');
+      const res = await post(cookie, completePayload({ gender: 'male' }));
+      expect(res.status).toBe(200);
+
+      const rows = await env.DB.prepare('SELECT target_gender, redeemed_by_user_id FROM invite_codes WHERE created_by_user_id = ?')
+        .bind('u1')
+        .all<any>();
+      expect(rows.results.length).toBeGreaterThan(0);
+      for (const row of rows.results) {
+        expect(row.target_gender).toBe('female');
+        expect(row.redeemed_by_user_id).toBeNull();
+      }
+    });
+
+    it('does not grant a second batch on a later Settings re-save', async () => {
+      const cookie = await sessionCookieFor('u1');
+      await post(cookie, completePayload({}));
+      const afterFirst = await env.DB.prepare('SELECT COUNT(*) c FROM invite_codes WHERE created_by_user_id = ?').bind('u1').first<any>();
+
+      await post(cookie, completePayload({ display_name: 'Jordan Updated' }));
+      const afterResave = await env.DB.prepare('SELECT COUNT(*) c FROM invite_codes WHERE created_by_user_id = ?').bind('u1').first<any>();
+
+      expect(afterResave.c).toBe(afterFirst.c);
     });
   });
 });

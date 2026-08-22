@@ -23,7 +23,7 @@ beforeEach(async () => {
     DELETE FROM messages; DELETE FROM matches; DELETE FROM user_photos;
     DELETE FROM people_swipes; DELETE FROM music_swipes; DELETE FROM user_genres; DELETE FROM music_profiles;
     DELETE FROM blocks; DELETE FROM reports; DELETE FROM notifications; DELETE FROM sessions;
-    DELETE FROM push_subscriptions;
+    DELETE FROM push_subscriptions; DELETE FROM invite_codes;
     DELETE FROM tracks; DELETE FROM artists;
     DELETE FROM music_source_tokens; DELETE FROM auth_identities;
     DELETE FROM users;
@@ -97,6 +97,37 @@ describe('hardDeleteUser and catalog attribution', () => {
     const track = await env.DB.prepare('SELECT * FROM tracks WHERE id = ?').bind('t1').first<any>();
     expect(track).not.toBeNull();
     expect(track.added_by_user_id).toBeNull();
+  });
+});
+
+describe('hardDeleteUser and invite codes', () => {
+  it('nulls created_by_user_id/redeemed_by_user_id on invite_codes rather than leaving them dangling', async () => {
+    // Every completed onboarding grants 2 invite_codes rows (migrations/0026,
+    // src/lib/inviteCodes.ts) -- meaning virtually every real account has
+    // rows referencing it as created_by_user_id, and some as
+    // redeemed_by_user_id too. Both FKs are nullable specifically so a code
+    // outlives the account that issued or redeemed it, same reasoning as
+    // artists/tracks' added_by_user_id above.
+    await seedFullUser('u1');
+    await seedFullUser('u2');
+    await env.DB.prepare(
+      `INSERT INTO invite_codes (id, code, created_by_user_id, target_gender, created_at, updated_at) VALUES ('ic1', 'ABCD1234', 'u1', 'female', 1000, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO invite_codes (id, code, created_by_user_id, target_gender, redeemed_by_user_id, redeemed_at, created_at, updated_at)
+       VALUES ('ic2', 'EFGH5678', 'u2', 'male', 'u1', 1500, 1000, 1500)`
+    ).run();
+
+    await hardDeleteUser(env as any, 'u1');
+
+    expect(await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind('u1').first()).toBeNull();
+    const issued = await env.DB.prepare('SELECT * FROM invite_codes WHERE id = ?').bind('ic1').first<any>();
+    expect(issued).not.toBeNull();
+    expect(issued.created_by_user_id).toBeNull();
+    const redeemed = await env.DB.prepare('SELECT * FROM invite_codes WHERE id = ?').bind('ic2').first<any>();
+    expect(redeemed).not.toBeNull();
+    expect(redeemed.redeemed_by_user_id).toBeNull();
+    expect(redeemed.created_by_user_id).toBe('u2'); // untouched -- u2 wasn't deleted
   });
 });
 

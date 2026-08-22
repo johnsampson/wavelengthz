@@ -188,4 +188,7 @@ export const api = {
   submitDailyDropAnswer: (track) =>
     request('/api/daily-drop/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track }) }),
   dailyDropAnswers: () => request('/api/daily-drop/answers'),
+  // Settings -> "Your invites" (public/settings/invites.js). Codes I've
+  // issued and their redemption state -- see migrations/0026.
+  myInvites: () => request('/api/me/invites'),
 };

@@ -378,7 +378,15 @@
 // precache list), a banner on the deck (index.html/index.js) as its only
 // discovery surface, and 3 new app.js client methods. Browse-only in v1 --
 // deliberately not a scoring/matching input yet, see the spec doc.
-const CACHE_NAME = 'wavelengthz-shell-v60';
+// v61 adds the gender-balanced invite system (docs/superpowers/specs/
+// 2026-08-09-gender-balanced-invite-gate-design.md): every completed
+// onboarding hands out 2 codes that only work for the opposite gender --
+// self-balancing growth, off by default (INVITE_ONLY unset). New Settings ->
+// "Your invites" panel (/settings/invites + its .js, both added to this
+// precache list); /join and /join/continue are the pre-auth redemption
+// landing page, deliberately NOT precached, same treatment as /login. New
+// app.js client method (myInvites), settings.html links to the new panel.
+const CACHE_NAME = 'wavelengthz-shell-v61';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -425,11 +433,13 @@ const APP_SHELL = [
   '/settings/preferences',
   '/settings/notifications',
   '/settings/connections',
+  '/settings/invites',
   '/settings/profile.js',
   '/settings/messaging.js',
   '/settings/preferences.js',
   '/settings/notifications.js',
   '/settings/connections.js',
+  '/settings/invites.js',
   '/wavelength',
   '/wavelength.js',
   '/notifications',
@@ -461,7 +471,7 @@ self.addEventListener('activate', (event) => {
 // oauth-state cookie round-trip and produces "Invalid OAuth state" with
 // nothing to log server-side, since the request the server sees is entirely
 // legitimate, just carrying a cookie from a redirect chain the SW mangled.
-const BYPASS_PATHS = new Set(['/login', '/login/spotify', '/login/google', '/callback', '/callback/google', '/logout']);
+const BYPASS_PATHS = new Set(['/login', '/login/spotify', '/login/google', '/callback', '/callback/google', '/logout', '/join', '/join/continue']);
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
