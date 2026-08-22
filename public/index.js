@@ -82,6 +82,10 @@ export function createDeckApp() {
     // count just crossed the threshold (src/routes/musicSwipes.ts); null
     // the rest of the time.
     genrePrompt: null,
+    // { text, answered } once loaded, or null while loading/on failure --
+    // the deck's only discovery surface for /drop (public/drop.html), so a
+    // failure here just means no banner, never a broken deck.
+    dailyDropPrompt: null,
 
     // Reads playerBar.js's own module state rather than keeping a local
     // copy -- true exactly when the current card's anthem is the track
@@ -116,8 +120,21 @@ export function createDeckApp() {
             this.showSearch = true;
           }
         }
+        this.loadDailyDropPrompt();
       }
       this.debouncedSearch = debounce(() => this.runSearch(), 300);
+    },
+
+    // Fire-and-forget, same reasoning as showNext()'s artist-profile
+    // prefetch below -- a failure here just means no banner, never a
+    // broken deck.
+    async loadDailyDropPrompt() {
+      try {
+        const res = await api.dailyDrop();
+        this.dailyDropPrompt = { text: res.prompt.text, answered: !!res.myAnswer };
+      } catch (e) {
+        // Non-fatal.
+      }
     },
 
     destroy() {

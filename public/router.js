@@ -40,6 +40,7 @@ export const ROUTES = {
   '/settings/connections': { module: '/settings/connections.js', factory: 'createConnectionsApp' },
   '/history': { module: '/history.js', factory: 'createHistoryApp' },
   '/wavelength': { module: '/wavelength.js', factory: 'createWavelengthApp' },
+  '/drop': { module: '/drop.js', factory: 'createDropApp' },
   '/matches': { module: '/matches.js', factory: 'createMatchesApp' },
   '/match': { module: '/match.js', factory: 'createMatchApp' },
   '/groups': { module: '/groups.js', factory: 'createGroupsApp' },

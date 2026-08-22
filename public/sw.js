@@ -369,7 +369,16 @@
 // because the handshake genuinely needed more than 8s, not because
 // anything was actually broken. No new precached files, but
 // wavelengthzPlayer.js's content changed.
-const CACHE_NAME = 'wavelengthz-shell-v59';
+// v60 adds The Daily Drop (docs/superpowers/specs/2026-08-17-idea-daily-drop.md):
+// one prompt a day, answered with a song, browsable against everyone else's
+// answer to the same prompt -- this app's own retention-strategy work's #1
+// ranked idea, aimed at the gap that every notification today is purely
+// reactive (a match or message someone else triggers) with no self-serve
+// reason to open the app. New /drop route + drop.js (both added to this
+// precache list), a banner on the deck (index.html/index.js) as its only
+// discovery surface, and 3 new app.js client methods. Browse-only in v1 --
+// deliberately not a scoring/matching input yet, see the spec doc.
+const CACHE_NAME = 'wavelengthz-shell-v60';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -426,6 +435,8 @@ const APP_SHELL = [
   '/notifications',
   '/groups',
   '/group',
+  '/drop',
+  '/drop.js',
 ];
 
 self.addEventListener('install', (event) => {

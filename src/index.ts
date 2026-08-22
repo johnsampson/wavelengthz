@@ -21,6 +21,7 @@ import { runScheduledFollowSync } from './lib/followSync';
 import { registerPushRoutes } from './routes/push';
 import { registerGenreBlockRoutes } from './routes/genreBlocks';
 import { registerPhoneRoutes } from './routes/phone';
+import { registerDailyDropRoutes } from './routes/dailyDrop';
 import { purgeExpiredDeletions } from './lib/accountDeletion';
 import { refreshCatalogFromProfiles } from './db/catalogRefresh';
 import { discoverArtistsByGenre } from './lib/catalogDiscovery';
@@ -54,6 +55,7 @@ registerFollowSyncRoutes(router);
 registerPushRoutes(router);
 registerGenreBlockRoutes(router);
 registerPhoneRoutes(router);
+registerDailyDropRoutes(router);
 
 // Falls back to the ASSETS binding (static HTML/JS/CSS under public/) for
 // anything that isn't an API route -- required once [assets].run_worker_first
