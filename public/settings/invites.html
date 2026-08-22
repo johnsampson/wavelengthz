@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wavelengthz — Your invites</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/tailwind.css" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+</head>
+<body class="min-h-dvh bg-base text-neutral-50 p-4 pb-app">
+  <div id="wl-header-root"></div>
+  <div id="wl-app-root" x-data="pageApp()">
+  <a href="/settings" class="mx-auto mb-2 block max-w-md text-sm text-neutral-400">&larr; Settings</a>
+  <h1 class="mx-auto mb-1 max-w-md text-2xl font-bold">Your invites</h1>
+  <p class="mx-auto mb-4 max-w-md text-sm text-neutral-500">
+    Every code you send only works for one gender -- that's what keeps this fair as the app grows. Share a link below with someone you actually want here.
+  </p>
+
+  <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
+  <p x-show="loading" class="mx-auto max-w-md text-sm text-neutral-500">Loading...</p>
+
+  <template x-if="!loading && invites">
+    <div class="mx-auto max-w-md space-y-4">
+      <div>
+        <h2 class="mb-2 text-sm font-semibold text-neutral-200">Ready to send</h2>
+        <p x-show="!unredeemed.length" class="text-sm text-neutral-500">You've used all your invites for now.</p>
+        <ul x-show="unredeemed.length" class="space-y-2">
+          <template x-for="invite in unredeemed" :key="invite.code">
+            <li class="card flex items-center justify-between gap-3 p-4">
+              <span class="min-w-0 flex-1">
+                <span class="block truncate font-mono text-sm text-neutral-100" x-text="invite.code"></span>
+                <span class="block text-xs text-neutral-500">For <span x-text="genderLabel(invite.targetGender)"></span></span>
+              </span>
+              <button type="button" class="btn-secondary shrink-0" @click="copyLink(invite.code)">
+                <span x-text="copiedCode === invite.code ? 'Copied!' : 'Copy link'"></span>
+              </button>
+            </li>
+          </template>
+        </ul>
+      </div>
+
+      <div x-show="redeemed.length">
+        <h2 class="mb-2 text-sm font-semibold text-neutral-200">People you invited</h2>
+        <ul class="space-y-2">
+          <template x-for="invite in redeemed" :key="invite.code">
+            <li class="card p-4 text-sm text-neutral-300" x-text="invite.redeemedByName || 'Someone joined with this code'"></li>
+          </template>
+        </ul>
+      </div>
+    </div>
+  </template>
+  </div>
+
+  <script type="module">
+    import { createInvitesApp } from '/settings/invites.js';
+    import { mountHeader, mountNav } from '/nav.js';
+    import { installTapFeedback } from '/tapFeedback.js';
+    import { mountPlayerBar } from '/playerBar.js';
+    import '/router.js';
+    mountHeader();
+    mountNav();
+    installTapFeedback();
+    mountPlayerBar();
+
+    window.pageApp = createInvitesApp;
+  </script>
+  <script defer src="/alpine.js"></script>
+  <div id="wl-player-root" class="wl-gpu-layer fixed inset-x-0 z-10" style="bottom: var(--wl-nav-h)">
+    <div id="wl-player-chrome" class="border-t border-white/10 bg-surface/90 backdrop-blur-lg"></div>
+    <div id="wl-player-iframe-host" class="hidden border-t border-white/10 bg-surface/90 backdrop-blur-lg"></div>
+  </div>
+  <div id="wl-nav-root"></div>
+</body>
+</html>

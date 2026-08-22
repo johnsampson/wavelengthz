@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
 import worker from '../../src/index';
@@ -10,7 +10,14 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await env.DB.exec('DELETE FROM sessions; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;');
+  // users.invited_by_code_id -> invite_codes.id and invite_codes.
+  // created_by_user_id/redeemed_by_user_id -> users.id form a genuine
+  // cycle (this is the only test file where a real /callback run sets
+  // invited_by_code_id) -- nulling it first breaks the cycle so either
+  // table can then be cleared in either order.
+  await env.DB.exec(
+    'UPDATE users SET invited_by_code_id = NULL; DELETE FROM invite_codes; DELETE FROM sessions; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;'
+  );
 });
 
 describe('GET /login/spotify', () => {
@@ -765,6 +772,137 @@ describe('GET /callback/google', () => {
     const user = await env.DB.prepare('SELECT deleted_at FROM users WHERE id = ?').bind(userId).first<any>();
     expect(user.deleted_at).toBeNull();
 
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('invite-only gate (INVITE_ONLY)', () => {
+  // env.INVITE_ONLY mutation leaks across tests in this pool -- unlike
+  // vi.stubGlobal, there's no vi.unstub equivalent for env bindings, so
+  // this file resets it by hand.
+  afterEach(() => {
+    (env as any).INVITE_ONLY = '';
+  });
+
+  function stubSpotify(spotifyId = 'spotify-invite-test') {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('accounts.spotify.com/api/token')) {
+          return new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 }), { status: 200 });
+        }
+        if (url.includes('api.spotify.com/v1/me')) {
+          return new Response(JSON.stringify({ id: spotifyId, email: null }), { status: 200 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+  }
+
+  async function callbackWithInviteCookie(inviteCode: string | null) {
+    const cookie = inviteCode ? `wl_oauth_state=match; wl_invite_code=${inviteCode}` : 'wl_oauth_state=match';
+    return worker.fetch(new Request('http://localhost/callback?code=abc&state=match', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+  }
+
+  it('signup works with no invite cookie at all when INVITE_ONLY is off (the default)', async () => {
+    stubSpotify();
+    const res = await callbackWithInviteCookie(null);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/onboarding');
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects a new signup with no invite cookie when INVITE_ONLY is on, creating no user', async () => {
+    (env as any).INVITE_ONLY = 'true';
+    stubSpotify();
+
+    const res = await callbackWithInviteCookie(null);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/join?error=invalid_code');
+    const count = await env.DB.prepare('SELECT COUNT(*) c FROM users').first<any>();
+    expect(count.c).toBe(0);
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects an unknown invite code when INVITE_ONLY is on, creating no user', async () => {
+    (env as any).INVITE_ONLY = 'true';
+    stubSpotify();
+
+    const res = await callbackWithInviteCookie('NOSUCHCODE');
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/join?error=invalid_code');
+    const count = await env.DB.prepare('SELECT COUNT(*) c FROM users').first<any>();
+    expect(count.c).toBe(0);
+    vi.unstubAllGlobals();
+  });
+
+  it('accepts a valid invite code when INVITE_ONLY is on, creating the user, claiming the code, and clearing the cookie', async () => {
+    (env as any).INVITE_ONLY = 'true';
+    await env.DB.prepare(
+      `INSERT INTO invite_codes (id, code, target_gender, created_at, updated_at) VALUES ('ic1', 'ABCD1234', 'female', 1000, 1000)`
+    ).run();
+    stubSpotify();
+
+    const res = await callbackWithInviteCookie('ABCD1234');
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/onboarding');
+    const setCookies = res.headers.getSetCookie ? res.headers.getSetCookie() : [res.headers.get('Set-Cookie') ?? ''];
+    expect(setCookies.some((c) => c.startsWith('wl_invite_code=;'))).toBe(true);
+
+    const user = await env.DB.prepare('SELECT id, invited_by_code_id FROM users').first<any>();
+    expect(user).toBeTruthy();
+    expect(user.invited_by_code_id).toBe('ic1');
+
+    const code = await env.DB.prepare('SELECT redeemed_by_user_id FROM invite_codes WHERE id = ?').bind('ic1').first<any>();
+    expect(code.redeemed_by_user_id).toBe(user.id);
+    vi.unstubAllGlobals();
+  });
+
+  it('never gates an existing user signing back in, even with no invite cookie', async () => {
+    (env as any).INVITE_ONLY = 'true';
+    await insertTestUser(env.DB, { id: 'u-existing', spotifyId: 'spotify-existing', skipSpotify: true });
+    await env.DB.prepare(
+      `INSERT INTO auth_identities (id, user_id, provider, provider_id, created_at, updated_at) VALUES ('ai1', 'u-existing', 'spotify', 'spotify-existing', 1000, 1000)`
+    ).run();
+    stubSpotify('spotify-existing');
+
+    const res = await callbackWithInviteCookie(null);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).not.toBe('/join?error=invalid_code');
+    vi.unstubAllGlobals();
+  });
+
+  it('gates the Google callback new-user branch identically', async () => {
+    (env as any).INVITE_ONLY = 'true';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('oauth2.googleapis.com/token')) {
+          return new Response(JSON.stringify({ access_token: 'gat', id_token: 'idt' }), { status: 200 });
+        }
+        if (url.includes('userinfo')) {
+          return new Response(JSON.stringify({ sub: 'google-invite-test', email: 'g@example.com', email_verified: true }), { status: 200 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    const res = await worker.fetch(
+      new Request('http://localhost/callback/google?code=abc&state=match', { headers: { Cookie: 'wl_oauth_state=match' } }),
+      env,
+      {} as ExecutionContext
+    );
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/join?error=invalid_code');
+    const count = await env.DB.prepare('SELECT COUNT(*) c FROM users').first<any>();
+    expect(count.c).toBe(0);
     vi.unstubAllGlobals();
   });
 });

@@ -22,6 +22,7 @@ import { registerPushRoutes } from './routes/push';
 import { registerGenreBlockRoutes } from './routes/genreBlocks';
 import { registerPhoneRoutes } from './routes/phone';
 import { registerDailyDropRoutes } from './routes/dailyDrop';
+import { registerInviteRoutes } from './routes/invites';
 import { purgeExpiredDeletions } from './lib/accountDeletion';
 import { refreshCatalogFromProfiles } from './db/catalogRefresh';
 import { discoverArtistsByGenre } from './lib/catalogDiscovery';
@@ -56,6 +57,7 @@ registerPushRoutes(router);
 registerGenreBlockRoutes(router);
 registerPhoneRoutes(router);
 registerDailyDropRoutes(router);
+registerInviteRoutes(router);
 
 // Falls back to the ASSETS binding (static HTML/JS/CSS under public/) for
 // anything that isn't an API route -- required once [assets].run_worker_first

@@ -37,6 +37,7 @@ describe('ROUTES', () => {
       '/profile',
       '/settings',
       '/settings/connections',
+      '/settings/invites',
       '/settings/messaging',
       '/settings/notifications',
       '/settings/preferences',

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Wavelengthz — You're invited</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/tailwind.css" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+</head>
+<body class="min-h-dvh bg-base text-neutral-50 flex items-center justify-center p-4">
+  <div id="join-card" class="card flex w-full max-w-sm flex-col items-center gap-3 px-6 py-12 text-center">
+    <span class="text-3xl">🎧</span>
+    <p id="join-message" class="font-semibold text-neutral-100">Loading your invite...</p>
+    <a id="join-continue" href="#" class="btn-primary mt-2 hidden w-full">Continue</a>
+    <a id="join-no-code" href="/" class="btn-secondary hidden w-full">Back to Wavelengthz</a>
+  </div>
+  <script type="module">
+    import { installTapFeedback } from '/tapFeedback.js';
+    installTapFeedback();
+
+    const messageEl = document.getElementById('join-message');
+    const continueLink = document.getElementById('join-continue');
+    const noCodeLink = document.getElementById('join-no-code');
+
+    const code = new URLSearchParams(location.search).get('code');
+    const invalidCode = new URLSearchParams(location.search).get('error') === 'invalid_code';
+
+    if (!code) {
+      messageEl.textContent = "You'll need an invite link from someone already on Wavelengthz.";
+      noCodeLink.classList.remove('hidden');
+    } else {
+      try {
+        const res = await fetch(`/api/invites/${encodeURIComponent(code)}`);
+        const status = await res.json();
+        if (!status.valid) {
+          messageEl.textContent = 'This invite has already been used, or the link is no longer valid.';
+          noCodeLink.classList.remove('hidden');
+        } else {
+          const who = status.inviterName ? `${status.inviterName} invited you` : "You've been invited";
+          const gender = status.targetGender === 'male' ? 'a man' : status.targetGender === 'female' ? 'a woman' : 'anyone';
+          messageEl.textContent = `${who} to join Wavelengthz as ${gender}.`;
+          continueLink.href = `/join/continue?code=${encodeURIComponent(code)}`;
+          continueLink.classList.remove('hidden');
+        }
+      } catch (e) {
+        messageEl.textContent = 'Could not check your invite right now. Please try again.';
+        noCodeLink.classList.remove('hidden');
+      }
+    }
+
+    if (invalidCode) {
+      messageEl.textContent = "That invite didn't work -- it may have just been used by someone else. Ask for a fresh link.";
+      continueLink.classList.add('hidden');
+      noCodeLink.classList.remove('hidden');
+    }
+  </script>
+</body>
+</html>

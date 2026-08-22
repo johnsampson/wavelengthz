@@ -20,7 +20,7 @@ import { mountHeader, mountNav } from './nav.js';
 // letting a client-side fetch()+DOMParser cycle stand in for the real
 // top-level navigation would mangle the redirect chain the same way sw.js's
 // own comment describes.
-export const BYPASS_PATHS = new Set(['/login', '/login/spotify', '/login/google', '/callback', '/callback/google', '/logout']);
+export const BYPASS_PATHS = new Set(['/login', '/login/spotify', '/login/google', '/callback', '/callback/google', '/logout', '/join', '/join/continue']);
 
 // One entry per page migrated onto the `<div id="wl-app-root" x-data=
 // "pageApp()">` shape -- grows across several PRs (see the plan's staging).
@@ -38,6 +38,7 @@ export const ROUTES = {
   '/settings/preferences': { module: '/settings/preferences.js', factory: 'createPreferencesApp' },
   '/settings/notifications': { module: '/settings/notifications.js', factory: 'createNotificationsApp' },
   '/settings/connections': { module: '/settings/connections.js', factory: 'createConnectionsApp' },
+  '/settings/invites': { module: '/settings/invites.js', factory: 'createInvitesApp' },
   '/history': { module: '/history.js', factory: 'createHistoryApp' },
   '/wavelength': { module: '/wavelength.js', factory: 'createWavelengthApp' },
   '/drop': { module: '/drop.js', factory: 'createDropApp' },

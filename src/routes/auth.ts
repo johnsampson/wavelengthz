@@ -5,6 +5,62 @@ import { hasFollowScope, setFollowSyncEnabled } from '../lib/followSync';
 import { encrypt } from '../lib/crypto';
 import { createSession, requestIsSecure, requestProtocol, getSessionUser } from '../lib/session';
 import { buildGoogleAuthUrl, exchangeGoogleCode, fetchGoogleProfile } from '../lib/google';
+import { isInviteOnly, claimInviteCode } from '../lib/inviteCodes';
+
+// Always cleared alongside a resolved outcome -- a code redemption is a
+// one-shot thing, never meant to outlive the signup attempt it was set for.
+const CLEAR_INVITE_COOKIE = 'wl_invite_code=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0';
+
+function inviteRejectResponse(): Response {
+  const headers = new Headers({ Location: '/join?error=invalid_code' });
+  headers.append('Set-Cookie', CLEAR_INVITE_COOKIE);
+  return new Response(null, { status: 302, headers });
+}
+
+/**
+ * Step 1 of the gate, called BEFORE the new user row exists -- just reads
+ * the cookie, no DB write yet. `claimInviteCode`'s UPDATE stamps
+ * `redeemed_by_user_id`, a NOT NULL-checked-at-write FK to users(id); doing
+ * that before the user row exists would fail outright, not just logically
+ * reject. `null` means "nothing to claim later" (gate off entirely) --
+ * distinct from `{ reject }`, which means stop now, before creating anyone.
+ */
+function precheckInvite(request: Request, env: Env): { code: string } | { reject: Response } | null {
+  if (!isInviteOnly(env)) return null;
+  const code = parseCookie(request, 'wl_invite_code');
+  return code ? { code } : { reject: inviteRejectResponse() };
+}
+
+/**
+ * Step 2, called immediately AFTER the new user row has been inserted --
+ * `userId` now exists, so the atomic claim's FK is satisfiable. If the code
+ * turned out to be unknown, or someone else's request won the race on it in
+ * the meantime, the just-created account is rolled back (auth_identities +
+ * music_source_tokens, if any + users) so a rejected signup never leaves an
+ * orphaned row behind -- same "closes the race" guarantee as if the check
+ * had happened before creation, just sequenced around the FK constraint
+ * instead of before it.
+ */
+async function claimInviteOrRollback(
+  env: Env,
+  invite: { code: string },
+  userId: string,
+  hadMusicSourceToken: boolean
+): Promise<Response | null> {
+  const now = Date.now();
+  const claim = await claimInviteCode(env.DB, invite.code, userId, now);
+  if (!claim.claimed) {
+    const statements = [
+      env.DB.prepare('DELETE FROM auth_identities WHERE user_id = ?').bind(userId),
+      env.DB.prepare('DELETE FROM users WHERE id = ?').bind(userId),
+    ];
+    if (hadMusicSourceToken) statements.splice(1, 0, env.DB.prepare('DELETE FROM music_source_tokens WHERE user_id = ?').bind(userId));
+    await env.DB.batch(statements);
+    return inviteRejectResponse();
+  }
+  await env.DB.prepare('UPDATE users SET invited_by_code_id = ?, updated_at = ? WHERE id = ?').bind(claim.codeId, now, userId).run();
+  return null;
+}
 
 function parseCookie(request: Request, name: string): string | null {
   const header = request.headers.get('Cookie');
@@ -167,6 +223,13 @@ export function registerAuthRoutes(router: RouterType) {
         userId = crypto.randomUUID();
         onboarded = false;
 
+        // Existing users signing back in (both branches above) are never
+        // gated -- this only governs first-time signup. Cookie is read
+        // BEFORE the user exists (see precheckInvite's own comment on why);
+        // the real atomic claim happens right after creation, below.
+        const invite = precheckInvite(request, env);
+        if (invite && 'reject' in invite) return invite.reject;
+
         // A Google-only user has no real Spotify id -- spotify_id is still
         // UNIQUE NOT NULL, so this user's own id (guaranteed unique, already
         // generated) is written as a harmless placeholder. auth_identities is
@@ -180,18 +243,22 @@ export function registerAuthRoutes(router: RouterType) {
              VALUES (?, ?, 'google', ?, ?, ?, ?)`
           ).bind(crypto.randomUUID(), userId, profile.sub, profile.email ?? null, now, now),
         ]);
+
+        if (invite) {
+          const rejection = await claimInviteOrRollback(env, invite, userId, false);
+          if (rejection) return rejection;
+        }
       }
     }
 
     const { cookie } = await createSession(env.DB, userId, requestIsSecure(request));
 
-    return new Response(null, {
-      status: 302,
-      headers: {
-        Location: onboarded ? '/' : '/onboarding',
-        'Set-Cookie': cookie,
-      },
-    });
+    const headers = new Headers({ Location: onboarded ? '/' : '/onboarding' });
+    headers.append('Set-Cookie', cookie);
+    // Harmless when it was never set (an existing user signing back in, or
+    // INVITE_ONLY off) -- clearing an absent cookie is a no-op.
+    headers.append('Set-Cookie', CLEAR_INVITE_COOKIE);
+    return new Response(null, { status: 302, headers });
   });
 
   router.get('/callback', async (request: Request, env: Env) => {
@@ -355,6 +422,15 @@ export function registerAuthRoutes(router: RouterType) {
         userId = crypto.randomUUID();
         onboarded = false;
 
+        // Existing users signing back in (both branches above, plus the
+        // ?intent=connect/sync/follow account-linking branch far above,
+        // which returns before ever reaching here) are never gated -- this
+        // only governs first-time signup. Cookie is read BEFORE the user
+        // exists (see precheckInvite's own comment on why); the real atomic
+        // claim happens right after creation, below.
+        const invite = precheckInvite(request, env);
+        if (invite && 'reject' in invite) return invite.reject;
+
         // spotify_id is still a required, still-UNIQUE column on users (see
         // Task 1's migration note -- it's a platform constraint, not an
         // oversight, that it can't be dropped). Keep writing the real value
@@ -369,6 +445,11 @@ export function registerAuthRoutes(router: RouterType) {
           ).bind(crypto.randomUUID(), userId, profile.id, profile.email ?? null, now, now),
           tokenStatement(userId),
         ]);
+
+        if (invite) {
+          const rejection = await claimInviteOrRollback(env, invite, userId, true);
+          if (rejection) return rejection;
+        }
       }
     }
 
@@ -377,6 +458,9 @@ export function registerAuthRoutes(router: RouterType) {
     const headers = new Headers({ Location: onboarded ? '/' : '/onboarding' });
     headers.append('Set-Cookie', cookie);
     if (intentCookie) headers.append('Set-Cookie', clearIntentCookie);
+    // Harmless when it was never set (an existing user signing back in, or
+    // INVITE_ONLY off) -- clearing an absent cookie is a no-op.
+    headers.append('Set-Cookie', CLEAR_INVITE_COOKIE);
     return new Response(null, { status: 302, headers });
   });
 
