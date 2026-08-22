@@ -600,12 +600,19 @@ export function registerCatalogRoutes(router: RouterType) {
       if (!q.trim()) return Response.json({ results: [] });
 
       const localRows = await env.DB.prepare(
-        `SELECT t.id, t.spotify_id, t.name, t.album_image_url, a.name AS artist_name
+        `SELECT t.id, t.spotify_id, t.name, t.album_image_url, a.name AS artist_name, a.spotify_id AS artist_spotify_id
          FROM tracks t LEFT JOIN artists a ON a.id = t.artist_id
          WHERE t.name LIKE ? LIMIT 10`
       )
         .bind(`%${q}%`)
-        .all<{ id: string; spotify_id: string; name: string; album_image_url: string | null; artist_name: string | null }>();
+        .all<{
+          id: string;
+          spotify_id: string;
+          name: string;
+          album_image_url: string | null;
+          artist_name: string | null;
+          artist_spotify_id: string | null;
+        }>();
       const localSpotifyIds = new Set(localRows.results.map((r) => r.spotify_id));
 
       const token = await getValidAccessToken(user, env, env.DB).catch(() => getClientCredentialsToken(env));
@@ -618,6 +625,7 @@ export function registerCatalogRoutes(router: RouterType) {
             spotifyTrackId: r.spotify_id,
             name: r.name,
             artistName: r.artist_name,
+            spotifyArtistId: r.artist_spotify_id,
             imageUrl: r.album_image_url,
             inCatalog: true,
           })),
@@ -627,6 +635,14 @@ export function registerCatalogRoutes(router: RouterType) {
               spotifyTrackId: t.id,
               name: t.name,
               artistName: t.artists?.[0]?.name ?? null,
+              // Needed by callers that want to like/catalog a not-yet-seen
+              // track directly from an unscoped search result (issue #108:
+              // "I often try to find and like a track and I'm unable to")
+              // -- POST /api/tracks requires an internal artistId, which for
+              // a brand-new artist means POSTing to /api/artists first, the
+              // same "catalog it, then use the id it hands back" two-step
+              // the deck's own artist search already does in selectArtist().
+              spotifyArtistId: t.artists?.[0]?.id ?? null,
               imageUrl: t.album?.images?.[0]?.url ?? null,
               inCatalog: false,
             })),

@@ -956,8 +956,25 @@ describe('GET /api/tracks/search without artist_id (one-step song search)', () =
       spotifyTrackId: 'sp-t1',
       name: 'Landslide',
       artistName: 'Some Artist',
+      // Needed by callers that want to like/catalog a not-yet-seen track
+      // directly from this result (issue #108) -- POST /api/tracks requires
+      // an internal artistId, which for a brand-new artist means POSTing to
+      // POST /api/artists first, keyed on this.
+      spotifyArtistId: 'sp-a',
       inCatalog: false,
     });
+  });
+
+  it('includes the artist Spotify id on an already-cataloged result too', async () => {
+    stubTrackSearch([]);
+    const cookie = await cookieFor('u1');
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('t-local', 'sp-local', 'Landslide Local', 'local-1', 'https://i/l.jpg', 'seed', 1, 1000)`
+    ).run();
+
+    const body = await search(cookie, 'Landslide');
+
+    expect(body.results[0]).toMatchObject({ id: 't-local', inCatalog: true, spotifyArtistId: 'spotify-local-1' });
   });
 
   it('surfaces already-cataloged matches, tagged, alongside live results', async () => {

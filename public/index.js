@@ -3,7 +3,7 @@ import { attachSwipeDeck } from './swipe.js';
 import { getAuthedUser } from './auth.js';
 import { shouldSearch, debounce, loadStoredMode, storeMode, saveSearchState, takeSearchState } from './search.js';
 import { play, togglePlayPause, isCurrentTrack } from './playerBar.js';
-import { showErrorToast } from './toast.js';
+import { showToast, showErrorToast } from './toast.js';
 import { focusAfterReveal } from './domUtils.js';
 import { navigate } from './router.js';
 
@@ -62,9 +62,20 @@ export function createDeckApp() {
     detachSwipe: null,
     authed: null,
     showSearch: false,
+    // 'artist' (search the roster of artists to swipe on/view) or 'track'
+    // (issue #108: "I often try to find and like a track and I'm unable
+    // to" -- the deck's search had no way to look up a specific song at
+    // all, only artists by name). Always resets to 'artist' on close/reopen
+    // -- unlike searchQuery/searchResults, this never needs to survive the
+    // /artist?id=... round trip via search.js's saveSearchState, since
+    // selectTrack() never navigates away in the first place.
+    searchType: 'artist',
     searchQuery: '',
     searchResults: [],
     searching: false,
+    // Guards selectTrack()'s catalog-then-swipe round trip against a
+    // double-tap firing it twice.
+    likingTrack: false,
     debouncedSearch: null,
     matchModal: null,
     // Set to a genre name once the swipe response reports that genre's pass
@@ -240,8 +251,19 @@ export function createDeckApp() {
 
     closeSearch() {
       this.showSearch = false;
+      this.searchType = 'artist';
       this.searchQuery = '';
       this.searchResults = [];
+    },
+
+    // Switches between searching artists and songs without requiring the
+    // query to be retyped -- re-runs immediately against whatever's already
+    // typed, same as how onSearchInput() itself behaves.
+    setSearchType(type) {
+      if (this.searchType === type) return;
+      this.searchType = type;
+      this.searchResults = [];
+      if (shouldSearch(this.searchQuery)) this.runSearch();
     },
 
     onSearchInput() {
@@ -255,7 +277,8 @@ export function createDeckApp() {
     async runSearch() {
       this.searching = true;
       try {
-        const res = await api.artistSearch(this.searchQuery.trim());
+        const q = this.searchQuery.trim();
+        const res = this.searchType === 'track' ? await api.trackSearch(q) : await api.artistSearch(q);
         this.searchResults = res.results;
       } catch (e) {
         showErrorToast('Could not search right now. Please try again.');
@@ -289,6 +312,42 @@ export function createDeckApp() {
         await navigate(`/artist?id=${res.artistId}`);
       } catch (e) {
         showErrorToast('Could not add that artist. Please try again.');
+      }
+    },
+
+    // Tapping a song result likes it directly (POST /api/swipe/music,
+    // item_type: 'track') rather than navigating anywhere -- this is a
+    // one-step "find and like a song" tool (issue #108), not an alternate
+    // way into an artist's page. Liking through the catalog rather than a
+    // raw Spotify id is deliberate, not incidental: it's what makes the
+    // like cascade to an artist-level like/genre-affinity bump
+    // (likeArtistForTrack, src/routes/musicSwipes.ts) and real-time Spotify
+    // follow-sync, the same as every other like in this app -- a bare
+    // Spotify-sourced item_id would swipe successfully but silently skip
+    // all of that.
+    async selectTrack(result) {
+      if (this.likingTrack) return;
+      this.likingTrack = true;
+      try {
+        let trackId = result.id;
+        if (!trackId) {
+          // Not yet cataloged (GET /api/tracks/search's `inCatalog: false`
+          // shape) -- ensure the artist exists first (POST /api/artists is
+          // DB-first/idempotent, same as selectArtist() above, so this is
+          // cheap even if the artist's already cataloged from some other
+          // path), then the track itself, to get a real internal id to
+          // swipe against.
+          const artistRes = await api.createArtist(result.spotifyArtistId);
+          const trackRes = await api.createTrack(result.spotifyTrackId, artistRes.artistId);
+          trackId = trackRes.trackId;
+        }
+        await api.swipe('music', { item_type: 'track', item_id: trackId, direction: 'right' });
+        showToast({ message: `Liked "${result.name}"`, icon: '❤️' });
+        this.closeSearch();
+      } catch (e) {
+        showErrorToast('Could not like that song. Please try again.');
+      } finally {
+        this.likingTrack = false;
       }
     },
 

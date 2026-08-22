@@ -197,31 +197,76 @@
     class="fixed inset-0 z-20 flex flex-col bg-base/95 p-4 backdrop-blur-sm"
     role="dialog"
     aria-modal="true"
-    aria-label="Search for an artist"
+    :aria-label="searchType === 'track' ? 'Search for a song' : 'Search for an artist'"
   >
     <div class="mx-auto flex w-full max-w-md items-center gap-2">
       <input
         x-ref="searchInput"
         class="field flex-1"
         type="search"
-        placeholder="Search for an artist..."
+        :placeholder="searchType === 'track' ? 'Search for a song...' : 'Search for an artist...'"
         x-model="searchQuery"
         @input="onSearchInput()"
       />
       <button class="btn-ghost" @click="closeSearch()">Cancel</button>
     </div>
+    <!-- issue #108: "I often try to find and like a track and I'm unable
+         to" -- search only ever looked up artists by name before this,
+         with no way to find a specific song at all. -->
+    <div class="mx-auto mt-3 flex w-full max-w-md gap-2 rounded-full bg-surface2 p-1">
+      <button
+        type="button"
+        class="pill-toggle flex-1"
+        :class="searchType === 'artist' ? 'pill-toggle-active' : 'pill-toggle-inactive'"
+        @click="setSearchType('artist')"
+        :aria-pressed="searchType === 'artist'"
+      >Artists</button>
+      <button
+        type="button"
+        class="pill-toggle flex-1"
+        :class="searchType === 'track' ? 'pill-toggle-active' : 'pill-toggle-inactive'"
+        @click="setSearchType('track')"
+        :aria-pressed="searchType === 'track'"
+      >Songs</button>
+    </div>
     <ul class="mx-auto mt-4 flex w-full max-w-md flex-col gap-2 overflow-y-auto">
-      <template x-for="result in searchResults" :key="result.id || result.spotifyArtistId">
-        <li>
-          <button class="card flex w-full items-center gap-3 p-3 text-left transition active:scale-[0.98] active:bg-white/5" @click="selectArtist(result)">
-            <img :src="result.imageUrl" :alt="result.name" class="h-10 w-10 rounded-full object-cover ring-1 ring-white/10" />
-            <span class="text-neutral-100" x-text="result.name"></span>
-          </button>
-        </li>
+      <template x-if="searchType === 'artist'">
+        <template x-for="result in searchResults" :key="result.id || result.spotifyArtistId">
+          <li>
+            <button class="card flex w-full items-center gap-3 p-3 text-left transition active:scale-[0.98] active:bg-white/5" @click="selectArtist(result)">
+              <img :src="result.imageUrl" :alt="result.name" class="h-10 w-10 rounded-full object-cover ring-1 ring-white/10" />
+              <span class="text-neutral-100" x-text="result.name"></span>
+            </button>
+          </li>
+        </template>
+      </template>
+      <!-- Tapping a song likes it immediately (selectTrack, index.js) rather
+           than navigating anywhere -- the heart makes that a tap-to-like
+           row rather than a tap-to-view one, matching the artist rows'
+           lack of one for the opposite reason. -->
+      <template x-if="searchType === 'track'">
+        <template x-for="result in searchResults" :key="result.id || result.spotifyTrackId">
+          <li>
+            <button
+              class="card flex w-full items-center gap-3 p-3 text-left transition active:scale-[0.98] active:bg-white/5 disabled:pointer-events-none disabled:opacity-50"
+              :disabled="likingTrack"
+              @click="selectTrack(result)"
+            >
+              <img :src="result.imageUrl" :alt="result.name" class="h-10 w-10 shrink-0 rounded object-cover ring-1 ring-white/10" />
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-neutral-100" x-text="result.name"></span>
+                <span class="block truncate text-xs text-neutral-400" x-text="result.artistName"></span>
+              </span>
+              <svg viewBox="0 0 24 24" fill="currentColor" class="h-5 w-5 shrink-0 text-brand-400">
+                <path d="M12 21C2 15 2 10 3 7L7 11L12 7L17 11L21 7C22 10 22 15 12 21Z" />
+              </svg>
+            </button>
+          </li>
+        </template>
       </template>
     </ul>
     <p x-show="searchQuery.trim().length > 0 && !searching && searchResults.length === 0" class="mx-auto mt-4 w-full max-w-md text-center text-neutral-400">
-      No artists found.
+      <span x-text="searchType === 'track' ? 'No songs found.' : 'No artists found.'"></span>
     </p>
   </div>
 
