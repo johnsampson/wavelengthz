@@ -215,6 +215,48 @@ export function isCurrentTrack(spotifyId) {
   return trackMatches(spotifyId, currentTrack);
 }
 
+// Cross-page "now playing" change notifications.
+//
+// isCurrentTrack() reads THIS module's state, not the calling page's own
+// Alpine data -- so Alpine's fine-grained reactivity has no dependency to
+// re-run a page's isCurrentTrack(spotifyId) binding when that state changes
+// out from under it. That's invisible for a same-track pause/resume (see
+// below), but very visible for radio: rolling into the next track while the
+// listener is looking at a track-card view elsewhere (an artist page, a
+// shared-track list) left that page's play/pause icon frozen on whatever was
+// true at the last render, especially wrong in radio's automatic
+// track-to-track case since nothing on the page itself ever prompted Alpine
+// to look again.
+//
+// Every page that renders an isCurrentTrack() result subscribes here and
+// bumps a plain counter of its own -- the same "nothing about this value
+// matters except that it changed, so Alpine has something to track" idiom
+// messages.js/group.js already use for `now = Date.now()` to re-evaluate
+// canRecall()'s x-show each poll tick.
+//
+// Only fired on an actual currentTrack identity change (a new track starts,
+// or the bar closes) -- not on every pause/resume -- because every
+// isCurrentTrack() call site above treats "this is the active track" as the
+// whole answer regardless of paused state, so a pause/resume toggle alone
+// never changes what any of them would render.
+let nowPlayingListeners = new Set();
+
+function notifyNowPlayingChange() {
+  for (const listener of nowPlayingListeners) listener();
+}
+
+/**
+ * Subscribe to every change that could flip an isCurrentTrack() answer.
+ * Returns an unsubscribe function -- callers MUST invoke it from their own
+ * destroy() (see router.js's `Alpine.$data(oldRoot)?.destroy?.()`), or a
+ * page's listener keeps firing forever after navigating away: this module is
+ * a page-lifetime singleton that outlives any one page's Alpine component.
+ */
+export function onNowPlayingChange(listener) {
+  nowPlayingListeners.add(listener);
+  return () => nowPlayingListeners.delete(listener);
+}
+
 // Whether a live Premium connection is available determines everything
 // else about how a track gets played -- pulled out as its own pure
 // function (rather than inlined in play(), below) purely so it's testable
@@ -556,6 +598,7 @@ async function startPlayback(track) {
   // event for the new one re-arms it.
   clearRadioAdvanceTimer();
   currentTrack = track;
+  notifyNowPlayingChange();
   mode = null; // renders the neutral loading state below, not a guess at sdk/iframe
   sdkState = null;
   swipeRevealed = false; // a fresh track starts closed, regardless of the outgoing track's reveal state
@@ -707,6 +750,7 @@ export async function like() {
 export async function hide() {
   if (mode === 'sdk') await pausePlayback();
   currentTrack = null;
+  notifyNowPlayingChange();
   mode = null;
   sdkState = null;
   swipeRevealed = false;
@@ -842,4 +886,5 @@ export function _resetForTests() {
   resetRadio();
   sdkListenerAttached = false;
   mounted = false;
+  nowPlayingListeners = new Set();
 }

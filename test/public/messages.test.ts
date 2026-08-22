@@ -87,6 +87,30 @@ describe('messages thread', () => {
     expect(doc._listeners['keydown']?.length).toBe(0);
   });
 
+  // init() calls initTrackPicker() (public/trackPicker.js), which subscribes
+  // to playerBar.js's now-playing changes so this thread's shared-track rows
+  // stay in sync with radio auto-advancing elsewhere. destroy() must also
+  // unsubscribe that -- trackPicker.js's own destroyTrackPicker() isn't
+  // named plain destroy() precisely because this app defines its own, which
+  // would otherwise silently override it via the mixin spread.
+  it('destroy() also unsubscribes the track picker\'s now-playing listener', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', fakeDocument());
+    stubApi((path) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
+      if (path === '/api/matches/m1') return new Response(JSON.stringify({ match: {} }), { status: 200 });
+      if (path === '/api/matches/m1/messages') return new Response(JSON.stringify({ messages: [] }), { status: 200 });
+      return new Response('not found', { status: 404 });
+    });
+    const app = createMessagesApp();
+    await app.init();
+    expect(typeof (app as any).unsubscribeNowPlaying).toBe('function');
+
+    app.destroy();
+
+    expect((app as any).unsubscribeNowPlaying).toBeNull();
+  });
+
   it('rejects a message containing a disallowed character without calling the API', async () => {
     vi.stubGlobal('window', fakeWindow());
     vi.stubGlobal('document', fakeDocument());

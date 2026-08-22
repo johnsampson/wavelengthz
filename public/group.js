@@ -61,6 +61,7 @@ export function createGroupApp() {
         document.removeEventListener('keydown', this.unlockAudioHandler);
         this.unlockAudioHandler = null;
       }
+      this.destroyTrackPicker();
     },
 
     memberName(userId) {

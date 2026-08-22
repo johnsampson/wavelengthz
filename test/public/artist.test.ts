@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createArtistApp } from '../../public/artist.js';
 import { showErrorToast } from '../../public/toast.js';
-import { play, togglePlayPause, isCurrentTrack } from '../../public/playerBar.js';
+import { play, togglePlayPause, isCurrentTrack, onNowPlayingChange } from '../../public/playerBar.js';
 
 vi.mock('../../public/toast.js', () => ({ showErrorToast: vi.fn() }));
 vi.mock('../../public/playerBar.js', () => ({
   play: vi.fn(),
   togglePlayPause: vi.fn(),
   isCurrentTrack: vi.fn(() => false),
+  onNowPlayingChange: vi.fn(() => vi.fn()),
 }));
 
 function fakeWindow() {
@@ -23,6 +24,7 @@ beforeEach(() => {
   vi.mocked(play).mockClear();
   vi.mocked(togglePlayPause).mockClear();
   vi.mocked(isCurrentTrack).mockReset().mockReturnValue(false);
+  vi.mocked(onNowPlayingChange).mockReset().mockReturnValue(vi.fn());
 });
 
 describe('artist page', () => {
@@ -157,6 +159,48 @@ describe('artist page', () => {
     await app.likeArtist();
 
     expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  // Radio auto-advancing to a new track (or any other page/tap starting one)
+  // changes playerBar.js's own module state, which this page's own
+  // isCurrentTrack(spotifyId) binding has no way to notice on its own -- see
+  // artist.js's nowPlayingTick comment. init() must subscribe so Alpine has
+  // something to actually re-run the track rows' play/pause icons on.
+  it('subscribes to now-playing changes on init and bumps nowPlayingTick so isCurrentTrack re-evaluates', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    stubApi((path) => (path === '/api/me' ? new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 }) : new Response('not found', { status: 404 })));
+    let firePlayerChange: (() => void) | undefined;
+    vi.mocked(onNowPlayingChange).mockImplementation((cb: () => void) => {
+      firePlayerChange = cb;
+      return vi.fn();
+    });
+    const app = createArtistApp();
+
+    await app.init();
+
+    expect(onNowPlayingChange).toHaveBeenCalled();
+    expect(app.nowPlayingTick).toBe(0);
+    firePlayerChange?.();
+    expect(app.nowPlayingTick).toBe(1);
+    // isCurrentTrack still delegates to the real playerBar.js answer -- the
+    // tick only exists to make Alpine re-ask it.
+    vi.mocked(isCurrentTrack).mockReturnValue(true);
+    expect(app.isCurrentTrack('sp1')).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it('destroy() unsubscribes from now-playing changes', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    stubApi((path) => (path === '/api/me' ? new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 }) : new Response('not found', { status: 404 })));
+    const unsubscribe = vi.fn();
+    vi.mocked(onNowPlayingChange).mockReturnValue(unsubscribe);
+    const app = createArtistApp();
+    await app.init();
+
+    app.destroy();
+
+    expect(unsubscribe).toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 });
