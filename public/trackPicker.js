@@ -1,7 +1,7 @@
 import { api } from './app.js';
 import { debounce } from './search.js';
 import { showErrorToast } from './toast.js';
-import { play, togglePlayPause, isCurrentTrack } from './playerBar.js';
+import { play, togglePlayPause, isCurrentTrack as isCurrentTrackGlobal, onNowPlayingChange } from './playerBar.js';
 import { focusAfterReveal } from './domUtils.js';
 
 // Shared by messages.js (1:1 match threads) and group.js (group threads) --
@@ -34,10 +34,37 @@ export function createTrackPicker(deps) {
     playlistTracks: [],
     playlistCount: 0,
 
-    isCurrentTrack,
+    // Bumped every time playerBar.js reports the active track changed (a tap
+    // here, elsewhere, or radio auto-advancing) -- referencing it inside
+    // isCurrentTrack gives Alpine an actual reactive dependency to re-run the
+    // shared-track rows' play/pause icons on, since isCurrentTrackGlobal()
+    // itself reads playerBar.js's own module state rather than anything on
+    // this component. Same "value doesn't matter, only that it changed"
+    // idiom as messages.js/group.js's own `now = Date.now()` re-evaluating
+    // canRecall().
+    nowPlayingTick: 0,
+    unsubscribeNowPlaying: null,
+    isCurrentTrack(spotifyId) {
+      void this.nowPlayingTick;
+      return isCurrentTrackGlobal(spotifyId);
+    },
 
     initTrackPicker() {
       this.debouncedTrackSearch = debounce(() => this.runTrackSearch(), 300);
+      this.unsubscribeNowPlaying = onNowPlayingChange(() => {
+        this.nowPlayingTick++;
+      });
+    },
+
+    // Not named plain `destroy` -- this mixin is spread into messages.js's
+    // and group.js's own app objects, which each define their own destroy()
+    // (poll interval/audio-unlock cleanup) placed AFTER the spread, so a
+    // same-named method here would just get silently overridden rather than
+    // both running. Both call sites call this explicitly from their own
+    // destroy() instead.
+    destroyTrackPicker() {
+      this.unsubscribeNowPlaying?.();
+      this.unsubscribeNowPlaying = null;
     },
 
     async openTrackPicker() {
@@ -166,7 +193,7 @@ export function createTrackPicker(deps) {
      */
     async playSharedTrack(track) {
       if (!track) return;
-      if (isCurrentTrack(track.spotifyId)) {
+      if (isCurrentTrackGlobal(track.spotifyId)) {
         await togglePlayPause();
         return;
       }

@@ -1,11 +1,11 @@
 import { api } from './app.js';
 import { requireAuth } from './auth.js';
-import { play, togglePlayPause, isCurrentTrack } from './playerBar.js';
+import { play, togglePlayPause, isCurrentTrack as isCurrentTrackGlobal, onNowPlayingChange } from './playerBar.js';
 import { showErrorToast } from './toast.js';
 
 // Extracted from artist.html's inline script -- see matches.js's comment
-// for why (same reasoning, same shape). No destroy() needed -- nothing here
-// starts a timer or attaches a listener outside Alpine's own bindings.
+// for why (same reasoning, same shape). Now needs a destroy() after all --
+// see the nowPlayingTick/onNowPlayingChange comment below.
 
 // Matches src/routes/catalog.ts's ARTIST_PROFILE_TRACK_LIMIT -- the server
 // default this page starts at, and the increment each "Load more" tap adds
@@ -22,10 +22,26 @@ export function createArtistApp() {
     trackLimit: TRACKS_PAGE_SIZE,
     hasMoreTracks: false,
     loadingMore: false,
-    isCurrentTrack,
+
+    // Bumped every time playerBar.js reports the active track changed (a tap
+    // here, elsewhere, or radio auto-advancing) -- referencing it inside
+    // isCurrentTrack gives Alpine an actual reactive dependency to re-run the
+    // track rows' play/pause icons on, since isCurrentTrackGlobal() itself
+    // reads playerBar.js's own module state rather than anything on this
+    // component. Same "value doesn't matter, only that it changed" idiom as
+    // messages.js/group.js's `now = Date.now()` re-evaluating canRecall().
+    nowPlayingTick: 0,
+    unsubscribeNowPlaying: null,
+    isCurrentTrack(spotifyId) {
+      void this.nowPlayingTick;
+      return isCurrentTrackGlobal(spotifyId);
+    },
 
     async init() {
       if (!(await requireAuth())) return;
+      this.unsubscribeNowPlaying = onNowPlayingChange(() => {
+        this.nowPlayingTick++;
+      });
       try {
         const res = await api.artistProfile(this.artistId);
         this.artist = res.artist;
@@ -43,6 +59,11 @@ export function createArtistApp() {
             ? "Spotify's a little busy right now. Please try again in a moment."
             : 'Could not load this artist. Please try again.';
       }
+    },
+
+    destroy() {
+      this.unsubscribeNowPlaying?.();
+      this.unsubscribeNowPlaying = null;
     },
 
     // GET /api/artists/:id has no offset/cursor to resume from
@@ -66,7 +87,7 @@ export function createArtistApp() {
     },
 
     async togglePlayer(track) {
-      if (isCurrentTrack(track.spotifyId)) {
+      if (isCurrentTrackGlobal(track.spotifyId)) {
         await togglePlayPause();
         return;
       }

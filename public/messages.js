@@ -79,6 +79,7 @@ export function createMessagesApp() {
         document.removeEventListener('keydown', this.unlockAudioHandler);
         this.unlockAudioHandler = null;
       }
+      this.destroyTrackPicker();
     },
 
     async load() {

@@ -101,6 +101,28 @@ describe('group chat', () => {
     expect(doc._listeners['keydown']?.length).toBe(0);
   });
 
+  // See messages.test.ts's identical case -- init() calls initTrackPicker()
+  // (public/trackPicker.js), which subscribes to playerBar.js's now-playing
+  // changes so this thread's shared-track rows stay in sync with radio
+  // auto-advancing elsewhere. destroy() must also unsubscribe that.
+  it('destroy() also unsubscribes the track picker\'s now-playing listener', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', fakeDocument());
+    stubApi((path) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
+      if (path === '/api/groups/g1') return new Response(JSON.stringify({ group: { id: 'g1', name: 'g', members: [] } }), { status: 200 });
+      if (path === '/api/groups/g1/messages') return new Response(JSON.stringify({ messages: [] }), { status: 200 });
+      return new Response('not found', { status: 404 });
+    });
+    const app = createGroupApp();
+    await app.init();
+    expect(typeof (app as any).unsubscribeNowPlaying).toBe('function');
+
+    app.destroy();
+
+    expect((app as any).unsubscribeNowPlaying).toBeNull();
+  });
+
   it('navigates to /groups after successfully leaving', async () => {
     vi.stubGlobal('window', fakeWindow());
     vi.stubGlobal('document', fakeDocument());

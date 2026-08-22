@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createDeckApp, preloadCandidateImage } from '../../public/index.js';
 import { showToast, showErrorToast } from '../../public/toast.js';
-import { play, togglePlayPause, isCurrentTrack } from '../../public/playerBar.js';
+import { play, togglePlayPause, isCurrentTrack, onNowPlayingChange } from '../../public/playerBar.js';
 import { attachSwipeDeck } from '../../public/swipe.js';
 import { navigate } from '../../public/router.js';
 
@@ -10,6 +10,7 @@ vi.mock('../../public/playerBar.js', () => ({
   play: vi.fn(),
   togglePlayPause: vi.fn(),
   isCurrentTrack: vi.fn(() => false),
+  onNowPlayingChange: vi.fn(() => vi.fn()),
 }));
 vi.mock('../../public/swipe.js', () => ({ attachSwipeDeck: vi.fn() }));
 vi.mock('../../public/router.js', () => ({ navigate: vi.fn() }));
@@ -37,6 +38,7 @@ beforeEach(() => {
   vi.mocked(play).mockClear();
   vi.mocked(togglePlayPause).mockClear();
   vi.mocked(isCurrentTrack).mockReset().mockReturnValue(false);
+  vi.mocked(onNowPlayingChange).mockReset().mockReturnValue(vi.fn());
   vi.mocked(attachSwipeDeck).mockReset().mockReturnValue(vi.fn());
   vi.mocked(navigate).mockClear();
   vi.stubGlobal('localStorage', fakeStorage());
@@ -103,6 +105,49 @@ describe('deck app', () => {
     const app = createDeckApp();
 
     expect(() => app.destroy()).not.toThrow();
+  });
+
+  // Radio auto-advancing to a new track (or any other page/tap starting one)
+  // changes playerBar.js's own module state, which isCurrentAnthem/
+  // isCurrentPreviewTrack have no way to notice on their own -- see index.js's
+  // nowPlayingTick comment. init() must subscribe so Alpine has something to
+  // actually re-run those bindings on.
+  it('subscribes to now-playing changes on init and bumps nowPlayingTick so isCurrentAnthem/isCurrentPreviewTrack re-evaluate', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { getElementById: vi.fn(() => null) });
+    stubApi(() => new Response('nope', { status: 401 }));
+    let firePlayerChange: (() => void) | undefined;
+    vi.mocked(onNowPlayingChange).mockImplementation((cb: () => void) => {
+      firePlayerChange = cb;
+      return vi.fn();
+    });
+    const app = createDeckApp();
+
+    await app.init();
+
+    expect(onNowPlayingChange).toHaveBeenCalled();
+    expect(app.nowPlayingTick).toBe(0);
+    firePlayerChange?.();
+    expect(app.nowPlayingTick).toBe(1);
+    app.current = { anthemTrack: { spotifyId: 'sp1', name: 'Song' }, track: { spotifyId: 'sp1', id: 't1', name: 'Song' } };
+    vi.mocked(isCurrentTrack).mockReturnValue(true);
+    expect(app.isCurrentAnthem()).toBe(true);
+    expect(app.isCurrentPreviewTrack()).toBe(true);
+    app.destroy();
+  });
+
+  it('destroy() unsubscribes from now-playing changes', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { getElementById: vi.fn(() => null) });
+    stubApi(() => new Response('nope', { status: 401 }));
+    const unsubscribe = vi.fn();
+    vi.mocked(onNowPlayingChange).mockReturnValue(unsubscribe);
+    const app = createDeckApp();
+    await app.init();
+
+    app.destroy();
+
+    expect(unsubscribe).toHaveBeenCalled();
   });
 
   it('toggleAnthem toggles pause on the currently-playing anthem instead of restarting it', async () => {

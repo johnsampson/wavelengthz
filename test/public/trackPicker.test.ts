@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createTrackPicker } from '../../public/trackPicker.js';
 import { showErrorToast } from '../../public/toast.js';
-import { play, togglePlayPause, isCurrentTrack } from '../../public/playerBar.js';
+import { play, togglePlayPause, isCurrentTrack, onNowPlayingChange } from '../../public/playerBar.js';
 
 vi.mock('../../public/toast.js', () => ({ showErrorToast: vi.fn() }));
 vi.mock('../../public/playerBar.js', () => ({
   play: vi.fn(),
   togglePlayPause: vi.fn(),
   isCurrentTrack: vi.fn(() => false),
+  onNowPlayingChange: vi.fn(() => vi.fn()),
 }));
 
 function stubApi(handler: (path: string) => Response) {
@@ -36,6 +37,7 @@ beforeEach(() => {
   vi.mocked(play).mockClear();
   vi.mocked(togglePlayPause).mockClear();
   vi.mocked(isCurrentTrack).mockReset().mockReturnValue(false);
+  vi.mocked(onNowPlayingChange).mockReset().mockReturnValue(vi.fn());
 });
 
 describe('track picker', () => {
@@ -224,5 +226,42 @@ describe('track picker', () => {
 
     expect(picker.playlistCount).toBe(0);
     expect(showErrorToast).not.toHaveBeenCalled();
+  });
+
+  // Radio auto-advancing to a new track (or any other page/tap starting one)
+  // changes playerBar.js's own module state, which this picker's
+  // isCurrentTrack binding has no way to notice on its own -- see
+  // trackPicker.js's nowPlayingTick comment. initTrackPicker() must
+  // subscribe so Alpine has something to actually re-run the shared-track
+  // rows' play/pause icons on. Not named plain destroy() -- see
+  // destroyTrackPicker's own comment -- so messages.js/group.js call it
+  // explicitly from their own destroy().
+  it('initTrackPicker subscribes to now-playing changes and bumps nowPlayingTick so isCurrentTrack re-evaluates', () => {
+    let firePlayerChange: (() => void) | undefined;
+    vi.mocked(onNowPlayingChange).mockImplementation((cb: () => void) => {
+      firePlayerChange = cb;
+      return vi.fn();
+    });
+    const picker = makePicker();
+
+    picker.initTrackPicker();
+
+    expect(onNowPlayingChange).toHaveBeenCalled();
+    expect(picker.nowPlayingTick).toBe(0);
+    firePlayerChange?.();
+    expect(picker.nowPlayingTick).toBe(1);
+    vi.mocked(isCurrentTrack).mockReturnValue(true);
+    expect(picker.isCurrentTrack('sp1')).toBe(true);
+  });
+
+  it('destroyTrackPicker unsubscribes from now-playing changes', () => {
+    const unsubscribe = vi.fn();
+    vi.mocked(onNowPlayingChange).mockReturnValue(unsubscribe);
+    const picker = makePicker();
+    picker.initTrackPicker();
+
+    picker.destroyTrackPicker();
+
+    expect(unsubscribe).toHaveBeenCalled();
   });
 });
