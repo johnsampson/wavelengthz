@@ -420,7 +420,16 @@
 // rows -- liking is the only action now, one button, circled white when
 // liked and unmarked otherwise, same convention likeArtist() already uses
 // (issue #127).
-const CACHE_NAME = 'wavelengthz-shell-v67';
+// v68 re-measures --wl-nav-h (the bottom nav's real rendered height, used by
+// every page's .pb-app/.mb-app bottom padding) once web fonts finish
+// loading, not just once at mount -- a fallback font's line-height can
+// differ from Manrope's, so on a slow font swap the nav could grow slightly
+// AFTER the padding was already computed from a too-small pre-swap reading,
+// leaving the true bottom of a scrollable list sitting behind the
+// now-taller nav with no way to scroll the rest of the way to it (issue
+// #127: "menu on many pages... can't scroll down low enough to click on
+// items").
+const CACHE_NAME = 'wavelengthz-shell-v68';
 const APP_SHELL = [
   '/',
   '/app.js',
