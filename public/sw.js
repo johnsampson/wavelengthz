@@ -400,7 +400,18 @@
 // index.html's card already had this exact chip row for people-mode's own
 // topGenres, just gated to that mode; the gate is dropped so both modes
 // share the one markup block.
-const CACHE_NAME = 'wavelengthz-shell-v63';
+// v68 re-measures --wl-nav-h (the bottom nav's real rendered height, used by
+// every page's .pb-app/.mb-app bottom padding) once web fonts finish
+// loading, not just once at mount -- a fallback font's line-height can
+// differ from Manrope's, so on a slow font swap the nav could grow slightly
+// AFTER the padding was already computed from a too-small pre-swap reading,
+// leaving the true bottom of a scrollable list sitting behind the
+// now-taller nav with no way to scroll the rest of the way to it (issue
+// #127: "menu on many pages... can't scroll down low enough to click on
+// items"). (v64-v67 are in flight in parallel Round 6 PRs; whichever of
+// these merges last hits an ordinary conflict on this one line to resolve,
+// not a real bug.)
+const CACHE_NAME = 'wavelengthz-shell-v68';
 const APP_SHELL = [
   '/',
   '/app.js',
