@@ -400,7 +400,14 @@
 // index.html's card already had this exact chip row for people-mode's own
 // topGenres, just gated to that mode; the gate is dropped so both modes
 // share the one markup block.
-const CACHE_NAME = 'wavelengthz-shell-v63';
+// v65 makes a completed swipe-to-decide gesture vibrate (public/swipe.js),
+// same haptic installTapFeedback's click listener already gives a tap on
+// the Like/Pass buttons -- swiping to a decision never fired one since a
+// drag settles via setTimeout, not a click (issue #127). New
+// public/tapFeedback.js export (vibrate()) backs both. (v64 is in flight
+// in a parallel PR for this same round; whichever of the two merges second
+// will hit an ordinary conflict on this line to resolve, not a real bug.)
+const CACHE_NAME = 'wavelengthz-shell-v65';
 const APP_SHELL = [
   '/',
   '/app.js',
