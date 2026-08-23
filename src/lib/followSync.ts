@@ -38,6 +38,7 @@ export interface FollowSyncRow {
   id: string;
   enabled: number;
   last_synced_at: number | null;
+  needs_reconnect: number;
 }
 
 export interface FollowSyncStatus {
@@ -47,6 +48,12 @@ export interface FollowSyncStatus {
   lastSyncedAt: number | null;
   pendingCount: number;
   followedCount: number;
+  /**
+   * True when following is off because Spotify revoked access, not because
+   * the user chose to turn it off -- see playlistSync.ts's identical field
+   * for the full reasoning (migrations/0027).
+   */
+  needsReconnect: boolean;
 }
 
 export type FollowSkipReason = 'disabled' | 'scope_missing' | 'no_spotify';
@@ -64,7 +71,7 @@ export function hasFollowScope(grantedScope: string | null | undefined): boolean
 
 export async function getFollowSyncRow(db: D1Database, userId: string): Promise<FollowSyncRow | null> {
   return db
-    .prepare('SELECT id, enabled, last_synced_at FROM spotify_follow_syncs WHERE user_id = ?')
+    .prepare('SELECT id, enabled, last_synced_at, needs_reconnect FROM spotify_follow_syncs WHERE user_id = ?')
     .bind(userId)
     .first<FollowSyncRow>();
 }
@@ -99,17 +106,24 @@ export async function getFollowSyncStatus(db: D1Database, userId: string): Promi
     lastSyncedAt: row?.last_synced_at ?? null,
     pendingCount,
     followedCount: followedRow?.c ?? 0,
+    needsReconnect: row?.needs_reconnect === 1,
   };
 }
 
-export async function setFollowSyncEnabled(db: D1Database, userId: string, enabled: boolean, now: number): Promise<void> {
+/**
+ * `needsReconnect` defaults to false -- see playlistSync.ts's setSyncEnabled
+ * for the identical reasoning: every ordinary caller is a real, current,
+ * intentional state change that supersedes whatever reason following was
+ * previously off for; only the auth-failure paths below pass true.
+ */
+export async function setFollowSyncEnabled(db: D1Database, userId: string, enabled: boolean, now: number, needsReconnect = false): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO spotify_follow_syncs (id, user_id, enabled, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(user_id) DO UPDATE SET enabled = excluded.enabled, updated_at = excluded.updated_at`
+      `INSERT INTO spotify_follow_syncs (id, user_id, enabled, needs_reconnect, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET enabled = excluded.enabled, needs_reconnect = excluded.needs_reconnect, updated_at = excluded.updated_at`
     )
-    .bind(crypto.randomUUID(), userId, enabled ? 1 : 0, now, now)
+    .bind(crypto.randomUUID(), userId, enabled ? 1 : 0, needsReconnect ? 1 : 0, now, now)
     .run();
 }
 
@@ -186,7 +200,7 @@ export async function runFollowSync(env: Env, user: UserRow, now: number = Date.
     // retrying a grant that no longer exists, and report it so the UI can
     // offer reconnect rather than a generic failure.
     if (isSpotifyAuthFailure(error)) {
-      await setFollowSyncEnabled(db, user.id, false, now);
+      await setFollowSyncEnabled(db, user.id, false, now, true);
       return { followed: 0, needsReconnect: true };
     }
     throw error;
@@ -242,7 +256,7 @@ export async function syncFollowForArtist(env: Env, user: UserRow, spotifyArtist
       .run();
   } catch (error) {
     if (isSpotifyAuthFailure(error)) {
-      await setFollowSyncEnabled(db, user.id, false, now);
+      await setFollowSyncEnabled(db, user.id, false, now, true);
       return;
     }
     // Rate limit, transient network error, etc. -- swallowed here rather

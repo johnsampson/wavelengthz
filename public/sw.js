@@ -429,7 +429,13 @@
 // now-taller nav with no way to scroll the rest of the way to it (issue
 // #127: "menu on many pages... can't scroll down low enough to click on
 // items").
-const CACHE_NAME = 'wavelengthz-shell-v68';
+// v69 persists WHY Spotify playlist sync/following turned off (migrations/
+// 0027's needs_reconnect column) -- previously the auto-disable-on-
+// revocation path was indistinguishable from the user manually turning it
+// off, so a page load any time after the moment's toast disappeared showed
+// an ordinary-looking disabled toggle with no explanation. /settings/
+// connections.html now shows a persistent banner instead (issue #127).
+const CACHE_NAME = 'wavelengthz-shell-v69';
 const APP_SHELL = [
   '/',
   '/app.js',
