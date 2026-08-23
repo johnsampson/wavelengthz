@@ -78,29 +78,17 @@
                   <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
                 </svg>
               </button>
-              <button
-                class="btn-secondary h-9 w-9 rounded-full"
-                :class="track.direction === 'left' ? 'ring-2 ring-neutral-400' : ''"
-                @click="swipeTrack(track, 'left')"
-                aria-label="Pass"
-              >
-                <!-- Sized to match this row's own Play button (h-5 w-5 in
-                     the same h-9 w-9 circle) and the player bar's icon set
-                     (playerBar.js's likeButtonHtml uses the same pairing) --
-                     issue #108: "the thumb down icon is not right on track
-                     card" was this icon sitting a size smaller than its
-                     siblings, not the glyph itself (it's the same Feather
-                     thumbs-down path used correctly on the deck's Pass
-                     button). -->
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto h-5 w-5">
-                  <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
-                </svg>
-              </button>
+              <!-- Issue #127: was a separate Pass (thumbs-down) button next
+                   to this one -- removed entirely, not just hidden. Like is
+                   the only action on a track row now: circled white when
+                   liked (unchanged), no marker at all otherwise, whether
+                   never-swiped or (previously) passed -- there's no longer
+                   a passed state to mark. -->
               <button
                 class="btn-primary h-9 w-9 rounded-full"
                 :class="track.direction === 'right' ? 'ring-2 ring-white' : ''"
-                @click="swipeTrack(track, 'right')"
-                aria-label="Like"
+                @click="likeTrack(track)"
+                :aria-label="track.direction === 'right' ? 'Liked' : 'Like'"
               >
                 <!-- Was a raw "♥" text glyph -- a different icon system from
                      every other heart in the app (the deck's Like button,

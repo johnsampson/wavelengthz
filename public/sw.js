@@ -400,7 +400,13 @@
 // index.html's card already had this exact chip row for people-mode's own
 // topGenres, just gated to that mode; the gate is dropped so both modes
 // share the one markup block.
-const CACHE_NAME = 'wavelengthz-shell-v63';
+// v67 removes the separate Pass (thumbs-down) button from /artist's track
+// rows -- liking is the only action now, one button, circled white when
+// liked and unmarked otherwise, same convention likeArtist() already uses
+// (issue #127). (v64/v65/v66 are in flight in parallel Round 6 PRs;
+// whichever of these merges last hits an ordinary conflict on this one
+// line to resolve, not a real bug.)
+const CACHE_NAME = 'wavelengthz-shell-v67';
 const APP_SHELL = [
   '/',
   '/app.js',
