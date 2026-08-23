@@ -395,7 +395,12 @@
 // has a dependency to actually re-run those bindings on. Touches
 // playerBar.js, artist.js, personProfile.js, index.js, drop.js,
 // trackPicker.js, messages.js, and group.js -- all already in this list.
-const CACHE_NAME = 'wavelengthz-shell-v62';
+// v63 shows an artist candidate's genres as chips on the deck's Music-mode
+// card (GET /api/candidates/music's new topGenres field, capped at 5) --
+// index.html's card already had this exact chip row for people-mode's own
+// topGenres, just gated to that mode; the gate is dropped so both modes
+// share the one markup block.
+const CACHE_NAME = 'wavelengthz-shell-v63';
 const APP_SHELL = [
   '/',
   '/app.js',

@@ -129,6 +129,52 @@ describe('GET /api/candidates/music', () => {
     expect(body.candidates[0].imageUrl).toBe('https://img.example/t1.jpg');
   });
 
+  // public/index.html's deck card renders these in the same chip row
+  // people-mode candidates already use for their own topGenres.
+  it('includes an artist candidate\'s genres as topGenres', async () => {
+    await env.DB.prepare(`UPDATE artists SET genres = ? WHERE id = 'a1'`).bind(JSON.stringify(genresToObject(['indie', 'rock']))).run();
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/candidates/music?limit=10', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, ctx);
+    const body = await res.json<any>();
+    const a1 = body.candidates.find((c: any) => c.itemId === 'a1');
+    expect(a1.topGenres).toEqual(['indie', 'rock']);
+  });
+
+  it('caps topGenres at 5 for an artist with many genres', async () => {
+    await env.DB.prepare(`UPDATE artists SET genres = ? WHERE id = 'a1'`)
+      .bind(JSON.stringify(genresToObject(['a', 'b', 'c', 'd', 'e', 'f', 'g'])))
+      .run();
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/candidates/music?limit=10', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, ctx);
+    const body = await res.json<any>();
+    const a1 = body.candidates.find((c: any) => c.itemId === 'a1');
+    expect(a1.topGenres).toHaveLength(5);
+  });
+
+  it('reports no genres as an empty array, not null or undefined', async () => {
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/candidates/music?limit=10', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, ctx);
+    const body = await res.json<any>();
+    const a2 = body.candidates.find((c: any) => c.itemId === 'a2'); // a2 has genres: '{}' from beforeEach
+    expect(a2.topGenres).toEqual([]);
+  });
+
+  it('includes a track candidate\'s parent artist\'s genres as topGenres', async () => {
+    await env.DB.prepare(`UPDATE artists SET genres = ? WHERE id = 'a1'`).bind(JSON.stringify(genresToObject(['jazz']))).run();
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, album_image_url, source, approved, created_at)
+       VALUES ('t1', 'Track One', 'a1', 'https://img.example/t1.jpg', 'seed', 1, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/candidates/music?item_type=track', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, ctx);
+    const body = await res.json<any>();
+    expect(body.candidates[0].topGenres).toEqual(['jazz']);
+  });
+
   it('includes a representative track for an artist candidate, when one already exists in the catalog', async () => {
     await env.DB.prepare(
       `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, duration_ms, source, approved, created_at) VALUES ('t1', 'sp-t1', 'Track One', 'a1', 'https://img.example/t1.jpg', 180000, 'seed', 1, 1000)`
