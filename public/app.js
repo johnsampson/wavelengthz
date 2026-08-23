@@ -130,6 +130,7 @@ export const api = {
   blocks: () => request('/api/blocks'),
   unblock: (userId) => request(`/api/blocks/${userId}/unblock`, { method: 'POST' }),
   blockedGenres: () => request('/api/genres/blocked'),
+  genreSearch: (q) => request(`/api/genres/search?q=${encodeURIComponent(q)}`),
   blockGenre: (genre) => request(`/api/genres/${encodeURIComponent(genre)}/block`, { method: 'POST' }),
   unblockGenre: (genre) => request(`/api/genres/${encodeURIComponent(genre)}/unblock`, { method: 'POST' }),
   report: (userId, reason, details) =>
