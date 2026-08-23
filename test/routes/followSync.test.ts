@@ -49,7 +49,7 @@ describe('GET /api/me/follow-sync', () => {
     const { status, body } = await call('/api/me/follow-sync', await cookieFor('u1'));
 
     expect(status).toBe(200);
-    expect(body).toEqual({ enabled: false, connected: false, lastSyncedAt: null, pendingCount: 0, followedCount: 0 });
+    expect(body).toEqual({ enabled: false, connected: false, lastSyncedAt: null, pendingCount: 0, followedCount: 0, needsReconnect: false });
   });
 
   it('does not treat the playlist grant as permission to follow', async () => {
@@ -122,6 +122,6 @@ describe('POST /api/me/follow-sync/run', () => {
   it('returns the refreshed status alongside the result', async () => {
     const { body } = await call('/api/me/follow-sync/run', await cookieFor('u1'), 'POST');
 
-    expect(body.status).toEqual({ enabled: false, connected: false, lastSyncedAt: null, pendingCount: 0, followedCount: 0 });
+    expect(body.status).toEqual({ enabled: false, connected: false, lastSyncedAt: null, pendingCount: 0, followedCount: 0, needsReconnect: false });
   });
 });

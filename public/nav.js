@@ -121,6 +121,24 @@ export function mountNav(pathname = window.location.pathname) {
   // a sliver of scrolled content visible between the two. Runs on every
   // mount (first load and every router navigation), so it self-corrects if
   // the nav's own markup or the viewport's font rendering ever changes.
+  measureNavHeight(root);
+  // Re-measure once web fonts finish loading (issue #127: "menu on many
+  // pages... can't scroll down low enough to click on items"). The
+  // measurement above can run before Manrope (index.html's Google Fonts
+  // link) has swapped in -- a fallback font's line-height doesn't always
+  // match the real one, so on a slow font load the nav can grow slightly
+  // AFTER --wl-nav-h (and therefore every page's .pb-app bottom padding,
+  // which is computed from it) was already set from the too-small
+  // pre-swap measurement, leaving the true bottom of a scrollable list
+  // sitting behind the now-taller nav with no way to scroll the rest of
+  // the way to it. document.fonts is unsupported in ~nothing shipping
+  // today, but guarded anyway since this is a progressive correction, not
+  // a requirement -- the synchronous measurement above is already right
+  // most of the time.
+  document.fonts?.ready?.then(() => measureNavHeight(root));
+}
+
+function measureNavHeight(root) {
   const navEl = root.firstElementChild;
   if (navEl) document.documentElement.style.setProperty('--wl-nav-h', `${navEl.getBoundingClientRect().height}px`);
 }

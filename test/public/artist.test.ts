@@ -103,16 +103,52 @@ describe('artist page', () => {
     vi.unstubAllGlobals();
   });
 
-  it('optimistically sets swipe direction and rolls back on failure', async () => {
+  // Issue #127: the track row's separate Pass button is gone -- liking is
+  // the only action, same "no separate unlike affordance" convention
+  // likeArtist() already uses (see its own tests below).
+  it('likeTrack optimistically marks the track liked and posts a right swipe', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    const fetchMock = vi.fn(async (path: string, options: any) => {
+      if (path === '/api/swipe/music') {
+        expect(JSON.parse(options.body)).toEqual({ item_type: 'track', item_id: 't1', direction: 'right' });
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createArtistApp();
+    const track = { id: 't1', direction: null };
+
+    await app.likeTrack(track);
+
+    expect(track.direction).toBe('right');
+    expect(fetchMock).toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('likeTrack rolls back the optimistic update on failure', async () => {
     vi.stubGlobal('window', fakeWindow());
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
     const app = createArtistApp();
     const track = { id: 't1', direction: null };
 
-    await app.swipeTrack(track, 'right');
+    await app.likeTrack(track);
 
     expect(track.direction).toBeNull();
     expect(showErrorToast).toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('likeTrack is a no-op when the track is already liked', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createArtistApp();
+    const track = { id: 't1', direction: 'right' };
+
+    await app.likeTrack(track);
+
+    expect(fetchMock).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 

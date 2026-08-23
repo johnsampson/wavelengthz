@@ -56,6 +56,7 @@ describe('GET /api/me/playlist-sync', () => {
       lastSyncedAt: null,
       pendingCount: 0,
       syncedCount: 0,
+      needsReconnect: false,
     });
   });
 
@@ -146,6 +147,7 @@ describe('POST /api/me/playlist-sync/run', () => {
       lastSyncedAt: null,
       pendingCount: 0,
       syncedCount: 0,
+      needsReconnect: false,
     });
   });
 });

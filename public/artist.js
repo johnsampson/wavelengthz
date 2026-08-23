@@ -97,11 +97,20 @@ export function createArtistApp() {
       await play({ spotifyId: track.spotifyId, id: track.id, name: track.name, artistName: this.artist?.name ?? null, imageUrl: track.imageUrl, durationMs: track.durationMs ?? null });
     },
 
-    async swipeTrack(track, direction) {
+    // Issue #127: "let's remove the thumbs down button from the track
+    // card... move the like/pass functionality to the single button... if
+    // it's liked, it's circled in white as it is now.. anything not liked
+    // or passed doesn't have the marker." Passing a track from this row is
+    // gone entirely, not just hidden -- there's now exactly one action
+    // (like) and one visual state (liked, via the same white ring
+    // likeArtist() below already uses), same "no separate unlike
+    // affordance, tapping again while already liked is a no-op" convention.
+    async likeTrack(track) {
+      if (track.direction === 'right') return;
       const previous = track.direction;
-      track.direction = direction; // optimistic
+      track.direction = 'right'; // optimistic
       try {
-        await api.swipe('music', { item_type: 'track', item_id: track.id, direction });
+        await api.swipe('music', { item_type: 'track', item_id: track.id, direction: 'right' });
       } catch (e) {
         track.direction = previous;
         showErrorToast('Could not save that. Please try again.');
