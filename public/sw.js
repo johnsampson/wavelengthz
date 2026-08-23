@@ -411,6 +411,15 @@
 // the Like/Pass buttons -- swiping to a decision never fired one since a
 // drag settles via setTimeout, not a click (issue #127). New
 // public/tapFeedback.js export (vibrate()) backs both.
+// v66 adds a "Block a genre" search box to Settings -> Preferences (new
+// GET /api/genres/search, querying the catalog-wide genres table) -- until
+// now the only way a genre ever reached user_blocked_genres was the
+// reactive "you've passed 10 artists in GENRE, block it?" prompt, with no
+// proactive way to add one (issue #127).
+// v67 removes the separate Pass (thumbs-down) button from /artist's track
+// rows -- liking is the only action now, one button, circled white when
+// liked and unmarked otherwise, same convention likeArtist() already uses
+// (issue #127).
 // v68 re-measures --wl-nav-h (the bottom nav's real rendered height, used by
 // every page's .pb-app/.mb-app bottom padding) once web fonts finish
 // loading, not just once at mount -- a fallback font's line-height can
@@ -419,9 +428,7 @@
 // leaving the true bottom of a scrollable list sitting behind the
 // now-taller nav with no way to scroll the rest of the way to it (issue
 // #127: "menu on many pages... can't scroll down low enough to click on
-// items"). (v66/v67 are in flight in parallel Round 6 PRs; whichever of
-// these merges last hits an ordinary conflict on this one line to resolve,
-// not a real bug.)
+// items").
 const CACHE_NAME = 'wavelengthz-shell-v68';
 const APP_SHELL = [
   '/',
