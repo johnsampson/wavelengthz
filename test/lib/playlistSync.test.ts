@@ -323,8 +323,26 @@ describe('runPlaylistSync', () => {
     const result = await runPlaylistSync(env, user);
 
     expect(result).toEqual({ added: 0, needsReconnect: true });
-    const row = await env.DB.prepare('SELECT enabled FROM spotify_playlist_syncs WHERE user_id = ?').bind('u1').first<any>();
+    const row = await env.DB.prepare('SELECT enabled, needs_reconnect FROM spotify_playlist_syncs WHERE user_id = ?').bind('u1').first<any>();
     expect(row.enabled).toBe(0);
+    // Persisted (migrations/0027), not just the one-time result above --
+    // issue #127: a later page load must still be able to explain why sync
+    // is off, not just that it is.
+    expect(row.needs_reconnect).toBe(1);
+  });
+
+  it('clears needs_reconnect on a later explicit re-enable', async () => {
+    const user = await seedUser('u1');
+    await setSyncEnabled(env.DB, 'u1', true, 1000);
+    await likeTrack('u1', 't1', 'sp-t1', 2000);
+    stubSpotify({ createStatus: 403 });
+    await runPlaylistSync(env, user);
+
+    await setSyncEnabled(env.DB, 'u1', true, 3000); // e.g. the OAuth callback completing
+
+    const status = await getSyncStatus(env.DB, 'u1');
+    expect(status.needsReconnect).toBe(false);
+    expect(status.enabled).toBe(true);
   });
 
   it('keeps the ledger for chunks that already landed when a later chunk fails', async () => {
@@ -374,6 +392,7 @@ describe('getSyncStatus', () => {
       lastSyncedAt: null,
       pendingCount: 1,
       syncedCount: 0,
+      needsReconnect: false,
     });
   });
 });

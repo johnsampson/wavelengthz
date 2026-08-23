@@ -53,6 +53,7 @@ export interface PlaylistSyncRow {
   playlist_id: string | null;
   playlist_url: string | null;
   last_synced_at: number | null;
+  needs_reconnect: number;
 }
 
 export interface PlaylistSyncStatus {
@@ -63,6 +64,13 @@ export interface PlaylistSyncStatus {
   lastSyncedAt: number | null;
   pendingCount: number;
   syncedCount: number;
+  /**
+   * True when sync is off because Spotify revoked access, not because the
+   * user chose to turn it off -- persisted (migrations/0027), not just a
+   * one-time toast, so it still reads correctly on a later page load after
+   * the moment it happened.
+   */
+  needsReconnect: boolean;
 }
 
 export type SyncSkipReason = 'disabled' | 'scope_missing' | 'no_spotify';
@@ -83,7 +91,7 @@ export function hasPlaylistScope(grantedScope: string | null | undefined): boole
 
 export async function getSyncRow(db: D1Database, userId: string): Promise<PlaylistSyncRow | null> {
   return db
-    .prepare('SELECT id, enabled, playlist_id, playlist_url, last_synced_at FROM spotify_playlist_syncs WHERE user_id = ?')
+    .prepare('SELECT id, enabled, playlist_id, playlist_url, last_synced_at, needs_reconnect FROM spotify_playlist_syncs WHERE user_id = ?')
     .bind(userId)
     .first<PlaylistSyncRow>();
 }
@@ -129,17 +137,25 @@ export async function getSyncStatus(db: D1Database, userId: string): Promise<Pla
     lastSyncedAt: row?.last_synced_at ?? null,
     pendingCount,
     syncedCount: syncedRow?.c ?? 0,
+    needsReconnect: row?.needs_reconnect === 1,
   };
 }
 
-export async function setSyncEnabled(db: D1Database, userId: string, enabled: boolean, now: number): Promise<void> {
+/**
+ * `needsReconnect` defaults to false: every ordinary caller (an explicit
+ * enable via the OAuth callback, an explicit disable via the Settings
+ * toggle) is a real, current, intentional state change that supersedes
+ * whatever reason sync was previously off for -- only the auth-failure path
+ * in runPlaylistSync below passes true.
+ */
+export async function setSyncEnabled(db: D1Database, userId: string, enabled: boolean, now: number, needsReconnect = false): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO spotify_playlist_syncs (id, user_id, enabled, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(user_id) DO UPDATE SET enabled = excluded.enabled, updated_at = excluded.updated_at`
+      `INSERT INTO spotify_playlist_syncs (id, user_id, enabled, needs_reconnect, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET enabled = excluded.enabled, needs_reconnect = excluded.needs_reconnect, updated_at = excluded.updated_at`
     )
-    .bind(crypto.randomUUID(), userId, enabled ? 1 : 0, now, now)
+    .bind(crypto.randomUUID(), userId, enabled ? 1 : 0, needsReconnect ? 1 : 0, now, now)
     .run();
 }
 
@@ -266,7 +282,7 @@ export async function runPlaylistSync(env: Env, user: UserRow, now: number = Dat
     // off so the cron stops retrying a grant that no longer exists, and
     // report it so the UI can offer reconnect rather than a generic failure.
     if (isSpotifyAuthFailure(error)) {
-      await setSyncEnabled(db, user.id, false, now);
+      await setSyncEnabled(db, user.id, false, now, true);
       return { added: 0, needsReconnect: true };
     }
     throw error;
