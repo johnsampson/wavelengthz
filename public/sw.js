@@ -411,12 +411,15 @@
 // the Like/Pass buttons -- swiping to a decision never fired one since a
 // drag settles via setTimeout, not a click (issue #127). New
 // public/tapFeedback.js export (vibrate()) backs both.
+// v66 adds a "Block a genre" search box to Settings -> Preferences (new
+// GET /api/genres/search, querying the catalog-wide genres table) -- until
+// now the only way a genre ever reached user_blocked_genres was the
+// reactive "you've passed 10 artists in GENRE, block it?" prompt, with no
+// proactive way to add one (issue #127).
 // v67 removes the separate Pass (thumbs-down) button from /artist's track
 // rows -- liking is the only action now, one button, circled white when
 // liked and unmarked otherwise, same convention likeArtist() already uses
-// (issue #127). (v66 is in flight in a parallel Round 6 PR; whichever of
-// these merges last hits an ordinary conflict on this one line to resolve,
-// not a real bug.)
+// (issue #127).
 const CACHE_NAME = 'wavelengthz-shell-v67';
 const APP_SHELL = [
   '/',
