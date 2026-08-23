@@ -400,13 +400,19 @@
 // index.html's card already had this exact chip row for people-mode's own
 // topGenres, just gated to that mode; the gate is dropped so both modes
 // share the one markup block.
+// v64 fixes /settings' "Account connections", "Your wavelength", and "Your
+// invites" links being packed into one shared <li> instead of one each --
+// they weren't getting the <ul>'s gap-2 spacing between them the way every
+// other row on this page does (issue #127: "fix spacing above 'your
+// wavelength' menu item"; also the very likely reason the reporter never
+// noticed "Your invites" existed at all, per the next item's fix).
 // v66 adds a "Block a genre" search box to Settings -> Preferences (new
 // GET /api/genres/search, querying the catalog-wide genres table) -- until
 // now the only way a genre ever reached user_blocked_genres was the
 // reactive "you've passed 10 artists in GENRE, block it?" prompt, with no
-// proactive way to add one (issue #127). (v64/v65 are in flight in
-// parallel Round 6 PRs; whichever of these merges last hits an ordinary
-// conflict on this one line to resolve, not a real bug.)
+// proactive way to add one (issue #127). (v65 is in flight in a parallel
+// Round 6 PR; whichever of these merges last hits an ordinary conflict on
+// this one line to resolve, not a real bug.)
 const CACHE_NAME = 'wavelengthz-shell-v66';
 const APP_SHELL = [
   '/',
