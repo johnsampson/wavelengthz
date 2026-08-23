@@ -406,12 +406,17 @@
 // other row on this page does (issue #127: "fix spacing above 'your
 // wavelength' menu item"; also the very likely reason the reporter never
 // noticed "Your invites" existed at all, per the next item's fix).
+// v65 makes a completed swipe-to-decide gesture vibrate (public/swipe.js),
+// same haptic installTapFeedback's click listener already gives a tap on
+// the Like/Pass buttons -- swiping to a decision never fired one since a
+// drag settles via setTimeout, not a click (issue #127). New
+// public/tapFeedback.js export (vibrate()) backs both.
 // v67 removes the separate Pass (thumbs-down) button from /artist's track
 // rows -- liking is the only action now, one button, circled white when
 // liked and unmarked otherwise, same convention likeArtist() already uses
-// (issue #127). (v65/v66 are in flight in parallel Round 6 PRs; whichever
-// of these merges last hits an ordinary conflict on this one line to
-// resolve, not a real bug.)
+// (issue #127). (v66 is in flight in a parallel Round 6 PR; whichever of
+// these merges last hits an ordinary conflict on this one line to resolve,
+// not a real bug.)
 const CACHE_NAME = 'wavelengthz-shell-v67';
 const APP_SHELL = [
   '/',

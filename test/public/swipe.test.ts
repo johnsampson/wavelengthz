@@ -1,5 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resolveSwipeDirection, attachSwipeDeck } from '../../public/swipe.js';
+import { vibrate } from '../../public/tapFeedback.js';
+
+vi.mock('../../public/tapFeedback.js', () => ({ vibrate: vi.fn() }));
+
+beforeEach(() => {
+  vi.mocked(vibrate).mockClear();
+});
 
 describe('resolveSwipeDirection', () => {
   it('returns null below the threshold', () => {
@@ -27,6 +34,22 @@ function fakeCardElement() {
   };
 }
 
+// Same shape as fakeCardElement, but actually records the listeners
+// attachSwipeDeck registers so a test can drive a full pointerdown ->
+// pointermove -> pointerup drag through them directly.
+function fakeDraggableCardElement() {
+  const handlers: Record<string, (e?: any) => void> = {};
+  return {
+    style: { transform: '', transition: '' } as Record<string, string>,
+    addEventListener(type: string, handler: (e?: any) => void) {
+      handlers[type] = handler;
+    },
+    removeEventListener() {},
+    setPointerCapture() {},
+    _handlers: handlers,
+  };
+}
+
 describe('attachSwipeDeck', () => {
   it('clears a leftover transform/transition from a previous drag-dismissed card on attach', () => {
     const container = fakeCardElement();
@@ -43,5 +66,35 @@ describe('attachSwipeDeck', () => {
 
     expect(container.style.transform).toBe('');
     expect(container.style.transition).toBe('');
+  });
+
+  // Issue #127: "when I click a like button, can't it give phone vibration
+  // feedback" -- installTapFeedback's site-wide haptic only fires on a
+  // 'click' event, and a completed drag never dispatches one, so swiping to
+  // a decision (unlike tapping the Like/Pass buttons) had no haptic at all.
+  it('vibrates when a drag commits to a real swipe decision', () => {
+    vi.stubGlobal('window', { innerWidth: 400 });
+    const container = fakeDraggableCardElement();
+    attachSwipeDeck(container, { onSwipe: () => {} });
+
+    container._handlers['pointerdown']({ clientX: 0, pointerId: 1 });
+    container._handlers['pointermove']({ clientX: 200 }); // past the 80px default threshold
+    container._handlers['pointerup']();
+
+    expect(vibrate).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('does not vibrate when a drag springs back without crossing the threshold', () => {
+    vi.stubGlobal('window', { innerWidth: 400 });
+    const container = fakeDraggableCardElement();
+    attachSwipeDeck(container, { onSwipe: () => {} });
+
+    container._handlers['pointerdown']({ clientX: 0, pointerId: 1 });
+    container._handlers['pointermove']({ clientX: 20 }); // well under threshold
+    container._handlers['pointerup']();
+
+    expect(vibrate).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });
