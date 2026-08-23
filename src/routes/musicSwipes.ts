@@ -175,6 +175,15 @@ export function registerMusicSwipeRoutes(router: RouterType) {
       SELECT 1 FROM json_each(${genresExpr}) je
       WHERE je.key IN (SELECT genre FROM user_blocked_genres WHERE user_id = ?)
     )`;
+    // Issue #127 ("doesn't make sense to show artist cards in the deck
+    // unless we have at least one genre"): an artist with zero known genres
+    // has nothing for the deck's own genre chips to show and contributes no
+    // genre-affinity signal from a swipe either -- excluded outright, same
+    // treatment as photoFilter above. Artist-only: a track candidate reaching
+    // through to a genre-less parent artist is already vanishingly rare
+    // (genres come from the same Spotify payload the artist was cataloged
+    // from) and this ask is specifically about artist cards.
+    const noGenreFilter = itemType === 'artist' ? `AND ${genresExpr} != '{}'` : '';
 
     // Artist candidates only: a representative track already in our own
     // catalog for this artist, if one exists, so the deck can offer a
@@ -202,7 +211,7 @@ export function registerMusicSwipeRoutes(router: RouterType) {
       env.DB.prepare(
         `SELECT ${table}.id, ${table}.name, ${table}.${imageColumn} as image_url, ${genresExpr} as genres_json${trackPreviewSelect} FROM ${table}
          ${trackPreviewJoin}
-         WHERE ${table}.approved = 1 ${photoFilter} AND ${table}.id NOT IN (
+         WHERE ${table}.approved = 1 ${photoFilter} ${noGenreFilter} AND ${table}.id NOT IN (
            SELECT item_id FROM music_swipes WHERE user_id = ? AND item_type = ?
          )
          ${blockedGenreFilter}
@@ -242,7 +251,7 @@ export function registerMusicSwipeRoutes(router: RouterType) {
     if (itemType === 'artist') {
       const remainingRow = await env.DB.prepare(
         `SELECT COUNT(*) as c FROM ${table}
-         WHERE approved = 1 ${photoFilter} AND id NOT IN (
+         WHERE approved = 1 ${photoFilter} ${noGenreFilter} AND id NOT IN (
            SELECT item_id FROM music_swipes WHERE user_id = ? AND item_type = ?
          )
          ${blockedGenreFilter}`

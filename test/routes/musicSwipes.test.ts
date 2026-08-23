@@ -33,11 +33,15 @@ beforeEach(async () => {
     createdAt: 1000,
     updatedAt: 1000,
   });
+  // Non-empty by default (rather than '{}') so both remain valid candidates
+  // under GET /api/candidates/music's own no-genre filter (issue #127) --
+  // most tests here don't care what the genre actually is, only that a1/a2
+  // show up; the handful that do care overwrite it explicitly per-test.
   await env.DB.prepare(
-    `INSERT INTO artists (id, name, genres, image_url, source, approved, created_at) VALUES ('a1', 'Artist One', '{}', 'https://img.example/a1.jpg', 'seed', 1, 1000)`
+    `INSERT INTO artists (id, name, genres, image_url, source, approved, created_at) VALUES ('a1', 'Artist One', '{"indie":true}', 'https://img.example/a1.jpg', 'seed', 1, 1000)`
   ).run();
   await env.DB.prepare(
-    `INSERT INTO artists (id, name, genres, image_url, source, approved, created_at) VALUES ('a2', 'Artist Two', '{}', 'https://img.example/a2.jpg', 'seed', 1, 1000)`
+    `INSERT INTO artists (id, name, genres, image_url, source, approved, created_at) VALUES ('a2', 'Artist Two', '{"indie":true}', 'https://img.example/a2.jpg', 'seed', 1, 1000)`
   ).run();
 });
 
@@ -88,7 +92,7 @@ describe('GET /api/candidates/music', () => {
     const body = await res.json<any>();
 
     expect(body.candidates.map((c: any) => c.itemId)).not.toContain('a1');
-    expect(body.candidates.map((c: any) => c.itemId)).toContain('a2'); // a2 has no genres, unaffected
+    expect(body.candidates.map((c: any) => c.itemId)).toContain('a2'); // a2's genre isn't blocked, unaffected
   });
 
   it('excludes a track whose parent artist carries a blocked genre', async () => {
@@ -153,13 +157,36 @@ describe('GET /api/candidates/music', () => {
     expect(a1.topGenres).toHaveLength(5);
   });
 
-  it('reports no genres as an empty array, not null or undefined', async () => {
+  // Issue #127: "doesn't make sense to show artist cards in the deck unless
+  // we have at least one genre" -- an artist with zero known genres has
+  // nothing for this same chip row to show, so it's excluded outright
+  // (mirroring the existing no-photo exclusion) rather than ever reaching
+  // the client with an empty topGenres array.
+  it('excludes an artist with no genres at all', async () => {
+    await env.DB.prepare(`UPDATE artists SET genres = '{}' WHERE id = 'a1'`).run();
     const cookie = await cookieFor('u1');
     const req = new Request('http://localhost/api/candidates/music?limit=10', { headers: { Cookie: cookie } });
     const res = await worker.fetch(req, env, ctx);
     const body = await res.json<any>();
-    const a2 = body.candidates.find((c: any) => c.itemId === 'a2'); // a2 has genres: '{}' from beforeEach
-    expect(a2.topGenres).toEqual([]);
+    expect(body.candidates.map((c: any) => c.itemId)).not.toContain('a1');
+    expect(body.candidates.map((c: any) => c.itemId)).toContain('a2'); // a2 still has a genre, unaffected
+  });
+
+  it('does not apply the no-genre exclusion to track candidates', async () => {
+    // Tracks don't carry their own genres column -- genresExpr reaches
+    // through to the parent artist's, but this filter is scoped to artist
+    // candidates only (see its own comment), so a track by a genre-less
+    // artist still surfaces rather than silently vanishing from the pool.
+    await env.DB.prepare(`UPDATE artists SET genres = '{}' WHERE id = 'a1'`).run();
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, album_image_url, source, approved, created_at)
+       VALUES ('t1', 'Track One', 'a1', 'https://img.example/t1.jpg', 'seed', 1, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/candidates/music?item_type=track', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, ctx);
+    const body = await res.json<any>();
+    expect(body.candidates.map((c: any) => c.itemId)).toContain('t1');
   });
 
   it('includes a track candidate\'s parent artist\'s genres as topGenres', async () => {
@@ -359,7 +386,7 @@ describe('GET /api/candidates/music', () => {
     // it. An artist whose name would trip the heuristic if it were wrongly
     // applied here must still come through untouched.
     await env.DB.prepare(
-      `INSERT INTO artists (id, name, genres, image_url, source, approved, created_at) VALUES ('a4', 'The Band - Live', '{}', 'https://img.example/a4.jpg', 'seed', 1, 1000)`
+      `INSERT INTO artists (id, name, genres, image_url, source, approved, created_at) VALUES ('a4', 'The Band - Live', '{"rock":true}', 'https://img.example/a4.jpg', 'seed', 1, 1000)`
     ).run();
     const cookie = await cookieFor('u1');
 
