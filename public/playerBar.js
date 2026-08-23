@@ -41,6 +41,29 @@ let currentTrack = null; // { spotifyId, id, name, artistName, imageUrl } | null
 let mode = null; // 'sdk' | 'iframe' | null -- null while currentTrack is set but availability hasn't resolved yet, or when currentTrack itself is null
 let sdkState = null; // { paused, position, duration } | null -- sdk mode only
 
+// Guards startPlayback() (below) against overlapping invocations -- issue
+// #127: "there's still a player issue when you navigate around the site, on
+// occasion... it opens multiple players both the main player and the basic
+// player and it doesn't work. (could this be related to API limits?)".
+// startPlayback is async with two real await points (checkPlayerAvailability,
+// the actual playTrack HTTP call to Spotify), and nothing previously stopped
+// a second call (a fast second tap, or radio advancing right as a new tap
+// lands) from starting while the first was still in flight -- both would
+// resume and write the same module-level currentTrack/mode with no ordering
+// guarantee, since either await can take arbitrarily long (exactly what
+// Spotify's own app-wide rate limiting, mentioned in the report, would
+// stretch out). The literal "shows both players" symptom was the failure
+// branch of this race: an older call's playTrack() call landing (or timing
+// out) AFTER a newer call had already committed mode = 'sdk' for a
+// different track would fall through to showIframe() -- rendering the
+// Basic-player chrome over a track that was never the current one, while
+// the SDK stayed connected and possibly still playing the newer track in
+// the background. Same "bump a token, bail out if it's stale by the time an
+// await resolves" idiom router.js's own navToken already uses for the
+// identical class of problem (a second navigate() landing before the
+// first's fetch settles).
+let playToken = 0;
+
 // Swipe-left-to-reveal-trash state (issue #108: "align the radio player w/
 // the tracks view... maybe make the radio a swipe left that exposes a trash
 // can to close the radio?"). Whether the trash is currently snapped open --
@@ -196,6 +219,7 @@ export function _playTrackingStateForTests() {
     radioQueueLength: radioQueue.length,
     radioPlayedCount,
     radioAdvanceArmed: radioAdvanceTimer !== null,
+    mode,
   };
 }
 let sdkListenerAttached = false;
@@ -590,6 +614,12 @@ export async function play(track) {
 // Shared by the explicit tap above and radio's own continuation. Everything
 // except radio-session lifecycle lives here.
 async function startPlayback(track) {
+  // Claimed before either await below -- see playToken's own comment for
+  // why. Anything that resumes after a newer call has already claimed a
+  // later token belongs to a superseded play and must not touch shared
+  // state (currentTrack/mode/the DOM) or ever reach the actual Spotify play
+  // call at all.
+  const token = ++playToken;
   // Whatever was playing is over -- if it never reached the threshold, that
   // stays recorded as an uncounted play, which is exactly the signal wanted.
   stopPlayTracking();
@@ -605,6 +635,7 @@ async function startPlayback(track) {
   renderChrome();
 
   const availability = await checkPlayerAvailability();
+  if (token !== playToken) return; // superseded while awaiting availability
   let resolvedMode = pickMode(availability);
 
   if (resolvedMode === 'sdk') {
@@ -614,6 +645,13 @@ async function startPlayback(track) {
     // an unknown or too-short duration.
     const startPositionMs = hookOffsetMs(track.durationMs);
     const started = await playTrack(track.spotifyId, { positionMs: startPositionMs });
+    // Superseded while the actual Spotify play call was in flight -- a newer
+    // startPlayback() already owns currentTrack/mode by now (and may
+    // already be playing something else), so this call must not overwrite
+    // either, must not touch the iframe host, and must not render -- doing
+    // any of those would be exactly the stale-call-clobbers-newer-call race
+    // that produced "both players" in the first place.
+    if (token !== playToken) return;
     if (started) {
       mode = 'sdk';
       hideIframe();
@@ -748,6 +786,9 @@ export async function like() {
 // Explicit close only -- never called implicitly by navigation or by
 // selecting a different track (play() above handles takeover on its own).
 export async function hide() {
+  // Invalidates any in-flight startPlayback() -- an explicit close always
+  // wins over whatever was still loading, same playToken guard as above.
+  playToken++;
   if (mode === 'sdk') await pausePlayback();
   currentTrack = null;
   notifyNowPlayingChange();
@@ -887,4 +928,5 @@ export function _resetForTests() {
   sdkListenerAttached = false;
   mounted = false;
   nowPlayingListeners = new Set();
+  playToken = 0;
 }
