@@ -400,12 +400,18 @@
 // index.html's card already had this exact chip row for people-mode's own
 // topGenres, just gated to that mode; the gate is dropped so both modes
 // share the one markup block.
+// v64 fixes /settings' "Account connections", "Your wavelength", and "Your
+// invites" links being packed into one shared <li> instead of one each --
+// they weren't getting the <ul>'s gap-2 spacing between them the way every
+// other row on this page does (issue #127: "fix spacing above 'your
+// wavelength' menu item"; also the very likely reason the reporter never
+// noticed "Your invites" existed at all, per the next item's fix).
 // v67 removes the separate Pass (thumbs-down) button from /artist's track
 // rows -- liking is the only action now, one button, circled white when
 // liked and unmarked otherwise, same convention likeArtist() already uses
-// (issue #127). (v64/v65/v66 are in flight in parallel Round 6 PRs;
-// whichever of these merges last hits an ordinary conflict on this one
-// line to resolve, not a real bug.)
+// (issue #127). (v65/v66 are in flight in parallel Round 6 PRs; whichever
+// of these merges last hits an ordinary conflict on this one line to
+// resolve, not a real bug.)
 const CACHE_NAME = 'wavelengthz-shell-v67';
 const APP_SHELL = [
   '/',

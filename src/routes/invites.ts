@@ -1,7 +1,7 @@
 import type { IRequest, RouterType } from 'itty-router';
 import { getSessionUser, requestIsSecure } from '../lib/session';
 import { constantTimeEqual } from '../lib/crypto';
-import { generateInviteCode, lookupInviteCode } from '../lib/inviteCodes';
+import { generateInviteCode, lookupInviteCode, grantInviteCodes } from '../lib/inviteCodes';
 
 export function registerInviteRoutes(router: RouterType) {
   // Public, no session -- the /join landing page calls this before OAuth
@@ -35,6 +35,23 @@ export function registerInviteRoutes(router: RouterType) {
   router.get('/api/me/invites', async (request: Request, env: Env) => {
     const user = await getSessionUser(request, env.DB);
     if (!user) return new Response('Unauthorized', { status: 401 });
+
+    // Self-heal for an account that onboarded before this feature existed
+    // (issue #127: "did we take the share/invite live? I don't see it").
+    // grantInviteCodes (src/lib/inviteCodes.ts) only ever fires on the
+    // onboarded_at NULL -> set transition (src/routes/onboarding.ts), so
+    // anyone who completed onboarding earlier has zero rows here and no
+    // future event that would ever grant them any otherwise. Gated on
+    // onboarded_at being set (never grant mid-onboarding; a real completion
+    // still grants normally the usual way) and on having never been granted
+    // any before (so a member who's already shared/redeemed theirs never
+    // gets a surprise second batch just for revisiting this page).
+    if (user.onboarded_at != null && user.gender) {
+      const alreadyGranted = await env.DB.prepare('SELECT 1 FROM invite_codes WHERE created_by_user_id = ? LIMIT 1')
+        .bind(user.id)
+        .first();
+      if (!alreadyGranted) await grantInviteCodes(env.DB, user.id, user.gender, Date.now());
+    }
 
     const rows = await env.DB.prepare(
       `SELECT ic.code, ic.target_gender, ic.redeemed_at, u.display_name AS redeemed_by_name
