@@ -17,6 +17,32 @@ export function registerGenreBlockRoutes(router: RouterType) {
     return Response.json({ genres: rows.results.map((r) => r.genre) });
   });
 
+  // Backs Settings -> Preferences' "Block a genre" search box (issue #127:
+  // "add ability to block genres" -- until now the only way a genre ever
+  // reached user_blocked_genres was the reactive "you've passed 10 artists
+  // in GENRE, block it?" prompt; there was no way to add one proactively).
+  // Searches the catalog-wide `genres` table (src/lib/genreCatalog.ts's
+  // recordCatalogGenres) rather than accepting an arbitrary typed string, so
+  // results are genres that actually exist in this app's catalog. Excludes
+  // ones already blocked -- no reason to suggest re-blocking what's already
+  // hidden.
+  router.get('/api/genres/search', async (request: Request, env: Env) => {
+    const user = await getSessionUser(request, env.DB);
+    if (!user) return new Response('Unauthorized', { status: 401 });
+
+    const q = new URL(request.url).searchParams.get('q')?.trim() ?? '';
+    if (!q) return Response.json({ genres: [] });
+
+    const rows = await env.DB.prepare(
+      `SELECT genre FROM genres
+       WHERE genre LIKE ? AND genre NOT IN (SELECT genre FROM user_blocked_genres WHERE user_id = ?)
+       ORDER BY (artist_count + track_count) DESC
+       LIMIT 20`
+    ).bind(`%${q}%`, user.id).all<{ genre: string }>();
+
+    return Response.json({ genres: rows.results.map((r) => r.genre) });
+  });
+
   router.post('/api/genres/:genre/block', async (request: IRequest, env: Env) => {
     const user = await getSessionUser(request, env.DB);
     if (!user) return new Response('Unauthorized', { status: 401 });

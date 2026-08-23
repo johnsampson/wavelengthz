@@ -1,5 +1,6 @@
 import { api, INTENT_OPTIONS } from '../app.js';
 import { showErrorToast } from '../toast.js';
+import { shouldSearch, debounce } from '../search.js';
 
 const LOCATION_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_AGE = 18;
@@ -23,6 +24,10 @@ export function createPreferencesApp() {
     saved: false,
     loading: true,
     blockedGenres: [],
+    genreQuery: '',
+    genreResults: [],
+    genreSearching: false,
+    debouncedGenreSearch: null,
 
     get locationCooldownRemainingMs() {
       if (this.locationUpdatedAt == null) return 0;
@@ -90,6 +95,7 @@ export function createPreferencesApp() {
       } finally {
         this.loading = false;
       }
+      this.debouncedGenreSearch = debounce(() => this.runGenreSearch(), 300);
     },
 
     useBrowserLocation() {
@@ -165,6 +171,41 @@ export function createPreferencesApp() {
         this.blockedGenres = this.blockedGenres.filter((g) => g !== genre);
       } catch (e) {
         showErrorToast('Could not unblock that genre. Please try again.');
+      }
+    },
+
+    // Proactive counterpart to the reactive "you've passed 10 artists in
+    // GENRE, block it?" prompt (index.js's blockGenrePrompt) -- until this,
+    // that prompt was the only way a genre ever reached
+    // user_blocked_genres in the first place (issue #127).
+    onGenreQueryInput() {
+      if (!shouldSearch(this.genreQuery)) {
+        this.genreResults = [];
+        return;
+      }
+      this.debouncedGenreSearch();
+    },
+
+    async runGenreSearch() {
+      this.genreSearching = true;
+      try {
+        const res = await api.genreSearch(this.genreQuery.trim());
+        this.genreResults = res.genres;
+      } catch (e) {
+        showErrorToast('Could not search genres right now. Please try again.');
+      } finally {
+        this.genreSearching = false;
+      }
+    },
+
+    async blockGenre(genre) {
+      try {
+        await api.blockGenre(genre);
+        this.blockedGenres = [...this.blockedGenres, genre].sort();
+        this.genreResults = this.genreResults.filter((g) => g !== genre);
+        this.genreQuery = '';
+      } catch (e) {
+        showErrorToast('Could not block that genre. Please try again.');
       }
     },
   };

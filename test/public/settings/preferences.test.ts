@@ -330,7 +330,7 @@ describe('preferences page', () => {
     vi.unstubAllGlobals();
   });
 
-  it('leaves blockedGenres empty (so the card stays hidden) when the user has none blocked', async () => {
+  it('leaves blockedGenres empty (so the pill list stays hidden) when the user has none blocked', async () => {
     stubApi(ONBOARDED_USER, []);
     const app = createPreferencesApp();
 
@@ -369,6 +369,95 @@ describe('preferences page', () => {
 
     expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('unblock'));
     expect(app.blockedGenres).toEqual(['emo']);
+    vi.unstubAllGlobals();
+  });
+
+  // Issue #127: "add ability to block genres" -- the reactive 10-pass
+  // prompt was the only way a genre ever reached user_blocked_genres before
+  // this; the search box below is the proactive counterpart.
+  it('does not search below the 3-character threshold', async () => {
+    stubApi(ONBOARDED_USER);
+    const app = createPreferencesApp();
+    await app.init();
+    app.genreQuery = 'ro';
+
+    app.onGenreQueryInput();
+
+    expect(app.genreResults).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+
+  it('searches genres once the query is long enough', async () => {
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: ONBOARDED_USER }), { status: 200 });
+      if (path === '/api/genres/blocked') return new Response(JSON.stringify({ genres: [] }), { status: 200 });
+      if (path === '/api/genres/search?q=rock') return new Response(JSON.stringify({ genres: ['rock', 'classic rock'] }), { status: 200 });
+      throw new Error(`unexpected ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createPreferencesApp();
+    await app.init();
+    app.genreQuery = 'rock';
+
+    await app.runGenreSearch();
+
+    expect(app.genreResults).toEqual(['rock', 'classic rock']);
+    vi.unstubAllGlobals();
+  });
+
+  it('surfaces an error toast when the genre search fails', async () => {
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: ONBOARDED_USER }), { status: 200 });
+      if (path === '/api/genres/blocked') return new Response(JSON.stringify({ genres: [] }), { status: 200 });
+      if (path.startsWith('/api/genres/search')) return new Response('nope', { status: 500 });
+      throw new Error(`unexpected ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createPreferencesApp();
+    await app.init();
+    app.genreQuery = 'rock';
+
+    await app.runGenreSearch();
+
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('search'));
+    vi.unstubAllGlobals();
+  });
+
+  it('blocking a genre from search results adds it (sorted) to blockedGenres, removes it from the results, and clears the query', async () => {
+    const apiStub = stubApi(ONBOARDED_USER, ['polka']);
+    const app = createPreferencesApp();
+    await app.init();
+    app.genreQuery = 'rock';
+    (app as any).genreResults = ['rock'];
+
+    await app.blockGenre('rock');
+
+    expect(app.blockedGenres).toEqual(['polka', 'rock']);
+    expect(app.genreResults).toEqual([]);
+    expect(app.genreQuery).toBe('');
+    const blockCall = apiStub.calls.find((c) => c.path === '/api/genres/rock/block');
+    expect(blockCall).toBeTruthy();
+    expect(blockCall!.options.method).toBe('POST');
+    vi.unstubAllGlobals();
+  });
+
+  it('growls an error toast and leaves state untouched when blocking fails', async () => {
+    const fetchMock = vi.fn(async (path: string, options: any = {}) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: ONBOARDED_USER }), { status: 200 });
+      if (path === '/api/genres/blocked') return new Response(JSON.stringify({ genres: [] }), { status: 200 });
+      if (path === '/api/genres/rock/block') return new Response('nope', { status: 500 });
+      throw new Error(`unexpected ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createPreferencesApp();
+    await app.init();
+    (app as any).genreResults = ['rock'];
+
+    await app.blockGenre('rock');
+
+    expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('block'));
+    expect(app.blockedGenres).toEqual([]);
+    expect(app.genreResults).toEqual(['rock']); // untouched on failure
     vi.unstubAllGlobals();
   });
 });

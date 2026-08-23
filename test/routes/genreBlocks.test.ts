@@ -10,7 +10,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await env.DB.exec('DELETE FROM user_blocked_genres; DELETE FROM sessions; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;');
+  await env.DB.exec('DELETE FROM user_blocked_genres; DELETE FROM genres; DELETE FROM sessions; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;');
   await insertTestUser(env.DB, { id: 'u1', spotifyId: 'sp1', createdAt: 1000, updatedAt: 1000 });
 });
 
@@ -39,6 +39,63 @@ describe('GET /api/genres/blocked', () => {
   it('rejects an unauthenticated request', async () => {
     const res = await worker.fetch(new Request('http://localhost/api/genres/blocked'), env, {} as ExecutionContext);
     expect(res.status).toBe(401);
+  });
+});
+
+describe('GET /api/genres/search', () => {
+  async function seedGenre(genre: string, artistCount: number, trackCount = 0) {
+    await env.DB.prepare(
+      `INSERT INTO genres (id, genre, artist_count, track_count, created_at, updated_at) VALUES (?, ?, ?, ?, 1000, 1000)`
+    ).bind(crypto.randomUUID(), genre, artistCount, trackCount).run();
+  }
+
+  it('rejects an unauthenticated request', async () => {
+    const res = await worker.fetch(new Request('http://localhost/api/genres/search?q=rock'), env, {} as ExecutionContext);
+    expect(res.status).toBe(401);
+  });
+
+  it('returns an empty list for an empty query rather than the whole catalog', async () => {
+    await seedGenre('rock', 5);
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(new Request('http://localhost/api/genres/search?q=', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.genres).toEqual([]);
+  });
+
+  it('matches by substring, most-used first', async () => {
+    await seedGenre('classic rock', 3);
+    await seedGenre('rock', 10);
+    await seedGenre('country', 20); // doesn't match "rock"
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(new Request('http://localhost/api/genres/search?q=rock', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.genres).toEqual(['rock', 'classic rock']);
+  });
+
+  it('excludes a genre the user has already blocked', async () => {
+    await seedGenre('rock', 5);
+    await seedGenre('classic rock', 3);
+    await env.DB.prepare(`INSERT INTO user_blocked_genres (id, user_id, genre, created_at, updated_at) VALUES ('b1', 'u1', 'rock', 1000, 1000)`).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(new Request('http://localhost/api/genres/search?q=rock', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.genres).toEqual(['classic rock']);
+  });
+
+  it("does not leak another user's blocked genres into the exclusion", async () => {
+    await insertTestUser(env.DB, { id: 'u2', spotifyId: 'sp2', createdAt: 1000, updatedAt: 1000 });
+    await seedGenre('rock', 5);
+    await env.DB.prepare(`INSERT INTO user_blocked_genres (id, user_id, genre, created_at, updated_at) VALUES ('b1', 'u2', 'rock', 1000, 1000)`).run();
+    const cookie = await cookieFor('u1');
+
+    const res = await worker.fetch(new Request('http://localhost/api/genres/search?q=rock', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.genres).toEqual(['rock']);
   });
 });
 

@@ -411,7 +411,12 @@
 // the Like/Pass buttons -- swiping to a decision never fired one since a
 // drag settles via setTimeout, not a click (issue #127). New
 // public/tapFeedback.js export (vibrate()) backs both.
-const CACHE_NAME = 'wavelengthz-shell-v65';
+// v66 adds a "Block a genre" search box to Settings -> Preferences (new
+// GET /api/genres/search, querying the catalog-wide genres table) -- until
+// now the only way a genre ever reached user_blocked_genres was the
+// reactive "you've passed 10 artists in GENRE, block it?" prompt, with no
+// proactive way to add one (issue #127).
+const CACHE_NAME = 'wavelengthz-shell-v66';
 const APP_SHELL = [
   '/',
   '/app.js',
