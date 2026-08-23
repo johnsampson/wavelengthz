@@ -1,3 +1,5 @@
+import { vibrate } from './tapFeedback.js';
+
 export function resolveSwipeDirection(deltaX, thresholdPx) {
   if (deltaX > thresholdPx) return 'right';
   if (deltaX < -thresholdPx) return 'left';
@@ -31,6 +33,13 @@ export function attachSwipeDeck(container, { onSwipe, thresholdPx = 80 }) {
 
   function settle(direction) {
     if (direction) {
+      // installTapFeedback's site-wide haptic (public/tapFeedback.js) only
+      // fires on a 'click' event -- a completed drag never dispatches one,
+      // so swiping to a decision was the one way to like/pass with zero
+      // haptic feedback (issue #127) even though tapping the same Like/Pass
+      // buttons already vibrates. Fired here, on commit, not in onSwipe
+      // itself, so it lands with the fling rather than 250ms later.
+      vibrate();
       const flungX = direction === 'right' ? window.innerWidth : -window.innerWidth;
       container.style.transition = 'transform 0.25s ease-out';
       container.style.transform = `translateX(${flungX}px) rotate(${flungX / 20}deg)`;

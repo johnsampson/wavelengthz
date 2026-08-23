@@ -406,6 +406,11 @@
 // other row on this page does (issue #127: "fix spacing above 'your
 // wavelength' menu item"; also the very likely reason the reporter never
 // noticed "Your invites" existed at all, per the next item's fix).
+// v65 makes a completed swipe-to-decide gesture vibrate (public/swipe.js),
+// same haptic installTapFeedback's click listener already gives a tap on
+// the Like/Pass buttons -- swiping to a decision never fired one since a
+// drag settles via setTimeout, not a click (issue #127). New
+// public/tapFeedback.js export (vibrate()) backs both.
 // v70 fixes an intermittent race in playerBar.js's startPlayback() (issue
 // #127: "there's still a player issue when you navigate around the
 // site... it opens multiple players both the main player and the basic
@@ -419,7 +424,7 @@
 // bump-and-compare idiom router.js's own navToken already uses) makes a
 // superseded call's continuation a no-op at both await points; hide() also
 // bumps the token so an explicit close always wins over an in-flight play.
-// (v65-v69 are in flight in parallel Round 6 PRs for other issues --
+// (v66-v69 are in flight in parallel Round 6 PRs for other issues --
 // whichever of these merges last hits an ordinary conflict on this one
 // line to resolve, not a real bug.)
 const CACHE_NAME = 'wavelengthz-shell-v70';

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { isTapTarget, installTapFeedback, TAP_VIBRATE_MS, _resetForTests } from '../../public/tapFeedback.js';
+import { isTapTarget, installTapFeedback, vibrate, TAP_VIBRATE_MS, _resetForTests } from '../../public/tapFeedback.js';
 
 beforeEach(() => {
   _resetForTests();
@@ -91,5 +91,35 @@ describe('installTapFeedback', () => {
     clickHandler({ target });
 
     expect(vibrate).not.toHaveBeenCalled();
+  });
+});
+
+// The standalone export callers whose action doesn't originate from a
+// 'click' event use instead -- currently just swipe.js's onSwipe (issue
+// #127), for the same haptic installTapFeedback's click listener already
+// gives every ordinary button tap.
+describe('vibrate', () => {
+  it('calls navigator.vibrate with the default tap duration', () => {
+    const nativeVibrate = vi.fn();
+    vi.stubGlobal('navigator', { vibrate: nativeVibrate });
+
+    vibrate();
+
+    expect(nativeVibrate).toHaveBeenCalledWith(TAP_VIBRATE_MS);
+  });
+
+  it('accepts a custom duration', () => {
+    const nativeVibrate = vi.fn();
+    vi.stubGlobal('navigator', { vibrate: nativeVibrate });
+
+    vibrate(200);
+
+    expect(nativeVibrate).toHaveBeenCalledWith(200);
+  });
+
+  it('is a silent no-op where the Vibration API is unavailable (iOS Safari)', () => {
+    vi.stubGlobal('navigator', {});
+
+    expect(() => vibrate()).not.toThrow();
   });
 });
