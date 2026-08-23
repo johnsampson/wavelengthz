@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   pickMode,
   renderPlayerChromeHtml,
   trackMatches,
+  isCurrentTrack,
   like,
   play,
   hide,
@@ -16,8 +17,10 @@ import {
   shouldSnapOpen,
   _setCurrentTrackForTests,
   _resetForTests,
+  _playTrackingStateForTests,
 } from '../../public/playerBar.js';
 import { showToast, showErrorToast } from '../../public/toast.js';
+import { checkPlayerAvailability, playTrack } from '../../public/wavelengthzPlayer.js';
 
 vi.mock('../../public/wavelengthzPlayer.js', () => ({
   checkPlayerAvailability: vi.fn(),
@@ -347,6 +350,105 @@ describe('onNowPlayingChange', () => {
 
     expect(listener).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
+  });
+});
+
+// Issue #127: "there's still a player issue when you navigate around the
+// site, on occasion... it opens multiple players both the main player and
+// the basic player and it doesn't work." startPlayback() has two real await
+// points (checkPlayerAvailability, the actual Spotify play call), so a
+// second play() landing before the first's awaits settle used to let
+// whichever call's continuation ran LAST win, regardless of which track was
+// actually tapped most recently -- including an older call's playTrack()
+// failure falling through to showIframe() and overwriting a newer call's
+// already-successful mode = 'sdk'. playToken guards against exactly this.
+describe('the playToken race guard (issue #127)', () => {
+  beforeEach(() => {
+    vi.stubGlobal('document', { getElementById: vi.fn(() => null) });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('not found', { status: 404 })));
+    vi.mocked(checkPlayerAvailability).mockResolvedValue({ available: true, accessToken: 'tok' });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('a stale call\'s late playTrack() failure does not overwrite a newer call\'s successful sdk mode', async () => {
+    let resolveA: (v: boolean) => void;
+    vi.mocked(playTrack).mockImplementation((spotifyId: string) => {
+      if (spotifyId === 'spA') return new Promise<boolean>((r) => { resolveA = r; });
+      return Promise.resolve(true);
+    });
+
+    // A starts first and is let through to its own in-flight playTrack()
+    // call (the SECOND guard checkpoint, right after the Spotify play
+    // request) before B starts -- exactly like a fast double-tap or radio
+    // advancing right as a new tap lands while the previous play request is
+    // still in flight. checkPlayerAvailability() resolves in exactly one
+    // microtask tick (it's a mockResolvedValue), so a single `await
+    // Promise.resolve()` here lands after A's continuation runs but before
+    // B exists at all.
+    const playA = play({ spotifyId: 'spA', id: 'a', name: 'Song A' });
+    await Promise.resolve();
+    expect(playTrack).toHaveBeenCalledWith('spA', expect.anything());
+
+    // B starts after A is already mid-flight and succeeds immediately.
+    const playB = play({ spotifyId: 'spB', id: 'b', name: 'Song B' });
+    await playB;
+    expect(_playTrackingStateForTests().mode).toBe('sdk');
+    expect(isCurrentTrack('spB')).toBe(true);
+
+    // A's play call finally resolves -- late, and it FAILED. Without the
+    // guard this falls through to mode = 'iframe' + showIframe('spA'),
+    // clobbering B's already-correct state with a Basic-player view of the
+    // wrong (superseded) track while the SDK keeps actually playing B.
+    resolveA!(false);
+    await playA;
+
+    expect(_playTrackingStateForTests().mode).toBe('sdk');
+    expect(isCurrentTrack('spB')).toBe(true);
+  });
+
+  it('a stale call\'s late playTrack() success does not re-render over a newer call', async () => {
+    let resolveA: (v: boolean) => void;
+    vi.mocked(playTrack).mockImplementation((spotifyId: string) => {
+      if (spotifyId === 'spA') return new Promise<boolean>((r) => { resolveA = r; });
+      return Promise.resolve(true);
+    });
+
+    const playA = play({ spotifyId: 'spA', id: 'a', name: 'Song A' });
+    await Promise.resolve();
+    expect(playTrack).toHaveBeenCalledWith('spA', expect.anything());
+
+    const playB = play({ spotifyId: 'spB', id: 'b', name: 'Song B' });
+    await playB;
+
+    // A's play call also succeeds, but late and stale -- must not be
+    // treated as the current track even though Spotify did start it.
+    resolveA!(true);
+    await playA;
+
+    expect(isCurrentTrack('spB')).toBe(true);
+    expect(isCurrentTrack('spA')).toBe(false);
+  });
+
+  it('hide() invalidates an in-flight startPlayback so it can never re-show the player after an explicit close', async () => {
+    let resolveA: (v: boolean) => void;
+    vi.mocked(playTrack).mockImplementation(() => new Promise<boolean>((r) => { resolveA = r; }));
+
+    // Let A reach its own in-flight playTrack() call before the explicit
+    // close comes in, same as the two tests above -- the close needs to win
+    // even against a play that's already made the real Spotify request, not
+    // just one still waiting on checkPlayerAvailability().
+    const playA = play({ spotifyId: 'spA', id: 'a', name: 'Song A' });
+    await Promise.resolve();
+    expect(playTrack).toHaveBeenCalledWith('spA', expect.anything());
+
+    await hide();
+    resolveA!(true);
+    await playA;
+
+    expect(isCurrentTrack('spA')).toBe(false);
   });
 });
 

@@ -400,7 +400,23 @@
 // index.html's card already had this exact chip row for people-mode's own
 // topGenres, just gated to that mode; the gate is dropped so both modes
 // share the one markup block.
-const CACHE_NAME = 'wavelengthz-shell-v63';
+// v70 fixes an intermittent race in playerBar.js's startPlayback() (issue
+// #127: "there's still a player issue when you navigate around the
+// site... it opens multiple players both the main player and the basic
+// player and it doesn't work"). startPlayback is async with two real await
+// points and nothing previously stopped a second call (a fast double-tap,
+// radio advancing, or just navigating while a play request is still in
+// flight) from resuming after the first and clobbering its already-correct
+// state -- a stale call's late failure could fall back to the iframe
+// player on top of an already-succeeded SDK play, or a stale success could
+// re-render over whatever's actually current. New playToken guard (same
+// bump-and-compare idiom router.js's own navToken already uses) makes a
+// superseded call's continuation a no-op at both await points; hide() also
+// bumps the token so an explicit close always wins over an in-flight play.
+// (v64-v69 are in flight in parallel Round 6 PRs for other issues --
+// whichever of these merges last hits an ordinary conflict on this one
+// line to resolve, not a real bug.)
+const CACHE_NAME = 'wavelengthz-shell-v70';
 const APP_SHELL = [
   '/',
   '/app.js',
