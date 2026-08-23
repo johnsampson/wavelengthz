@@ -253,7 +253,7 @@
         :aria-pressed="searchType === 'track'"
       >Songs</button>
     </div>
-    <ul class="mx-auto mt-4 flex w-full max-w-md flex-col gap-2 overflow-y-auto">
+    <ul class="mx-auto mt-4 flex w-full max-w-md flex-1 min-h-0 flex-col gap-2 overflow-y-auto">
       <template x-if="searchType === 'artist'">
         <template x-for="result in searchResults" :key="result.id || result.spotifyArtistId">
           <li>

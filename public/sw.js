@@ -400,7 +400,25 @@
 // index.html's card already had this exact chip row for people-mode's own
 // topGenres, just gated to that mode; the gate is dropped so both modes
 // share the one markup block.
-const CACHE_NAME = 'wavelengthz-shell-v63';
+// v71 fixes a real "can't scroll far enough to reach an item" bug (issue
+// #127: "soaking [squishing] issue w/ the menu on many pages. Can't scroll
+// down low enough to click on items") in the deck search modal
+// (index.html), and both the song-picker and shared-playlist modals on
+// messages.html and group.html. Each is a `position: fixed; inset: 0`
+// overlay sized to exactly the viewport, with a results `<ul
+// overflow-y-auto>` inside -- but that `<ul>` had no `flex-1 min-h-0`, so it
+// had no height of its own to scroll within: it just grew to fit its
+// content, and once that content is taller than the viewport the excess
+// renders past the fixed box's edges with no scroll mechanism at all (not
+// the `<ul>`'s own overflow, since it was never actually constrained; not
+// the page's, since these are `position: fixed` and don't participate in
+// normal document scroll). A long enough result list made its last items
+// permanently unreachable. Same `flex-1 min-h-0` already used correctly by
+// messages.html/group.html's own message-list right next to these.
+// (v64-v70 are in flight in parallel Round 6 PRs for other issues --
+// whichever of these merges last hits an ordinary conflict on this one
+// line to resolve, not a real bug.)
+const CACHE_NAME = 'wavelengthz-shell-v71';
 const APP_SHELL = [
   '/',
   '/app.js',
