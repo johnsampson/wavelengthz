@@ -400,6 +400,12 @@
 // index.html's card already had this exact chip row for people-mode's own
 // topGenres, just gated to that mode; the gate is dropped so both modes
 // share the one markup block.
+// v64 fixes /settings' "Account connections", "Your wavelength", and "Your
+// invites" links being packed into one shared <li> instead of one each --
+// they weren't getting the <ul>'s gap-2 spacing between them the way every
+// other row on this page does (issue #127: "fix spacing above 'your
+// wavelength' menu item"; also the very likely reason the reporter never
+// noticed "Your invites" existed at all, per the next item's fix).
 // v68 re-measures --wl-nav-h (the bottom nav's real rendered height, used by
 // every page's .pb-app/.mb-app bottom padding) once web fonts finish
 // loading, not just once at mount -- a fallback font's line-height can
@@ -408,7 +414,7 @@
 // leaving the true bottom of a scrollable list sitting behind the
 // now-taller nav with no way to scroll the rest of the way to it (issue
 // #127: "menu on many pages... can't scroll down low enough to click on
-// items"). (v64-v67 are in flight in parallel Round 6 PRs; whichever of
+// items"). (v65-v67 are in flight in parallel Round 6 PRs; whichever of
 // these merges last hits an ordinary conflict on this one line to resolve,
 // not a real bug.)
 const CACHE_NAME = 'wavelengthz-shell-v68';

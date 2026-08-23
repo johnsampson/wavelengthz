@@ -72,6 +72,49 @@ describe('GET /api/me/invites', () => {
       ])
     );
   });
+
+  // Issue #127: "did we take the share/invite live? I don't see it."
+  // grantInviteCodes only ever fires on the onboarded_at NULL -> set
+  // transition (src/routes/onboarding.ts) -- an account that onboarded
+  // before this feature existed has zero rows and no future event that
+  // would ever grant it any otherwise. This endpoint self-heals that on
+  // first visit instead.
+  it('grants invite codes on first visit to an already-onboarded user who has none', async () => {
+    await insertTestUser(env.DB, { id: 'u1', spotifyId: 'sp1', gender: 'male', onboardedAt: 1000 });
+
+    const res = await worker.fetch(new Request('http://localhost/api/me/invites', { headers: { Cookie: await cookieFor('u1') } }), env, {} as ExecutionContext);
+
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    expect(body.invites).toHaveLength(2);
+    // The self-balancing mechanism: a declared 'male' member's codes only
+    // work for 'female' (src/lib/inviteCodes.ts's grantInviteCodes).
+    for (const invite of body.invites) {
+      expect(invite.targetGender).toBe('female');
+      expect(invite.redeemed).toBe(false);
+    }
+    const rows = await env.DB.prepare('SELECT created_by_user_id FROM invite_codes WHERE created_by_user_id = ?').bind('u1').all<any>();
+    expect(rows.results).toHaveLength(2);
+  });
+
+  it('does not grant a second batch on a repeat visit', async () => {
+    await insertTestUser(env.DB, { id: 'u1', spotifyId: 'sp1', gender: 'female', onboardedAt: 1000 });
+
+    await worker.fetch(new Request('http://localhost/api/me/invites', { headers: { Cookie: await cookieFor('u1') } }), env, {} as ExecutionContext);
+    const res = await worker.fetch(new Request('http://localhost/api/me/invites', { headers: { Cookie: await cookieFor('u1') } }), env, {} as ExecutionContext);
+
+    const body = await res.json<any>();
+    expect(body.invites).toHaveLength(2); // still 2, not 4
+  });
+
+  it('does not grant to a user who has not finished onboarding yet', async () => {
+    await insertTestUser(env.DB, { id: 'u1', spotifyId: 'sp1' }); // onboardedAt/gender both null by default
+
+    const res = await worker.fetch(new Request('http://localhost/api/me/invites', { headers: { Cookie: await cookieFor('u1') } }), env, {} as ExecutionContext);
+
+    const body = await res.json<any>();
+    expect(body.invites).toHaveLength(0);
+  });
 });
 
 describe('POST /internal/invites/generate', () => {
