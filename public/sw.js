@@ -406,13 +406,16 @@
 // other row on this page does (issue #127: "fix spacing above 'your
 // wavelength' menu item"; also the very likely reason the reporter never
 // noticed "Your invites" existed at all, per the next item's fix).
+// v65 makes a completed swipe-to-decide gesture vibrate (public/swipe.js),
+// same haptic installTapFeedback's click listener already gives a tap on
+// the Like/Pass buttons -- swiping to a decision never fired one since a
+// drag settles via setTimeout, not a click (issue #127). New
+// public/tapFeedback.js export (vibrate()) backs both.
 // v66 adds a "Block a genre" search box to Settings -> Preferences (new
 // GET /api/genres/search, querying the catalog-wide genres table) -- until
 // now the only way a genre ever reached user_blocked_genres was the
 // reactive "you've passed 10 artists in GENRE, block it?" prompt, with no
-// proactive way to add one (issue #127). (v65 is in flight in a parallel
-// Round 6 PR; whichever of these merges last hits an ordinary conflict on
-// this one line to resolve, not a real bug.)
+// proactive way to add one (issue #127).
 const CACHE_NAME = 'wavelengthz-shell-v66';
 const APP_SHELL = [
   '/',
