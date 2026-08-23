@@ -406,7 +406,12 @@
 // other row on this page does (issue #127: "fix spacing above 'your
 // wavelength' menu item"; also the very likely reason the reporter never
 // noticed "Your invites" existed at all, per the next item's fix).
-const CACHE_NAME = 'wavelengthz-shell-v64';
+// v65 makes a completed swipe-to-decide gesture vibrate (public/swipe.js),
+// same haptic installTapFeedback's click listener already gives a tap on
+// the Like/Pass buttons -- swiping to a decision never fired one since a
+// drag settles via setTimeout, not a click (issue #127). New
+// public/tapFeedback.js export (vibrate()) backs both.
+const CACHE_NAME = 'wavelengthz-shell-v65';
 const APP_SHELL = [
   '/',
   '/app.js',

@@ -42,6 +42,18 @@ const TAP_TARGET_SELECTOR = 'button, [role="button"], .pill-toggle, a.btn-primar
 // landed, closer to a native button's own haptic click.
 export const TAP_VIBRATE_MS = 10;
 
+// Exported so callers whose action doesn't originate from a 'click' event
+// can still fire the same haptic installTapFeedback's own listener gives
+// every ordinary button tap -- namely swipe.js's onSwipe, which settles a
+// completed drag via a bare setTimeout, never a click (issue #127: "when I
+// click a like button, can't it give phone vibration feedback" -- the
+// button itself already vibrates via the click listener below; a
+// swiped-to-decision never did). Same silent no-op on iOS Safari as
+// everywhere else in this module -- see the module comment.
+export function vibrate(ms = TAP_VIBRATE_MS) {
+  navigator.vibrate?.(ms);
+}
+
 /**
  * Pure: whether a tap on this element should fire haptic feedback. Takes
  * anything with a `closest` method so it's testable without a real DOM.
