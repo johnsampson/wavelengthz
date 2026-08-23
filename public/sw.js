@@ -416,7 +416,11 @@
 // now the only way a genre ever reached user_blocked_genres was the
 // reactive "you've passed 10 artists in GENRE, block it?" prompt, with no
 // proactive way to add one (issue #127).
-const CACHE_NAME = 'wavelengthz-shell-v66';
+// v67 removes the separate Pass (thumbs-down) button from /artist's track
+// rows -- liking is the only action now, one button, circled white when
+// liked and unmarked otherwise, same convention likeArtist() already uses
+// (issue #127).
+const CACHE_NAME = 'wavelengthz-shell-v67';
 const APP_SHELL = [
   '/',
   '/app.js',
