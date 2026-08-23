@@ -200,7 +200,7 @@ describe('connections page', () => {
 
   it('points at reconnecting when Spotify has revoked write access', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(
-      JSON.stringify({ added: 0, needsReconnect: true, status: OFF_SYNC }),
+      JSON.stringify({ added: 0, needsReconnect: true, status: { ...OFF_SYNC, needsReconnect: true } }),
       { status: 200 }
     )));
     vi.stubGlobal('window', { location: { search: '' }, history: { replaceState: () => {} } });
@@ -209,6 +209,11 @@ describe('connections page', () => {
     await app.syncNow();
 
     expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('revoked'));
+    // Persisted onto the status object itself (migrations/0027), not just
+    // this one-time toast -- issue #127: connections.html's own banner
+    // reads app.sync.needsReconnect so it still explains why sync is off
+    // on a later page load, after the toast is long gone.
+    expect(app.sync!.needsReconnect).toBe(true);
     vi.unstubAllGlobals();
   });
 

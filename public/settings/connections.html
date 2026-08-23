@@ -45,6 +45,13 @@
 
     <template x-if="sync && !sync.enabled">
       <div class="mt-3">
+        <!-- Persists past the one-time toast syncNow() shows the moment this
+             happens (issue #127) -- a page load any time after that, with
+             the toast long gone, otherwise looked identical to the user
+             having turned sync off themselves, with no explanation. -->
+        <p x-show="sync.needsReconnect" class="mb-2 text-sm text-amber-400" role="alert">
+          Spotify revoked access, so sync turned off. Turn it back on to reconnect.
+        </p>
         <button type="button" @click="enableSync()" class="btn-primary w-full">Turn on playlist sync</button>
         <p class="mt-2 text-xs text-neutral-500">
           Spotify will ask for permission to create a playlist. This is a separate approval from signing in --
@@ -95,6 +102,11 @@
 
     <template x-if="follow && !follow.enabled">
       <div class="mt-3">
+        <!-- See the identical banner on playlist sync above for why this
+             persists past the one-time toast (issue #127). -->
+        <p x-show="follow.needsReconnect" class="mb-2 text-sm text-amber-400" role="alert">
+          Spotify revoked access, so following turned off. Turn it back on to reconnect.
+        </p>
         <button type="button" @click="enableFollow()" class="btn-primary w-full">Turn on following</button>
         <p class="mt-2 text-xs text-neutral-500">
           A separate Spotify approval from playlist sync -- turning one on never turns on the other.

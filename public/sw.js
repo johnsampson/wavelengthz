@@ -400,7 +400,16 @@
 // index.html's card already had this exact chip row for people-mode's own
 // topGenres, just gated to that mode; the gate is dropped so both modes
 // share the one markup block.
-const CACHE_NAME = 'wavelengthz-shell-v63';
+// v69 persists WHY Spotify playlist sync/following turned off (migrations/
+// 0027's needs_reconnect column) -- previously the auto-disable-on-
+// revocation path was indistinguishable from the user manually turning it
+// off, so a page load any time after the moment's toast disappeared showed
+// an ordinary-looking disabled toggle with no explanation. /settings/
+// connections.html now shows a persistent banner instead (issue #127).
+// (v64-v68 are in flight in parallel Round 6 PRs; whichever of these merges
+// last hits an ordinary conflict on this one line to resolve, not a real
+// bug.)
+const CACHE_NAME = 'wavelengthz-shell-v69';
 const APP_SHELL = [
   '/',
   '/app.js',

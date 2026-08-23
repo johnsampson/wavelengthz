@@ -223,8 +223,12 @@ describe('runFollowSync', () => {
     stubSpotify({ status: 403 });
 
     expect(await runFollowSync(env, user)).toEqual({ followed: 0, needsReconnect: true });
-    const row = await env.DB.prepare('SELECT enabled FROM spotify_follow_syncs WHERE user_id = ?').bind('u1').first<any>();
+    const row = await env.DB.prepare('SELECT enabled, needs_reconnect FROM spotify_follow_syncs WHERE user_id = ?').bind('u1').first<any>();
     expect(row.enabled).toBe(0);
+    // Persisted (migrations/0027), not just the one-time result above --
+    // issue #127: a later page load must still be able to explain why
+    // following is off, not just that it is.
+    expect(row.needs_reconnect).toBe(1);
   });
 
   it('keeps the ledger for a chunk that landed when a later one fails', async () => {
@@ -309,8 +313,9 @@ describe('syncFollowForArtist', () => {
 
     await expect(syncFollowForArtist(env, user, 'sp-a1')).resolves.toBeUndefined();
 
-    const row = await env.DB.prepare('SELECT enabled FROM spotify_follow_syncs WHERE user_id = ?').bind('u1').first<any>();
+    const row = await env.DB.prepare('SELECT enabled, needs_reconnect FROM spotify_follow_syncs WHERE user_id = ?').bind('u1').first<any>();
     expect(row.enabled).toBe(0);
+    expect(row.needs_reconnect).toBe(1);
   });
 
   it('swallows a transient failure without throwing, leaving the artist pending for the next sweep', async () => {
@@ -339,6 +344,7 @@ describe('getFollowSyncStatus', () => {
       lastSyncedAt: null,
       pendingCount: 1,
       followedCount: 0,
+      needsReconnect: false,
     });
   });
 });

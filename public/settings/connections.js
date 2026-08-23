@@ -14,7 +14,7 @@ export function createConnectionsApp() {
     // wrong "off" state on first paint. Annotated because a bare `null`
     // initializer infers as type `null`, which makes every later property
     // read an error under checkJs.
-    /** @type {{enabled: boolean, connected: boolean, playlistUrl: string | null, lastSyncedAt: number | null, pendingCount: number, syncedCount: number} | null} */
+    /** @type {{enabled: boolean, connected: boolean, playlistUrl: string | null, lastSyncedAt: number | null, pendingCount: number, syncedCount: number, needsReconnect: boolean} | null} */
     sync: null,
     syncing: false,
 
@@ -22,7 +22,7 @@ export function createConnectionsApp() {
     // its own toggle, and its own state. Deliberately not folded into `sync`:
     // a follow is outward-facing where the playlist is private, so the UI
     // must never be able to imply consent to one from the other.
-    /** @type {{enabled: boolean, connected: boolean, lastSyncedAt: number | null, pendingCount: number, followedCount: number} | null} */
+    /** @type {{enabled: boolean, connected: boolean, lastSyncedAt: number | null, pendingCount: number, followedCount: number, needsReconnect: boolean} | null} */
     follow: null,
     following: false,
 
