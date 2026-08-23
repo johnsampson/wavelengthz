@@ -400,7 +400,14 @@
 // index.html's card already had this exact chip row for people-mode's own
 // topGenres, just gated to that mode; the gate is dropped so both modes
 // share the one markup block.
-const CACHE_NAME = 'wavelengthz-shell-v63';
+// v66 adds a "Block a genre" search box to Settings -> Preferences (new
+// GET /api/genres/search, querying the catalog-wide genres table) -- until
+// now the only way a genre ever reached user_blocked_genres was the
+// reactive "you've passed 10 artists in GENRE, block it?" prompt, with no
+// proactive way to add one (issue #127). (v64/v65 are in flight in
+// parallel Round 6 PRs; whichever of these merges last hits an ordinary
+// conflict on this one line to resolve, not a real bug.)
+const CACHE_NAME = 'wavelengthz-shell-v66';
 const APP_SHELL = [
   '/',
   '/app.js',
