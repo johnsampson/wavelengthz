@@ -2,7 +2,7 @@ import { api } from './app.js';
 import { requireAuth } from './auth.js';
 import { shouldSearch, debounce } from './search.js';
 import { showErrorToast, showToast } from './toast.js';
-import { play, togglePlayPause, isCurrentTrack } from './playerBar.js';
+import { play, togglePlayPause, isCurrentTrack as isCurrentTrackGlobal, onNowPlayingChange } from './playerBar.js';
 import { navigate } from './router.js';
 
 export function createDropApp() {
@@ -22,10 +22,25 @@ export function createDropApp() {
     submitting: false,
     debouncedSearch: null,
 
-    isCurrentTrack,
+    // Bumped every time playerBar.js reports the active track changed (a tap
+    // here, elsewhere, or radio auto-advancing) -- referencing it inside
+    // isCurrentTrack gives Alpine an actual reactive dependency to re-run the
+    // answer rows' play/pause icons on, since isCurrentTrackGlobal() itself
+    // reads playerBar.js's own module state rather than anything on this
+    // component. Same "value doesn't matter, only that it changed" idiom as
+    // messages.js/group.js's `now = Date.now()` re-evaluating canRecall().
+    nowPlayingTick: 0,
+    unsubscribeNowPlaying: null,
+    isCurrentTrack(spotifyId) {
+      void this.nowPlayingTick;
+      return isCurrentTrackGlobal(spotifyId);
+    },
 
     async init() {
       if (!(await requireAuth())) return;
+      this.unsubscribeNowPlaying = onNowPlayingChange(() => {
+        this.nowPlayingTick++;
+      });
       this.debouncedSearch = debounce(() => this.runSearch(), 300);
       try {
         const res = await api.dailyDrop();
@@ -113,7 +128,7 @@ export function createDropApp() {
 
     async playTrack(track) {
       if (!track) return;
-      if (isCurrentTrack(track.spotifyId)) {
+      if (isCurrentTrackGlobal(track.spotifyId)) {
         await togglePlayPause();
       } else {
         await play({ spotifyId: track.spotifyId, name: track.name, imageUrl: track.imageUrl });
@@ -122,6 +137,11 @@ export function createDropApp() {
 
     viewProfile(userId) {
       navigate(`/profile?id=${userId}`);
+    },
+
+    destroy() {
+      this.unsubscribeNowPlaying?.();
+      this.unsubscribeNowPlaying = null;
     },
   };
 }

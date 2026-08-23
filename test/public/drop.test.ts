@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createDropApp } from '../../public/drop.js';
 import { showErrorToast, showToast } from '../../public/toast.js';
-import { play, togglePlayPause, isCurrentTrack } from '../../public/playerBar.js';
+import { play, togglePlayPause, isCurrentTrack, onNowPlayingChange } from '../../public/playerBar.js';
 import { navigate } from '../../public/router.js';
 
 vi.mock('../../public/toast.js', () => ({ showErrorToast: vi.fn(), showToast: vi.fn() }));
@@ -9,6 +9,7 @@ vi.mock('../../public/playerBar.js', () => ({
   play: vi.fn(),
   togglePlayPause: vi.fn(),
   isCurrentTrack: vi.fn(() => false),
+  onNowPlayingChange: vi.fn(() => vi.fn()),
 }));
 vi.mock('../../public/router.js', () => ({ navigate: vi.fn() }));
 
@@ -19,6 +20,7 @@ beforeEach(() => {
   vi.mocked(play).mockClear();
   vi.mocked(togglePlayPause).mockClear();
   vi.mocked(isCurrentTrack).mockReset().mockReturnValue(false);
+  vi.mocked(onNowPlayingChange).mockReset().mockReturnValue(vi.fn());
   vi.mocked(navigate).mockClear();
 });
 
@@ -186,5 +188,41 @@ describe('drop page', () => {
 
     app.viewProfile('u2');
     expect(navigate).toHaveBeenCalledWith('/profile?id=u2');
+  });
+
+  // Radio auto-advancing to a new track (or any other page/tap starting one)
+  // changes playerBar.js's own module state, which this page's isCurrentTrack
+  // binding has no way to notice on its own -- see drop.js's nowPlayingTick
+  // comment. init() must subscribe so Alpine has something to actually
+  // re-run the answer rows' play/pause icons on.
+  it('subscribes to now-playing changes on init and bumps nowPlayingTick so isCurrentTrack re-evaluates', async () => {
+    stubApi({ '/api/daily-drop': { prompt: PROMPT, myAnswer: null, answerCount: 0 } });
+    let firePlayerChange: (() => void) | undefined;
+    vi.mocked(onNowPlayingChange).mockImplementation((cb: () => void) => {
+      firePlayerChange = cb;
+      return vi.fn();
+    });
+    const app = createDropApp();
+
+    await app.init();
+
+    expect(onNowPlayingChange).toHaveBeenCalled();
+    expect(app.nowPlayingTick).toBe(0);
+    firePlayerChange?.();
+    expect(app.nowPlayingTick).toBe(1);
+    vi.mocked(isCurrentTrack).mockReturnValue(true);
+    expect(app.isCurrentTrack('sp1')).toBe(true);
+  });
+
+  it('destroy() unsubscribes from now-playing changes', async () => {
+    stubApi({ '/api/daily-drop': { prompt: PROMPT, myAnswer: null, answerCount: 0 } });
+    const unsubscribe = vi.fn();
+    vi.mocked(onNowPlayingChange).mockReturnValue(unsubscribe);
+    const app = createDropApp();
+    await app.init();
+
+    app.destroy();
+
+    expect(unsubscribe).toHaveBeenCalled();
   });
 });

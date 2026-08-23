@@ -4,6 +4,9 @@ import {
   renderPlayerChromeHtml,
   trackMatches,
   like,
+  play,
+  hide,
+  onNowPlayingChange,
   seekTargetMs,
   seekStepTargetMs,
   formatTime,
@@ -291,6 +294,58 @@ describe('like', () => {
     await like();
 
     expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('like'));
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('onNowPlayingChange', () => {
+  // isCurrentTrack() reads this module's own state, which a page's Alpine
+  // component has no way to notice changing on its own -- most visibly when
+  // radio auto-advances to the next track while the listener is looking at
+  // an unrelated track-card page. Every page subscribes here and bumps a
+  // counter of its own to give Alpine something to actually re-run its
+  // isCurrentTrack bindings on (see e.g. artist.js's nowPlayingTick).
+  //
+  // document.getElementById stubbed to return null throughout -- both
+  // renderChrome() and hideIframe() bail out immediately on a missing root,
+  // which is exactly what lets play()/hide() run to completion in this
+  // DOM-less test pool.
+  beforeEach(() => {
+    vi.stubGlobal('document', { getElementById: vi.fn(() => null) });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('not found', { status: 404 })));
+  });
+
+  it('notifies subscribers when a new track starts playing', async () => {
+    const listener = vi.fn();
+    const unsubscribe = onNowPlayingChange(listener);
+
+    await play({ spotifyId: 'sp1', id: 't1', name: 'Song' });
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    vi.unstubAllGlobals();
+  });
+
+  it('notifies subscribers when hide() clears the current track', async () => {
+    _setCurrentTrackForTests({ spotifyId: 'sp1', id: 't1', name: 'Song' });
+    const listener = vi.fn();
+    const unsubscribe = onNowPlayingChange(listener);
+
+    await hide();
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    vi.unstubAllGlobals();
+  });
+
+  it('stops notifying once unsubscribed', async () => {
+    const listener = vi.fn();
+    const unsubscribe = onNowPlayingChange(listener);
+    unsubscribe();
+
+    await play({ spotifyId: 'sp1', id: 't1', name: 'Song' });
+
+    expect(listener).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 });

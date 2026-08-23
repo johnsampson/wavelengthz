@@ -2,7 +2,7 @@ import { api } from './app.js';
 import { attachSwipeDeck } from './swipe.js';
 import { getAuthedUser } from './auth.js';
 import { shouldSearch, debounce, loadStoredMode, storeMode, saveSearchState, takeSearchState } from './search.js';
-import { play, togglePlayPause, isCurrentTrack } from './playerBar.js';
+import { play, togglePlayPause, isCurrentTrack, onNowPlayingChange } from './playerBar.js';
 import { showToast, showErrorToast } from './toast.js';
 import { focusAfterReveal } from './domUtils.js';
 import { navigate } from './router.js';
@@ -87,10 +87,21 @@ export function createDeckApp() {
     // failure here just means no banner, never a broken deck.
     dailyDropPrompt: null,
 
+    // Bumped every time playerBar.js reports the active track changed (a tap
+    // here, elsewhere, or radio auto-advancing) -- referenced inside both
+    // methods below purely to give Alpine an actual reactive dependency to
+    // re-run them on, since isCurrentTrack() itself reads playerBar.js's own
+    // module state rather than anything on this component. Same "value
+    // doesn't matter, only that it changed" idiom as messages.js/group.js's
+    // `now = Date.now()` re-evaluating canRecall().
+    nowPlayingTick: 0,
+    unsubscribeNowPlaying: null,
+
     // Reads playerBar.js's own module state rather than keeping a local
     // copy -- true exactly when the current card's anthem is the track
     // actually playing in the fixed bar.
     isCurrentAnthem() {
+      void this.nowPlayingTick;
       return !!this.current?.anthemTrack && isCurrentTrack(this.current.anthemTrack.spotifyId);
     },
 
@@ -99,10 +110,14 @@ export function createDeckApp() {
     // /api/candidates/music -- a representative catalog track for this
     // artist, distinct from People mode's anthemTrack).
     isCurrentPreviewTrack() {
+      void this.nowPlayingTick;
       return !!this.current?.track && isCurrentTrack(this.current.track.spotifyId);
     },
 
     async init() {
+      this.unsubscribeNowPlaying = onNowPlayingChange(() => {
+        this.nowPlayingTick++;
+      });
       const user = await getAuthedUser();
       this.authed = !!user;
       if (this.authed) {
@@ -142,6 +157,8 @@ export function createDeckApp() {
         this.detachSwipe();
         this.detachSwipe = null;
       }
+      this.unsubscribeNowPlaying?.();
+      this.unsubscribeNowPlaying = null;
     },
 
     async setMode(mode) {

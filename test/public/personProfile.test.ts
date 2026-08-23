@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createPersonProfileApp } from '../../public/personProfile.js';
 import { showErrorToast } from '../../public/toast.js';
-import { play, togglePlayPause, isCurrentTrack } from '../../public/playerBar.js';
+import { play, togglePlayPause, isCurrentTrack, onNowPlayingChange } from '../../public/playerBar.js';
 
 vi.mock('../../public/toast.js', () => ({ showErrorToast: vi.fn() }));
 vi.mock('../../public/playerBar.js', () => ({
   play: vi.fn(),
   togglePlayPause: vi.fn(),
   isCurrentTrack: vi.fn(() => false),
+  onNowPlayingChange: vi.fn(() => vi.fn()),
 }));
 
 function fakeWindow() {
@@ -23,6 +24,7 @@ beforeEach(() => {
   vi.mocked(play).mockClear();
   vi.mocked(togglePlayPause).mockClear();
   vi.mocked(isCurrentTrack).mockReset().mockReturnValue(false);
+  vi.mocked(onNowPlayingChange).mockReset().mockReturnValue(vi.fn());
 });
 
 describe('person profile page', () => {
@@ -91,6 +93,44 @@ describe('person profile page', () => {
 
     app.prevPhoto();
     expect(app.carouselIndex).toBe(2);
+    vi.unstubAllGlobals();
+  });
+
+  // See artist.test.ts's identical case -- playerBar.js's own module state
+  // (e.g. radio auto-advancing) is invisible to this page's isCurrentTrack
+  // binding unless init() subscribes and bumps something reactive.
+  it('subscribes to now-playing changes on init and bumps nowPlayingTick so isCurrentTrack re-evaluates', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    stubApi((path) => (path === '/api/me' ? new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 }) : new Response('not found', { status: 404 })));
+    let firePlayerChange: (() => void) | undefined;
+    vi.mocked(onNowPlayingChange).mockImplementation((cb: () => void) => {
+      firePlayerChange = cb;
+      return vi.fn();
+    });
+    const app = createPersonProfileApp();
+
+    await app.init();
+
+    expect(onNowPlayingChange).toHaveBeenCalled();
+    expect(app.nowPlayingTick).toBe(0);
+    firePlayerChange?.();
+    expect(app.nowPlayingTick).toBe(1);
+    vi.mocked(isCurrentTrack).mockReturnValue(true);
+    expect(app.isCurrentTrack('sp1')).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it('destroy() unsubscribes from now-playing changes', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    stubApi((path) => (path === '/api/me' ? new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 }) : new Response('not found', { status: 404 })));
+    const unsubscribe = vi.fn();
+    vi.mocked(onNowPlayingChange).mockReturnValue(unsubscribe);
+    const app = createPersonProfileApp();
+    await app.init();
+
+    app.destroy();
+
+    expect(unsubscribe).toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 });

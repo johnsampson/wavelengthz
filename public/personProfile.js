@@ -1,12 +1,12 @@
 import { api } from './app.js';
 import { requireAuth } from './auth.js';
-import { play, togglePlayPause, isCurrentTrack } from './playerBar.js';
+import { play, togglePlayPause, isCurrentTrack as isCurrentTrackGlobal, onNowPlayingChange } from './playerBar.js';
 import { showErrorToast } from './toast.js';
 
 // Extracted from profile.html's inline script -- named personProfile.js
 // (not profile.js) to avoid confusion with the already-existing
-// public/settings/profile.js. No destroy() needed -- nothing here starts a
-// timer or attaches a listener outside Alpine's own bindings.
+// public/settings/profile.js. Now needs a destroy() after all -- see the
+// nowPlayingTick/onNowPlayingChange comment below.
 const PAGE_SIZE = 6;
 
 export function createPersonProfileApp() {
@@ -24,10 +24,26 @@ export function createPersonProfileApp() {
     // keeps the other in sync whichever gets opened.
     carouselIndex: 0,
     lightboxOpen: false,
-    isCurrentTrack,
+
+    // Bumped every time playerBar.js reports the active track changed (a tap
+    // here, elsewhere, or radio auto-advancing) -- referencing it inside
+    // isCurrentTrack gives Alpine an actual reactive dependency to re-run the
+    // track rows' play/pause icons on, since isCurrentTrackGlobal() itself
+    // reads playerBar.js's own module state rather than anything on this
+    // component. Same "value doesn't matter, only that it changed" idiom as
+    // messages.js/group.js's `now = Date.now()` re-evaluating canRecall().
+    nowPlayingTick: 0,
+    unsubscribeNowPlaying: null,
+    isCurrentTrack(spotifyId) {
+      void this.nowPlayingTick;
+      return isCurrentTrackGlobal(spotifyId);
+    },
 
     async init() {
       if (!(await requireAuth())) return;
+      this.unsubscribeNowPlaying = onNowPlayingChange(() => {
+        this.nowPlayingTick++;
+      });
       try {
         const res = await api.personProfile(this.userId);
         this.profile = res.profile;
@@ -37,12 +53,17 @@ export function createPersonProfileApp() {
       }
     },
 
+    destroy() {
+      this.unsubscribeNowPlaying?.();
+      this.unsubscribeNowPlaying = null;
+    },
+
     // Playback happens in the fixed player bar (public/playerBar.js) above
     // the bottom nav, shared across all three track lists on this page
     // (top/shared/recent) the same way it's shared across every other page
     // that shows tracks.
     async togglePlayer(track) {
-      if (isCurrentTrack(track.spotifyId)) {
+      if (isCurrentTrackGlobal(track.spotifyId)) {
         await togglePlayPause();
         return;
       }

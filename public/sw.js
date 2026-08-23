@@ -386,7 +386,16 @@
 // precache list); /join and /join/continue are the pre-auth redemption
 // landing page, deliberately NOT precached, same treatment as /login. New
 // app.js client method (myInvites), settings.html links to the new panel.
-const CACHE_NAME = 'wavelengthz-shell-v61';
+// v62 fixes track-card play/pause icons (artist, profile, the deck, /drop,
+// message/group threads) going stale when playerBar.js's active track
+// changes out from under the page showing them -- most visibly radio
+// auto-advancing to the next track while a track-card page just sits there.
+// playerBar.js now exposes onNowPlayingChange(); every page/mixin that reads
+// isCurrentTrack() subscribes and bumps its own reactive counter so Alpine
+// has a dependency to actually re-run those bindings on. Touches
+// playerBar.js, artist.js, personProfile.js, index.js, drop.js,
+// trackPicker.js, messages.js, and group.js -- all already in this list.
+const CACHE_NAME = 'wavelengthz-shell-v62';
 const APP_SHELL = [
   '/',
   '/app.js',
