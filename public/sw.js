@@ -400,6 +400,12 @@
 // index.html's card already had this exact chip row for people-mode's own
 // topGenres, just gated to that mode; the gate is dropped so both modes
 // share the one markup block.
+// v64 fixes /settings' "Account connections", "Your wavelength", and "Your
+// invites" links being packed into one shared <li> instead of one each --
+// they weren't getting the <ul>'s gap-2 spacing between them the way every
+// other row on this page does (issue #127: "fix spacing above 'your
+// wavelength' menu item"; also the very likely reason the reporter never
+// noticed "Your invites" existed at all, per the next item's fix).
 // v70 fixes an intermittent race in playerBar.js's startPlayback() (issue
 // #127: "there's still a player issue when you navigate around the
 // site... it opens multiple players both the main player and the basic
@@ -413,7 +419,7 @@
 // bump-and-compare idiom router.js's own navToken already uses) makes a
 // superseded call's continuation a no-op at both await points; hide() also
 // bumps the token so an explicit close always wins over an in-flight play.
-// (v64-v69 are in flight in parallel Round 6 PRs for other issues --
+// (v65-v69 are in flight in parallel Round 6 PRs for other issues --
 // whichever of these merges last hits an ordinary conflict on this one
 // line to resolve, not a real bug.)
 const CACHE_NAME = 'wavelengthz-shell-v70';
