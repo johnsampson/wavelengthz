@@ -135,6 +135,12 @@ async function applyGenrePass(db: D1Database, userId: string, genres: string[], 
 // top-up (see below) instead of waiting for the pool to hit exactly zero.
 const LOW_ARTIST_POOL_THRESHOLD = 15;
 
+// How many genre chips a candidate card shows (public/index.html, mirroring
+// the same chip row people-mode's topGenres already renders). An artist's
+// genres list can run well past a dozen for a prolific/eclectic act -- capped
+// so the card stays legible rather than wrapping into a wall of pills.
+const CANDIDATE_GENRE_LIMIT = 5;
+
 // 'skip' (issue: "no reason to pass if you don't know who they are") defers
 // a decision on an artist you don't recognize rather than forcing a
 // like/pass verdict -- it still counts as swiped (migrations/0019) so the
@@ -194,7 +200,7 @@ export function registerMusicSwipeRoutes(router: RouterType) {
 
     const queryCandidates = () =>
       env.DB.prepare(
-        `SELECT ${table}.id, ${table}.name, ${table}.${imageColumn} as image_url${trackPreviewSelect} FROM ${table}
+        `SELECT ${table}.id, ${table}.name, ${table}.${imageColumn} as image_url, ${genresExpr} as genres_json${trackPreviewSelect} FROM ${table}
          ${trackPreviewJoin}
          WHERE ${table}.approved = 1 ${photoFilter} AND ${table}.id NOT IN (
            SELECT item_id FROM music_swipes WHERE user_id = ? AND item_type = ?
@@ -206,6 +212,7 @@ export function registerMusicSwipeRoutes(router: RouterType) {
         id: string;
         name: string;
         image_url: string | null;
+        genres_json: string | null;
         track_id?: string | null;
         track_spotify_id?: string | null;
         track_name?: string | null;
@@ -275,6 +282,14 @@ export function registerMusicSwipeRoutes(router: RouterType) {
         itemId: r.id,
         name: r.name,
         imageUrl: r.image_url,
+        // Same field name/shape people-mode candidates already use for their
+        // own top genres (src/routes/peopleSwipes.ts, public/index.html's
+        // shared chip row) -- an artist's own genres for an artist
+        // candidate, or its parent artist's for a track candidate (genresExpr
+        // above), since tracks carry no genres of their own. Capped for card
+        // legibility, not because the underlying data is short -- a prolific
+        // or eclectic artist can carry well past a dozen.
+        topGenres: r.genres_json ? genresFromRow(r.genres_json).slice(0, CANDIDATE_GENRE_LIMIT) : [],
         // Only ever set for artist candidates (see trackPreviewSelect
         // above) -- catalog-backed (spotifyId + our own internal id), so
         // liking it via the player bar cascades to likeArtistForTrack's

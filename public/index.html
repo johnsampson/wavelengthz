@@ -128,7 +128,10 @@
             <span class="truncate" x-text="current?.track?.name"></span>
           </button>
           <p class="text-neutral-200" x-text="current?.bio || current?.distanceLabel"></p>
-          <div x-show="mode === 'people' && current?.topGenres?.length > 0" class="mt-2 flex flex-wrap gap-1.5">
+          <!-- Shared chip row: people-mode's own top genres, or (as of the
+               music-mode candidates response adding topGenres) an artist
+               candidate's genres -- same field, same rendering either way. -->
+          <div x-show="current?.topGenres?.length > 0" class="mt-2 flex flex-wrap gap-1.5">
             <template x-for="g in current?.topGenres || []" :key="g">
               <span class="pill-toggle pill-toggle-inactive text-xs" x-text="g"></span>
             </template>
