@@ -406,13 +406,18 @@
 // other row on this page does (issue #127: "fix spacing above 'your
 // wavelength' menu item"; also the very likely reason the reporter never
 // noticed "Your invites" existed at all, per the next item's fix).
+// v65 makes a completed swipe-to-decide gesture vibrate (public/swipe.js),
+// same haptic installTapFeedback's click listener already gives a tap on
+// the Like/Pass buttons -- swiping to a decision never fired one since a
+// drag settles via setTimeout, not a click (issue #127). New
+// public/tapFeedback.js export (vibrate()) backs both.
 // v69 persists WHY Spotify playlist sync/following turned off (migrations/
 // 0027's needs_reconnect column) -- previously the auto-disable-on-
 // revocation path was indistinguishable from the user manually turning it
 // off, so a page load any time after the moment's toast disappeared showed
 // an ordinary-looking disabled toggle with no explanation. /settings/
 // connections.html now shows a persistent banner instead (issue #127).
-// (v65-v68 are in flight in parallel Round 6 PRs; whichever of these merges
+// (v66-v68 are in flight in parallel Round 6 PRs; whichever of these merges
 // last hits an ordinary conflict on this one line to resolve, not a real
 // bug.)
 const CACHE_NAME = 'wavelengthz-shell-v69';
