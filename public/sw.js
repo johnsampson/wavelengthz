@@ -448,7 +448,22 @@
 // bump-and-compare idiom router.js's own navToken already uses) makes a
 // superseded call's continuation a no-op at both await points; hide() also
 // bumps the token so an explicit close always wins over an in-flight play.
-const CACHE_NAME = 'wavelengthz-shell-v70';
+// v71 fixes a real "can't scroll far enough to reach an item" bug (issue
+// #127: "soaking [squishing] issue w/ the menu on many pages. Can't scroll
+// down low enough to click on items") in the deck search modal
+// (index.html), and both the song-picker and shared-playlist modals on
+// messages.html and group.html. Each is a `position: fixed; inset: 0`
+// overlay sized to exactly the viewport, with a results `<ul
+// overflow-y-auto>` inside -- but that `<ul>` had no `flex-1 min-h-0`, so it
+// had no height of its own to scroll within: it just grew to fit its
+// content, and once that content is taller than the viewport the excess
+// renders past the fixed box's edges with no scroll mechanism at all (not
+// the `<ul>`'s own overflow, since it was never actually constrained; not
+// the page's, since these are `position: fixed` and don't participate in
+// normal document scroll). A long enough result list made its last items
+// permanently unreachable. Same `flex-1 min-h-0` already used correctly by
+// messages.html/group.html's own message-list right next to these.
+const CACHE_NAME = 'wavelengthz-shell-v71';
 const APP_SHELL = [
   '/',
   '/app.js',
