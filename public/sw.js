@@ -400,6 +400,12 @@
 // index.html's card already had this exact chip row for people-mode's own
 // topGenres, just gated to that mode; the gate is dropped so both modes
 // share the one markup block.
+// v64 fixes /settings' "Account connections", "Your wavelength", and "Your
+// invites" links being packed into one shared <li> instead of one each --
+// they weren't getting the <ul>'s gap-2 spacing between them the way every
+// other row on this page does (issue #127: "fix spacing above 'your
+// wavelength' menu item"; also the very likely reason the reporter never
+// noticed "Your invites" existed at all, per the next item's fix).
 // v71 fixes a real "can't scroll far enough to reach an item" bug (issue
 // #127: "soaking [squishing] issue w/ the menu on many pages. Can't scroll
 // down low enough to click on items") in the deck search modal
@@ -415,7 +421,7 @@
 // normal document scroll). A long enough result list made its last items
 // permanently unreachable. Same `flex-1 min-h-0` already used correctly by
 // messages.html/group.html's own message-list right next to these.
-// (v64-v70 are in flight in parallel Round 6 PRs for other issues --
+// (v65-v70 are in flight in parallel Round 6 PRs for other issues --
 // whichever of these merges last hits an ordinary conflict on this one
 // line to resolve, not a real bug.)
 const CACHE_NAME = 'wavelengthz-shell-v71';
