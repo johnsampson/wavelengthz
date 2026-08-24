@@ -80,6 +80,29 @@ html, body {
 }
 
 /*
+ * Sitewide: every real clickable control shows the hand cursor on hover
+ * (issue #127: "Sitewide - Make sure we're using cursor pointer... over all
+ * clickable elements"). Needed because Tailwind's Preflight base reset
+ * explicitly sets `button { cursor: default }` -- undoing the browser's own
+ * default, which was already correct -- so without this every one of this
+ * app's many `<button>` elements (nearly every tap target site-wide; `<a>`
+ * links were never affected, Preflight doesn't touch those) showed the
+ * plain arrow cursor on desktop instead of a hand. `:not(:disabled)` keeps
+ * a disabled button's cursor at the browser default, which already reads
+ * correctly as "not interactive" -- the same distinction the age-range
+ * slider thumb above already makes by hand for its own disabled state.
+ * `[role="button"]` and `summary` cover the small remainder of this
+ * codebase's clickable elements that aren't real `<button>`/`<a>` tags.
+ */
+button:not(:disabled),
+[role="button"],
+a[href],
+select,
+summary {
+  cursor: pointer;
+}
+
+/*
  * Scrolls a player-bar track/artist name left-to-right only when it doesn't
  * fit (see playerBar.js's applyMarquee) -- holds at the start and end so a
  * just-barely-overflowing title is still readable, not a nonstop scroll.

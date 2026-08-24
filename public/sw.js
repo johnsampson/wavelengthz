@@ -474,15 +474,21 @@
 // to the bare album art alone if that compositing fails for any reason
 // (e.g. Spotify's image host not sending CORS headers permissive enough to
 // read the pixels back out) -- see mediaSession.js's own comment.
+// v73 adds a sitewide `cursor: pointer` rule (styles.css) for every real
+// clickable control -- issue #127: "Sitewide - Make sure we're using
+// cursor pointer... over all clickable elements". Tailwind's Preflight
+// base reset sets `button { cursor: default }`, undoing the browser's own
+// already-correct default, so on desktop nearly every `<button>` site-wide
+// showed a plain arrow instead of a hand.
 // v75 moves the deck's Daily Drop banner (index.html) from above the deck
 // card to below the whole deck/action-button block -- issue #127: "let's
 // move the daily drop somewhere else. It's impedes the UX of the
 // swiping". It used to eat into the vertical space right where a swipe
 // gesture starts, shrinking the card itself; still on the same page with
-// zero extra navigation, just entirely out of the swipe zone now. (v73/v74
-// are in flight in parallel Round 6 PRs for other issue items; whichever
-// of these merges last hits an ordinary conflict on this one line to
-// resolve, not a real bug.)
+// zero extra navigation, just entirely out of the swipe zone now. (v74 is
+// in flight in a parallel Round 6 PR for a different issue item;
+// whichever of the two merges last hits an ordinary conflict on this one
+// line to resolve, not a real bug.)
 const CACHE_NAME = 'wavelengthz-shell-v75';
 const APP_SHELL = [
   '/',
