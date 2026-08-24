@@ -69,12 +69,25 @@ export function registerGroupRoutes(router: RouterType) {
       return Response.json({ error: 'onboarding_incomplete' }, { status: 400 });
     }
 
-    const { name, topic } = await request.json<{ name: string; topic?: string | null }>();
+    const { name, topic, track } = await request.json<{ name: string; topic?: string | null; track?: ShareableSpotifyTrack }>();
     if (typeof name !== 'string' || !name.trim() || name.trim().length > MAX_GROUP_NAME_LENGTH) {
       return Response.json({ error: 'invalid_name' }, { status: 400 });
     }
     if (topic != null && (typeof topic !== 'string' || topic.length > MAX_TOPIC_LENGTH)) {
       return Response.json({ error: 'invalid_topic' }, { status: 400 });
+    }
+
+    // Optional seed track (issue #127: "Start a group from a song") -- same
+    // get-or-create catalog resolution POST /api/groups/:id/messages already
+    // uses for a shared-in-thread track, just attached to the group itself
+    // instead of a message row.
+    let seedTrackId: string | null = null;
+    if (track) {
+      const resolved = await resolveSharedTrack(env, track, user.id);
+      if ('error' in resolved) {
+        return Response.json({ error: resolved.error }, { status: resolved.error === 'artist_unavailable' ? 503 : 400 });
+      }
+      seedTrackId = resolved.trackId;
     }
 
     const id = crypto.randomUUID();
@@ -83,8 +96,8 @@ export function registerGroupRoutes(router: RouterType) {
     // separate location-picker UI, and it matches how a user's own radius
     // already governs what they can discover (see GET /api/groups below).
     await env.DB.prepare(
-      `INSERT INTO groups (id, name, topic, created_by, lat, lng, location_label, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(id, name.trim(), topic?.trim() || null, user.id, user.lat, user.lng, user.location_label, now, now).run();
+      `INSERT INTO groups (id, name, topic, created_by, lat, lng, location_label, seed_track_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(id, name.trim(), topic?.trim() || null, user.id, user.lat, user.lng, user.location_label, seedTrackId, now, now).run();
 
     await env.DB.prepare('INSERT INTO group_members (id, group_id, user_id, joined_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
       .bind(crypto.randomUUID(), id, user.id, now, now, now)
@@ -161,6 +174,11 @@ export function registerGroupRoutes(router: RouterType) {
     ).bind(group.id).all<{ id: string; display_name: string | null }>();
 
     const photos = await primaryPhotoUrls(env.DB, members.results.map((m) => m.id));
+    // At most one lookup, keyed the same way GET /api/groups/:id/messages
+    // already resolves message.track_id -- same shape, so group.html's
+    // pinned seed-track card can reuse trackPicker.js's playSharedTrack()
+    // unchanged.
+    const seedTrack = group.seed_track_id ? (await loadSharedTracks(env.DB, [group.seed_track_id])).get(group.seed_track_id) ?? null : null;
 
     return Response.json({
       group: {
@@ -168,6 +186,7 @@ export function registerGroupRoutes(router: RouterType) {
         name: group.name,
         topic: group.topic,
         locationLabel: group.location_label,
+        seedTrack,
         members: members.results.map((m) => ({
           id: m.id,
           displayName: m.display_name,

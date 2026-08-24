@@ -34,8 +34,72 @@
       <span class="field-label">Topic (optional)</span>
       <input class="field" type="text" x-model="newTopic" maxlength="100" placeholder="e.g. indie rock, 90s hip-hop..." />
     </label>
+    <!-- Start a group from a song (issue #127) -- optional. The picked
+         track becomes the group's seed and is pinned above its chat
+         compose box, same shared-catalog resolution POST /api/groups/:id/
+         messages already does for a track shared mid-thread. -->
+    <div class="flex flex-col gap-1">
+      <span class="field-label">Song (optional)</span>
+      <button
+        type="button"
+        x-show="!selectedSong"
+        class="btn-secondary flex items-center justify-center gap-1.5 text-sm"
+        @click="openSongPicker()"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+          <path d="M9 18V5l12-2v13" />
+          <circle cx="6" cy="18" r="3" />
+          <circle cx="18" cy="16" r="3" />
+        </svg>
+        Start a group from a song
+      </button>
+      <div x-show="selectedSong" class="card flex items-center gap-3 p-2">
+        <img :src="selectedSong?.imageUrl" :alt="selectedSong?.name" class="h-10 w-10 shrink-0 rounded object-cover ring-1 ring-white/10" />
+        <span class="min-w-0 flex-1">
+          <span class="block truncate text-sm text-neutral-100" x-text="selectedSong?.name"></span>
+          <span class="block truncate text-xs text-neutral-400" x-text="selectedSong?.artistName"></span>
+        </span>
+        <button type="button" class="btn-ghost shrink-0 text-xs" @click="clearSelectedSong()">Remove</button>
+      </div>
+    </div>
     <button type="submit" class="btn-primary">Create</button>
   </form>
+
+  <div
+    x-show="showSongPicker"
+    class="fixed inset-0 z-20 flex flex-col bg-base/95 p-4 backdrop-blur-sm"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Search for a song"
+  >
+    <div class="mx-auto flex w-full max-w-md items-center gap-2">
+      <input
+        x-ref="songSearchInput"
+        class="field flex-1"
+        type="search"
+        placeholder="Search for a song..."
+        x-model="songQuery"
+        @input="onSongQueryInput()"
+      />
+      <button class="btn-ghost" @click="closeSongPicker()">Cancel</button>
+    </div>
+    <ul class="mx-auto mt-4 flex w-full max-w-md flex-1 min-h-0 flex-col gap-2 overflow-y-auto">
+      <template x-for="result in songResults" :key="result.id || result.spotifyTrackId">
+        <li>
+          <button class="card flex w-full items-center gap-3 p-3 text-left transition active:scale-[0.98] active:bg-white/5" @click="pickSong(result)">
+            <img :src="result.imageUrl" :alt="result.name" class="h-10 w-10 shrink-0 rounded object-cover ring-1 ring-white/10" />
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-neutral-100" x-text="result.name"></span>
+              <span class="block truncate text-xs text-neutral-400" x-text="result.artistName"></span>
+            </span>
+          </button>
+        </li>
+      </template>
+    </ul>
+    <p x-show="songQuery.trim().length > 1 && !songSearching && songResults.length === 0" class="mx-auto mt-4 w-full max-w-md text-center text-neutral-400">
+      No songs found.
+    </p>
+  </div>
 
   <ul class="mx-auto flex max-w-md flex-col gap-2">
     <template x-for="g in groups" :key="g.id">

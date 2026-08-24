@@ -263,6 +263,126 @@ describe('GET /api/groups/:id', () => {
     const res = await worker.fetch(new Request('http://localhost/api/groups/does-not-exist', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
     expect(res.status).toBe(404);
   });
+
+  it('has a null seedTrack when the group wasn\'t started from a song', async () => {
+    const cookie = await cookieFor('u1');
+    const createRes = await worker.fetch(
+      new Request('http://localhost/api/groups', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'My Group' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    const { groupId } = await createRes.json<any>();
+
+    const res = await worker.fetch(new Request(`http://localhost/api/groups/${groupId}`, { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.group.seedTrack).toBeNull();
+  });
+});
+
+describe('starting a group from a song (issue #127)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubArtistLookup(ok = true) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = input.toString();
+        if (url.includes('api/token')) return new Response(JSON.stringify({ access_token: 'cc' }), { status: 200 });
+        if (url.includes('/v1/artists/')) {
+          if (!ok) return new Response('nope', { status: 500 });
+          return new Response(
+            JSON.stringify({ id: 'sp-a', name: 'Some Artist', genres: ['indie'], images: [{ url: 'https://i/a.jpg' }], popularity: 10 }),
+            { status: 200 }
+          );
+        }
+        throw new Error(`unexpected ${url}`);
+      })
+    );
+  }
+
+  const track = {
+    id: 'sp-t1',
+    name: 'Song One',
+    artists: [{ id: 'sp-a', name: 'Some Artist' }],
+    album: { images: [{ url: 'https://i/t1.jpg' }] },
+  };
+
+  it('resolves and stores the seed track, returned on GET /api/groups/:id', async () => {
+    stubArtistLookup();
+    const cookie = await cookieFor('u1');
+    const createRes = await worker.fetch(
+      new Request('http://localhost/api/groups', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Crate Diggers', track }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(createRes.status).toBe(200);
+    const { groupId } = await createRes.json<any>();
+
+    const group = await env.DB.prepare('SELECT seed_track_id FROM groups WHERE id = ?').bind(groupId).first<any>();
+    expect(group.seed_track_id).toBeTruthy();
+
+    const res = await worker.fetch(new Request(`http://localhost/api/groups/${groupId}`, { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.group.seedTrack).toMatchObject({ spotifyId: 'sp-t1', name: 'Song One', artistName: 'Some Artist' });
+  });
+
+  it('creates the group without a track when none is given (backward compatible)', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/groups', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'No Song Here' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(200);
+    const { groupId } = await res.json<any>();
+    const group = await env.DB.prepare('SELECT seed_track_id FROM groups WHERE id = ?').bind(groupId).first<any>();
+    expect(group.seed_track_id).toBeNull();
+  });
+
+  it('rejects an invalid track object without creating the group', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/groups', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Bad Song', track: { id: '', name: '' } }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+    const group = await env.DB.prepare('SELECT 1 FROM groups WHERE name = ?').bind('Bad Song').first();
+    expect(group).toBeNull();
+  });
+
+  it('surfaces an unavailable artist lookup as 503, same as sharing a track mid-thread', async () => {
+    stubArtistLookup(false);
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/groups', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Unlucky', track }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(503);
+  });
 });
 
 describe('POST /api/groups/:id/join and /leave', () => {

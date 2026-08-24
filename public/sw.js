@@ -474,7 +474,18 @@
 // to the bare album art alone if that compositing fails for any reason
 // (e.g. Spotify's image host not sending CORS headers permissive enough to
 // read the pixels back out) -- see mediaSession.js's own comment.
-const CACHE_NAME = 'wavelengthz-shell-v72';
+// v76 lets a group be started from a song (issue #127) -- groups.html gains
+// an optional song picker on the create form (migrations/0028 adds
+// groups.seed_track_id, same get-or-create catalog resolution POST
+// /api/groups/:id/messages already uses for a track shared mid-thread), and
+// group.html renders it as a persistent card between the message list and
+// the compose form -- a sibling of #group-message-list, not inside it, so
+// it's genuinely "fixed at the bottom of the chat" as asked, never
+// scrolling away with the conversation.
+// (v73-v75 are in flight in parallel Round 6 PRs for other issue items;
+// whichever of these merges last hits an ordinary conflict on this one
+// line to resolve, not a real bug.)
+const CACHE_NAME = 'wavelengthz-shell-v76';
 const APP_SHELL = [
   '/',
   '/app.js',
