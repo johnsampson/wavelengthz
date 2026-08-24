@@ -463,7 +463,18 @@
 // normal document scroll). A long enough result list made its last items
 // permanently unreachable. Same `flex-1 min-h-0` already used correctly by
 // messages.html/group.html's own message-list right next to these.
-const CACHE_NAME = 'wavelengthz-shell-v71';
+// v72 adds iOS/Android "Now Playing" integration via the Media Session API
+// (new public/mediaSession.js, added to this precache list) -- previously
+// a playing track showed up as nothing but a generic speaker/audio icon in
+// Safari's status bar, Control Center, and the lock screen; playerBar.js
+// now sets real title/artist/artwork metadata for every track regardless
+// of sdk/iframe mode, plus play/pause/seek action handlers for sdk mode.
+// The artwork itself is a best-effort composited "half app logo / half
+// album art" square, generated client-side via <canvas> and falling back
+// to the bare album art alone if that compositing fails for any reason
+// (e.g. Spotify's image host not sending CORS headers permissive enough to
+// read the pixels back out) -- see mediaSession.js's own comment.
+const CACHE_NAME = 'wavelengthz-shell-v72';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -480,6 +491,7 @@ const APP_SHELL = [
   '/alpine.js',
   '/playerBar.js',
   '/wavelengthzPlayer.js',
+  '/mediaSession.js',
   '/router.js',
   '/index.js',
   '/artist.js',

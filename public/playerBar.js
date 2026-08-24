@@ -26,6 +26,7 @@ import {
 } from './playHeuristics.js';
 import { api } from './app.js';
 import { showToast, showErrorToast } from './toast.js';
+import { setNowPlayingMetadata, setPlaybackState, clearNowPlayingMetadata, registerMediaSessionActionHandlers } from './mediaSession.js';
 
 // `id` is what the like button (below) swipes against -- this app's own
 // catalog id when the caller has one (artist.html's rows, profile.html's
@@ -629,6 +630,12 @@ async function startPlayback(track) {
   clearRadioAdvanceTimer();
   currentTrack = track;
   notifyNowPlayingChange();
+  // iOS/Android "Now Playing" (lock screen, Control Center, Safari's status
+  // bar) -- not mode-specific, so this is set here regardless of whether
+  // sdk or iframe mode ends up winning below. isStillCurrent guards its own
+  // async artwork-compositing step against a fast track change superseding
+  // this one before that finishes -- see mediaSession.js's own comment.
+  setNowPlayingMetadata(track, () => currentTrack === track);
   mode = null; // renders the neutral loading state below, not a guess at sdk/iframe
   sdkState = null;
   swipeRevealed = false; // a fresh track starts closed, regardless of the outgoing track's reveal state
@@ -655,6 +662,7 @@ async function startPlayback(track) {
     if (started) {
       mode = 'sdk';
       hideIframe();
+      setPlaybackState('playing'); // optimistic -- the state-change listener below re-syncs on the SDK's own first event
 
       playProgress = createPlayProgress(() => Date.now());
       playProgress.start();
@@ -689,6 +697,7 @@ async function startPlayback(track) {
           if (state.track_window?.current_track?.id !== currentTrack.spotifyId) return;
           const wasPaused = !sdkState || sdkState.paused;
           sdkState = { paused: state.paused, position: state.position, duration: state.duration };
+          setPlaybackState(state.paused ? 'paused' : 'playing');
 
           // Did this track just run out? Compared against the previous
           // snapshot for the SAME track -- see isTrackEnd for why the SDK
@@ -735,6 +744,11 @@ async function startPlayback(track) {
 
   mode = 'iframe';
   showIframe(track.spotifyId);
+  // Best-effort -- the embed owns its own playback state and this app has
+  // no visibility into its actual pause/resume, same limitation
+  // renderPlayerChromeHtml's own comment already accepts for iframe mode's
+  // missing play/pause button.
+  setPlaybackState('playing');
   renderChrome();
 }
 
@@ -792,6 +806,7 @@ export async function hide() {
   if (mode === 'sdk') await pausePlayback();
   currentTrack = null;
   notifyNowPlayingChange();
+  clearNowPlayingMetadata();
   mode = null;
   sdkState = null;
   swipeRevealed = false;
@@ -810,6 +825,22 @@ export async function hide() {
 export function mountPlayerBar() {
   if (mounted) return;
   mounted = true;
+
+  // Lock-screen/Control Center transport controls -- action handlers are
+  // session-global (not per-track), so registered once here rather than on
+  // every play(). sdk-only, same as togglePlayPause/seek above -- a no-op
+  // in iframe mode (the embed has no SDK connection for these to act on).
+  registerMediaSessionActionHandlers({
+    play: () => {
+      if (mode === 'sdk') resumePlayback();
+    },
+    pause: () => {
+      if (mode === 'sdk') pausePlayback();
+    },
+    seekto: (details) => {
+      if (typeof details.seekTime === 'number') seek(details.seekTime * 1000);
+    },
+  });
   const chromeRoot = document.getElementById('wl-player-chrome');
   if (!chromeRoot) return;
 
