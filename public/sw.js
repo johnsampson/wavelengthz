@@ -474,7 +474,13 @@
 // to the bare album art alone if that compositing fails for any reason
 // (e.g. Spotify's image host not sending CORS headers permissive enough to
 // read the pixels back out) -- see mediaSession.js's own comment.
-const CACHE_NAME = 'wavelengthz-shell-v72';
+// v73 adds a sitewide `cursor: pointer` rule (styles.css) for every real
+// clickable control -- issue #127: "Sitewide - Make sure we're using
+// cursor pointer... over all clickable elements". Tailwind's Preflight
+// base reset sets `button { cursor: default }`, undoing the browser's own
+// already-correct default, so on desktop nearly every `<button>` site-wide
+// showed a plain arrow instead of a hand.
+const CACHE_NAME = 'wavelengthz-shell-v73';
 const APP_SHELL = [
   '/',
   '/app.js',
