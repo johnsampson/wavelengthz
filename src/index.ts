@@ -23,6 +23,7 @@ import { registerGenreBlockRoutes } from './routes/genreBlocks';
 import { registerPhoneRoutes } from './routes/phone';
 import { registerDailyDropRoutes } from './routes/dailyDrop';
 import { registerInviteRoutes } from './routes/invites';
+import { registerSpotifyHealthRoutes } from './routes/spotifyHealth';
 import { purgeExpiredDeletions } from './lib/accountDeletion';
 import { refreshCatalogFromProfiles } from './db/catalogRefresh';
 import { discoverArtistsByGenre } from './lib/catalogDiscovery';
@@ -58,6 +59,7 @@ registerGenreBlockRoutes(router);
 registerPhoneRoutes(router);
 registerDailyDropRoutes(router);
 registerInviteRoutes(router);
+registerSpotifyHealthRoutes(router);
 
 // Falls back to the ASSETS binding (static HTML/JS/CSS under public/) for
 // anything that isn't an API route -- required once [assets].run_worker_first
@@ -177,11 +179,17 @@ function withSecurityHeaders(response: Response): Response {
 // who finds these two exact URLs can complete a real Spotify OAuth login
 // and create a live account without ever seeing the site password prompt.
 // Explicitly accepted as a pre-launch trade-off; revisit before real launch.
+// '/api/spotify/connection-test' (src/routes/spotifyHealth.ts) is a
+// deliberate, narrow hole of its own: a public Spotify-connectivity check
+// (client-credentials + one Get Artist call, no user data at all) meant to
+// be reachable with no site password, both for our own debugging and as
+// the test link Spotify's Extended Quota Mode application asks for.
 const SITE_BASIC_AUTH_EXEMPT_PATHS = new Set([
   '/manifest.json',
   '/icons/icon-180.png',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
+  '/api/spotify/connection-test',
   '/login/spotify',
   '/callback',
 ]);
