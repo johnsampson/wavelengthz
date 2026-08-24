@@ -474,7 +474,17 @@
 // to the bare album art alone if that compositing fails for any reason
 // (e.g. Spotify's image host not sending CORS headers permissive enough to
 // read the pixels back out) -- see mediaSession.js's own comment.
-const CACHE_NAME = 'wavelengthz-shell-v72';
+// v74 reworks the deck's person card (index.html), issue #127: squares it
+// off to match the music-mode card instead of the old portrait aspect-[3/4]
+// (aspect-square, unconditional); removes the separate "view full profile"
+// info button, folding that action into the candidate name itself (now
+// always a button, routing to viewArtist()/viewProfile() by mode, same
+// pattern music mode's name already used); and caps GET /api/candidates/
+// people's topGenres at 4 (was 10) to match what was actually asked for.
+// (v73 is in flight in a parallel Round 6 PR for a different issue item;
+// whichever of the two merges last hits an ordinary conflict on this one
+// line to resolve, not a real bug.)
+const CACHE_NAME = 'wavelengthz-shell-v74';
 const APP_SHELL = [
   '/',
   '/app.js',

@@ -222,7 +222,7 @@ describe('GET /api/candidates/people', () => {
     expect(u3.anthemTrack).toBeNull();
   });
 
-  it('includes a candidate\'s topGenres, capped at 10', async () => {
+  it('includes a candidate\'s topGenres, capped at 4', async () => {
     const genres = JSON.stringify(Array.from({ length: 15 }, (_, i) => `genre${i}`));
     await env.DB.prepare(
       `INSERT INTO music_profiles (id, user_id, top_artists, top_tracks, top_genres, time_range, refreshed_at, created_at, updated_at) VALUES ('mp10', 'u2', '[]', '[]', ?, 'medium_term', 1000, 1000, 1000)`
@@ -234,7 +234,7 @@ describe('GET /api/candidates/people', () => {
     const body = await res.json<any>();
     const u2 = body.candidates.find((c: any) => c.id === 'u2');
 
-    expect(u2.topGenres).toHaveLength(10);
+    expect(u2.topGenres).toHaveLength(4);
     expect(u2.topGenres[0]).toBe('genre0');
   });
 
