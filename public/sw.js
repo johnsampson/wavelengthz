@@ -493,7 +493,15 @@
 // swiping". It used to eat into the vertical space right where a swipe
 // gesture starts, shrinking the card itself; still on the same page with
 // zero extra navigation, just entirely out of the swipe zone now.
-const CACHE_NAME = 'wavelengthz-shell-v75';
+// v76 lets a group be started from a song (issue #127) -- groups.html gains
+// an optional song picker on the create form (migrations/0028 adds
+// groups.seed_track_id, same get-or-create catalog resolution POST
+// /api/groups/:id/messages already uses for a track shared mid-thread), and
+// group.html renders it as a persistent card between the message list and
+// the compose form -- a sibling of #group-message-list, not inside it, so
+// it's genuinely "fixed at the bottom of the chat" as asked, never
+// scrolling away with the conversation.
+const CACHE_NAME = 'wavelengthz-shell-v76';
 const APP_SHELL = [
   '/',
   '/app.js',

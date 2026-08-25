@@ -97,6 +97,28 @@
   </ul>
   <p x-show="group && messages.length === 0" class="mx-auto max-w-md text-center text-neutral-400">No messages yet — say hi!</p>
 
+  <!-- The song this group was started from (issue #127) -- a sibling of
+       #group-message-list, not inside it, so it never scrolls away with
+       the conversation: "fixed at the bottom of the chat" the way the
+       request literally put it. Same playSharedTrack()/isCurrentTrack()
+       play-pause toggle every shared-track message bubble above already
+       uses (both come from trackPicker.js's mixin, already spread into
+       this page's app). -->
+  <div x-show="group?.seedTrack" class="card mx-auto mt-2 flex w-full max-w-md items-center gap-3 overflow-hidden p-2">
+    <button type="button" class="flex min-w-0 flex-1 items-center gap-3 text-left" @click="playSharedTrack(group.seedTrack)">
+      <img :src="group.seedTrack?.imageUrl" :alt="group.seedTrack?.name" class="h-10 w-10 shrink-0 rounded object-cover ring-1 ring-white/10" />
+      <span class="min-w-0 flex-1">
+        <span class="block text-xs font-semibold tracking-wide text-brand-400 uppercase">Started with this song</span>
+        <span class="block truncate text-sm font-semibold text-neutral-100" x-text="group.seedTrack?.name"></span>
+        <span class="block truncate text-xs text-neutral-400" x-text="group.seedTrack?.artistName"></span>
+      </span>
+      <span class="shrink-0 pr-1" aria-hidden="true">
+        <svg x-show="!isCurrentTrack(group.seedTrack?.spotifyId)" viewBox="0 0 24 24" fill="currentColor" class="h-6 w-6"><path d="M8 5v14l11-7z" /></svg>
+        <svg x-show="isCurrentTrack(group.seedTrack?.spotifyId)" viewBox="0 0 24 24" fill="currentColor" class="h-6 w-6"><path d="M7 5h4v14H7zM13 5h4v14h-4z" /></svg>
+      </span>
+    </button>
+  </div>
+
   <form class="mx-auto mt-4 mb-app flex w-full max-w-md gap-2" @submit.prevent="send()">
     <label class="sr-only" for="group-message-input">Message</label>
     <input id="group-message-input" class="field flex-1" x-model="draft" maxlength="2000" required />

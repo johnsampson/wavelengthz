@@ -162,8 +162,8 @@ export const api = {
   markNotificationRead: (id) => request(`/api/notifications/${id}/read`, { method: 'POST' }),
   groups: () => request('/api/groups'),
   groupDetail: (groupId) => request(`/api/groups/${groupId}`),
-  createGroup: (name, topic) =>
-    request('/api/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, topic }) }),
+  createGroup: (name, topic, track) =>
+    request('/api/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, topic, track }) }),
   joinGroup: (groupId) => request(`/api/groups/${groupId}/join`, { method: 'POST' }),
   leaveGroup: (groupId) => request(`/api/groups/${groupId}/leave`, { method: 'POST' }),
   groupMessages: (groupId) => request(`/api/groups/${groupId}/messages`),
