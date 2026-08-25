@@ -501,7 +501,13 @@
 // the compose form -- a sibling of #group-message-list, not inside it, so
 // it's genuinely "fixed at the bottom of the chat" as asked, never
 // scrolling away with the conversation.
-const CACHE_NAME = 'wavelengthz-shell-v76';
+// v77 allows the standard emoji set in chat messages (messages.js/group.js)
+// -- src/lib/messageFilter.ts's ALLOWED_CHARS_RE previously blocked emoji
+// outright alongside links/markup; it now also allows
+// \p{Extended_Pictographic}/\p{Emoji_Modifier}/\p{Regional_Indicator} plus
+// the ZWJ/variation-selector-16 codepoints multi-part emoji (skin tones,
+// flags, family sequences) are built from, still blocking links and markup.
+const CACHE_NAME = 'wavelengthz-shell-v77';
 const APP_SHELL = [
   '/',
   '/app.js',

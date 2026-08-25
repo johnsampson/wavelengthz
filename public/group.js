@@ -180,9 +180,11 @@ export function createGroupApp() {
       if (!trimmed) return;
       this.error = null;
       // Cheap client-side charset pre-check -- see public/messages.js for
-      // why the profanity blocklist can't mirror here too.
-      if (!/^[-A-Za-z0-9 .,!?']*$/.test(trimmed)) {
-        showErrorToast("Messages can only contain letters, numbers, spaces, and basic punctuation ( . , ! ? ' ).");
+      // why the profanity blocklist can't mirror here too. Must stay in
+      // sync with src/lib/messageFilter.ts's ALLOWED_CHARS_RE, including
+      // the standard-emoji property escapes (needs the `u` flag here too).
+      if (!/^[-A-Za-z0-9 .,!?'\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\u{200D}\u{FE0F}]*$/u.test(trimmed)) {
+        showErrorToast("Messages can only contain letters, numbers, spaces, basic punctuation ( . , ! ? ' ), and emoji.");
         return;
       }
       try {
