@@ -487,7 +487,13 @@
 // always a button, routing to viewArtist()/viewProfile() by mode, same
 // pattern music mode's name already used); and caps GET /api/candidates/
 // people's topGenres at 4 (was 10) to match what was actually asked for.
-const CACHE_NAME = 'wavelengthz-shell-v74';
+// v75 moves the deck's Daily Drop banner (index.html) from above the deck
+// card to below the whole deck/action-button block -- issue #127: "let's
+// move the daily drop somewhere else. It's impedes the UX of the
+// swiping". It used to eat into the vertical space right where a swipe
+// gesture starts, shrinking the card itself; still on the same page with
+// zero extra navigation, just entirely out of the swipe zone now.
+const CACHE_NAME = 'wavelengthz-shell-v75';
 const APP_SHELL = [
   '/',
   '/app.js',
