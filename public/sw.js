@@ -487,6 +487,12 @@
 // always a button, routing to viewArtist()/viewProfile() by mode, same
 // pattern music mode's name already used); and caps GET /api/candidates/
 // people's topGenres at 4 (was 10) to match what was actually asked for.
+// v75 moves the deck's Daily Drop banner (index.html) from above the deck
+// card to below the whole deck/action-button block -- issue #127: "let's
+// move the daily drop somewhere else. It's impedes the UX of the
+// swiping". It used to eat into the vertical space right where a swipe
+// gesture starts, shrinking the card itself; still on the same page with
+// zero extra navigation, just entirely out of the swipe zone now.
 // v76 lets a group be started from a song (issue #127) -- groups.html gains
 // an optional song picker on the create form (migrations/0028 adds
 // groups.seed_track_id, same get-or-create catalog resolution POST
@@ -494,9 +500,7 @@
 // group.html renders it as a persistent card between the message list and
 // the compose form -- a sibling of #group-message-list, not inside it, so
 // it's genuinely "fixed at the bottom of the chat" as asked, never
-// scrolling away with the conversation. (v75 is in flight in a parallel
-// Round 6 PR for a different issue item; whichever of the two merges last
-// hits an ordinary conflict on this one line to resolve, not a real bug.)
+// scrolling away with the conversation.
 const CACHE_NAME = 'wavelengthz-shell-v76';
 const APP_SHELL = [
   '/',

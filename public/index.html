@@ -40,27 +40,6 @@
       <a href="/login" class="btn-primary mt-2 w-full">Log in</a>
     </div>
 
-    <!-- The deck's only discovery surface for /drop (public/drop.html) --
-         see that page's own comment for why this isn't a 6th bottom-nav
-         tab. Hidden entirely (not just skeleton-loading) until the fetch
-         resolves, so a slow or failed load never shows a stale/wrong
-         prompt. -->
-    <a
-      href="/drop"
-      x-show="authed === true && dailyDropPrompt"
-      class="card flex w-full max-w-sm items-center gap-3 p-3 text-left transition active:scale-[0.98] active:bg-white/5"
-    >
-      <span class="text-2xl" aria-hidden="true">🎵</span>
-      <span class="min-w-0 flex-1">
-        <span class="block text-xs font-semibold uppercase tracking-wide text-brand-400">The Daily Drop</span>
-        <span class="block truncate text-sm text-neutral-200" x-text="dailyDropPrompt && dailyDropPrompt.text"></span>
-      </span>
-      <span
-        class="shrink-0 text-xs text-neutral-500"
-        x-text="dailyDropPrompt && dailyDropPrompt.answered ? 'Answered' : 'Answer'"
-      ></span>
-    </a>
-
     <div
       id="deck-container"
       class="relative aspect-square w-full max-w-sm"
@@ -202,6 +181,33 @@
       </svg>
       Search
     </button>
+
+    <!-- The deck's only discovery surface for /drop (public/drop.html) --
+         see that page's own comment for why this isn't a 6th bottom-nav
+         tab. Moved below the deck/action-button block entirely (issue
+         #127: "let's move the daily drop somewhere else. It's impedes the
+         UX of the swiping") -- it used to sit above the deck card, eating
+         into the vertical space right where a swipe gesture starts and
+         shrinking the card itself. Still on this same page with zero extra
+         navigation, just entirely out of the swipe zone now. Hidden
+         entirely (not just skeleton-loading) until the fetch
+         resolves, so a slow or failed load never shows a stale/wrong
+         prompt. -->
+    <a
+      href="/drop"
+      x-show="authed === true && dailyDropPrompt"
+      class="card flex w-full max-w-sm items-center gap-3 p-3 text-left transition active:scale-[0.98] active:bg-white/5"
+    >
+      <span class="text-2xl" aria-hidden="true">🎵</span>
+      <span class="min-w-0 flex-1">
+        <span class="block text-xs font-semibold uppercase tracking-wide text-brand-400">The Daily Drop</span>
+        <span class="block truncate text-sm text-neutral-200" x-text="dailyDropPrompt && dailyDropPrompt.text"></span>
+      </span>
+      <span
+        class="shrink-0 text-xs text-neutral-500"
+        x-text="dailyDropPrompt && dailyDropPrompt.answered ? 'Answered' : 'Answer'"
+      ></span>
+    </a>
   </main>
 
   <div
