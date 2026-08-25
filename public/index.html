@@ -63,8 +63,7 @@
 
     <div
       id="deck-container"
-      class="relative w-full max-w-sm"
-      :class="mode === 'music' ? 'aspect-square' : 'aspect-[3/4]'"
+      class="relative aspect-square w-full max-w-sm"
       x-show="authed === true && current"
     >
       <article class="card absolute inset-0 overflow-hidden rounded-3xl" id="card">
@@ -102,19 +101,20 @@
         <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-5 pt-16">
           <h2 class="text-2xl font-bold">
             <!-- pointerdown.stop/click.stop: same swipe-drag-capture
-                 reasoning as the anthem chip above. Music mode only --
-                 People mode already has its own dedicated "view full
-                 profile" button below, and displayName isn't a link to
-                 anywhere of its own. -->
+                 reasoning as the anthem chip above -- without it this
+                 bubbles to #card and starts a drag capture instead of
+                 registering as a tap. Both modes route to the full
+                 view (artist page / profile) via the name itself now;
+                 people mode used to have a separate dedicated "view full
+                 profile" button below instead (issue #127: "remove the
+                 info button and make the match name clickable"). -->
             <button
               type="button"
-              x-show="mode === 'music'"
               class="text-left hover:underline underline-offset-4"
               @pointerdown.stop
-              @click.stop="viewArtist()"
-              x-text="current?.name"
+              @click.stop="mode === 'music' ? viewArtist() : viewProfile()"
+              x-text="mode === 'music' ? current?.name : current?.displayName"
             ></button>
-            <span x-show="mode === 'people'" x-text="current?.displayName"></span>
           </h2>
           <button
             type="button"
@@ -176,18 +176,6 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto h-6 w-6">
           <path d="M5 4l10 8-10 8V4z" />
           <path d="M19 5v14" />
-        </svg>
-      </button>
-      <button
-        x-show="mode === 'people'"
-        class="btn-secondary h-14 w-14 rounded-full"
-        @click="viewProfile()"
-        aria-label="View full profile"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto h-6 w-6">
-          <circle cx="12" cy="12" r="10" />
-          <line x1="12" y1="11" x2="12" y2="16" />
-          <circle cx="12" cy="8" r="0.5" fill="currentColor" stroke-width="1.5" />
         </svg>
       </button>
       <button
