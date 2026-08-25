@@ -480,7 +480,14 @@
 // base reset sets `button { cursor: default }`, undoing the browser's own
 // already-correct default, so on desktop nearly every `<button>` site-wide
 // showed a plain arrow instead of a hand.
-const CACHE_NAME = 'wavelengthz-shell-v73';
+// v74 reworks the deck's person card (index.html), issue #127: squares it
+// off to match the music-mode card instead of the old portrait aspect-[3/4]
+// (aspect-square, unconditional); removes the separate "view full profile"
+// info button, folding that action into the candidate name itself (now
+// always a button, routing to viewArtist()/viewProfile() by mode, same
+// pattern music mode's name already used); and caps GET /api/candidates/
+// people's topGenres at 4 (was 10) to match what was actually asked for.
+const CACHE_NAME = 'wavelengthz-shell-v74';
 const APP_SHELL = [
   '/',
   '/app.js',
