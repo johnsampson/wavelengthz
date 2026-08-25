@@ -480,15 +480,19 @@
 // base reset sets `button { cursor: default }`, undoing the browser's own
 // already-correct default, so on desktop nearly every `<button>` site-wide
 // showed a plain arrow instead of a hand.
+// v74 reworks the deck's person card (index.html), issue #127: squares it
+// off to match the music-mode card instead of the old portrait aspect-[3/4]
+// (aspect-square, unconditional); removes the separate "view full profile"
+// info button, folding that action into the candidate name itself (now
+// always a button, routing to viewArtist()/viewProfile() by mode, same
+// pattern music mode's name already used); and caps GET /api/candidates/
+// people's topGenres at 4 (was 10) to match what was actually asked for.
 // v75 moves the deck's Daily Drop banner (index.html) from above the deck
 // card to below the whole deck/action-button block -- issue #127: "let's
 // move the daily drop somewhere else. It's impedes the UX of the
 // swiping". It used to eat into the vertical space right where a swipe
 // gesture starts, shrinking the card itself; still on the same page with
-// zero extra navigation, just entirely out of the swipe zone now. (v74 is
-// in flight in a parallel Round 6 PR for a different issue item;
-// whichever of the two merges last hits an ordinary conflict on this one
-// line to resolve, not a real bug.)
+// zero extra navigation, just entirely out of the swipe zone now.
 const CACHE_NAME = 'wavelengthz-shell-v75';
 const APP_SHELL = [
   '/',

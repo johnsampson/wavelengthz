@@ -263,10 +263,13 @@ export function registerPeopleSwipeRoutes(router: RouterType) {
       // card's anthem chip (public/index.html) has a single falsy check.
       anthemTrack: anthemTracks.get(user.id) ?? null,
       // Already in memory from the scoring pass above (getMusicProfiles) --
-      // no extra query needed. Ranked, so slicing to the top 10 here keeps
+      // no extra query needed. Ranked, so slicing to the top 4 here keeps
       // the payload small and matches what the card actually has room to
-      // show, rather than pushing that decision onto the client.
-      topGenres: (profiles.get(user.id)?.topGenres ?? []).slice(0, 10),
+      // show (issue #127: "let's add 4 genres to the person card"), rather
+      // than pushing that decision onto the client -- same cap-server-side-
+      // not-client-side reasoning GET /api/candidates/music's own topGenres
+      // field already uses (capped at 5 there).
+      topGenres: (profiles.get(user.id)?.topGenres ?? []).slice(0, 4),
     }));
 
     return Response.json({ candidates });
