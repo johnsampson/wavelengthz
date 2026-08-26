@@ -208,9 +208,10 @@ export function createMessagesApp() {
       // profanity blocklist only lives server-side (src/lib/messageFilter.ts
       // isn't importable from a static asset page), so the server call
       // below is still the authoritative check either way. Must stay in
-      // sync with src/lib/messageFilter.ts's ALLOWED_CHARS_RE.
-      if (!/^[-A-Za-z0-9 .,!?']*$/.test(trimmed)) {
-        showErrorToast('Messages can only contain letters, numbers, spaces, and basic punctuation ( . , ! ? \' ).');
+      // sync with src/lib/messageFilter.ts's ALLOWED_CHARS_RE, including the
+      // standard-emoji property escapes (needs the `u` flag here too).
+      if (!/^[-A-Za-z0-9 .,!?'\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\u{200D}\u{FE0F}]*$/u.test(trimmed)) {
+        showErrorToast('Messages can only contain letters, numbers, spaces, basic punctuation ( . , ! ? \' ), and emoji.');
         return;
       }
       try {

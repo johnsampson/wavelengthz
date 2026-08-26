@@ -20,10 +20,17 @@ describe('isValidMessageBody', () => {
     expect(isValidMessageBody('a'.repeat(MAX_MESSAGE_LENGTH + 1))).toBe(false);
   });
 
-  it('rejects characters outside alphanumeric/space/basic punctuation', () => {
+  it('rejects characters outside alphanumeric/space/basic punctuation/emoji', () => {
     expect(isValidMessageBody('Check out http://evil.example')).toBe(false); // ':' and '/'
-    expect(isValidMessageBody('Emoji time 😀')).toBe(false);
     expect(isValidMessageBody('<script>alert(1)</script>')).toBe(false);
+    expect(isValidMessageBody('#hashtag')).toBe(false); // markup, not emoji
+  });
+
+  it('accepts the standard emoji set', () => {
+    expect(isValidMessageBody('Emoji time 😀')).toBe(true);
+    expect(isValidMessageBody('Nice 👍🏽 job')).toBe(true); // skin-tone modifier
+    expect(isValidMessageBody('See you in the 🇺🇸')).toBe(true); // flag (regional indicators)
+    expect(isValidMessageBody('👨‍👩‍👧‍👦 family trip')).toBe(true); // ZWJ sequence
   });
 
   it('rejects bodies containing a blocked word, case-insensitively and as a whole word', () => {
@@ -44,7 +51,7 @@ describe('isValidMessageBody', () => {
 
 // Exported for reuse on bios (src/routes/onboarding.ts) -- profile language
 // held to the same bar as message language, without pulling in
-// isValidMessageBody's other message-specific rules (length, link/emoji
+// isValidMessageBody's other message-specific rules (length, link/markup
 // lockdown) that don't make sense for a bio.
 describe('containsBlockedWord', () => {
   it('flags a blocked word case-insensitively and as a whole word', () => {
