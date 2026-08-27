@@ -613,6 +613,30 @@ describe('deck app', () => {
   });
 });
 
+describe('search overlay (issue #127 item 7)', () => {
+  function makeApp() {
+    const app: any = createDeckApp();
+    // No $nextTick faking here on purpose -- openSearch() is asserted to
+    // reveal + focus synchronously now, not via $nextTick/rAF at all (see
+    // domUtils.js's revealAndFocusSync). A real Alpine $nextTick would
+    // still resolve fine since nothing here calls it, but leaving it
+    // unset makes it obvious the test would fail loudly if openSearch()
+    // ever started depending on it again.
+    app.$refs = { searchOverlay: { style: { display: 'none' } }, searchInput: { focus: vi.fn() } };
+    return app;
+  }
+
+  it('openSearch reveals the overlay and focuses the input synchronously, with no ticks in between', () => {
+    const app = makeApp();
+
+    app.openSearch();
+
+    expect(app.showSearch).toBe(true);
+    expect(app.$refs.searchOverlay.style.display).toBe('');
+    expect(app.$refs.searchInput.focus).toHaveBeenCalled();
+  });
+});
+
 describe('preloadCandidateImage', () => {
   function stubImage() {
     const urls: string[] = [];

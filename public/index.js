@@ -4,7 +4,7 @@ import { getAuthedUser } from './auth.js';
 import { shouldSearch, debounce, loadStoredMode, storeMode, saveSearchState, takeSearchState } from './search.js';
 import { play, togglePlayPause, isCurrentTrack, onNowPlayingChange } from './playerBar.js';
 import { showToast, showErrorToast } from './toast.js';
-import { focusAfterReveal } from './domUtils.js';
+import { revealAndFocusSync } from './domUtils.js';
 import { navigate } from './router.js';
 
 /** @typedef {{id?: string, itemType?: string, itemId?: string, name?: string, displayName?: string, imageUrl?: string, primaryPhotoUrl?: string, bio?: string, distanceLabel?: string, topGenres?: string[], anthemTrack?: {spotifyId: string, id?: string, name: string, artistName?: string | null, imageUrl?: string} | null, track?: {spotifyId: string, id: string, name: string, imageUrl?: string, durationMs?: number | null} | null}} Candidate */
@@ -277,10 +277,12 @@ export function createDeckApp() {
 
     openSearch() {
       this.showSearch = true;
-      // See domUtils.js's focusAfterReveal for why this isn't a plain
-      // $nextTick(() => ...focus()) -- that reliably needed a second tap on
-      // iOS Safari before opening the keyboard (issue #108).
-      focusAfterReveal(this.$nextTick.bind(this), this.$refs.searchInput);
+      // issue #127 item 7: the keyboard still didn't reliably open on the
+      // first tap even with focusAfterReveal's nextTick+rAF fix (issue
+      // #108) in place -- revealAndFocusSync closes the gap by reveal +
+      // focus synchronously, no ticks between this click and either call.
+      // See domUtils.js's own comment for the full reasoning.
+      revealAndFocusSync(this.$refs.searchOverlay, this.$refs.searchInput);
     },
 
     closeSearch() {

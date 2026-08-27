@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { raf, focusAfterReveal } from '../../public/domUtils.js';
+import { raf, focusAfterReveal, revealAndFocusSync } from '../../public/domUtils.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -61,5 +61,33 @@ describe('focusAfterReveal', () => {
 
     tickCallback!();
     expect(el.focus).toHaveBeenCalled();
+  });
+});
+
+describe('revealAndFocusSync', () => {
+  it('sets the overlay display and focuses the input, both synchronously', () => {
+    const overlayEl = { style: { display: 'none' } };
+    const inputEl = { focus: vi.fn() };
+
+    revealAndFocusSync(overlayEl, inputEl);
+
+    expect(overlayEl.style.display).toBe('');
+    expect(inputEl.focus).toHaveBeenCalled();
+  });
+
+  it('does not throw when the overlay ref is not yet mounted', () => {
+    const inputEl = { focus: vi.fn() };
+
+    expect(() => revealAndFocusSync(null, inputEl)).not.toThrow();
+    expect(() => revealAndFocusSync(undefined, inputEl)).not.toThrow();
+    expect(inputEl.focus).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not throw when the input ref is not yet mounted', () => {
+    const overlayEl = { style: { display: 'none' } };
+
+    expect(() => revealAndFocusSync(overlayEl, null)).not.toThrow();
+    expect(() => revealAndFocusSync(overlayEl, undefined)).not.toThrow();
+    expect(overlayEl.style.display).toBe('');
   });
 });
