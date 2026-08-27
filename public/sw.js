@@ -507,7 +507,17 @@
 // \p{Extended_Pictographic}/\p{Emoji_Modifier}/\p{Regional_Indicator} plus
 // the ZWJ/variation-selector-16 codepoints multi-part emoji (skin tones,
 // flags, family sequences) are built from, still blocking links and markup.
-const CACHE_NAME = 'wavelengthz-shell-v77';
+// v78 fixes the deck's Search button still not reliably opening the
+// keyboard on the first iPhone tap (issue #127 item 7) -- the existing
+// focusAfterReveal fix (issue #108, v?) already deferred focus() past
+// Alpine's own $nextTick + a requestAnimationFrame, but that was still
+// apparently too far removed from the original tap for iOS Safari to treat
+// it as user-activated in every case. openSearch() (index.js) now uses the
+// new domUtils.js revealAndFocusSync() instead -- reveals the overlay
+// (index.html's search dialog, now x-ref'd) and focuses the input both as
+// plain synchronous DOM calls with zero ticks in between, all still inside
+// the original click handler's own call stack.
+const CACHE_NAME = 'wavelengthz-shell-v78';
 const APP_SHELL = [
   '/',
   '/app.js',
