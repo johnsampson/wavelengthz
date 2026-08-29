@@ -91,6 +91,27 @@ describe('GET /api/me/player-token', () => {
     const body = await res.json<any>();
     expect(body.available).toBe(false);
   });
+
+  // Issue #145 (Round 7) item 2: "paid Spotify members get the basic
+  // player" -- a transient token-refresh failure used to escape this route
+  // uncaught (a 500), permanently downgrading an eligible Premium account
+  // to the iframe fallback for the rest of that page load. Now degrades to
+  // `available: false` instead, same as every other ineligibility reason.
+  it('degrades to unavailable, not a 500, when the access-token refresh fails', async () => {
+    await makeUserWithSpotify('u6', { productTier: 'premium', grantedScope: 'streaming' });
+    // Force the refresh path: an already-expired token_expires_at.
+    await env.DB.prepare(`UPDATE music_source_tokens SET token_expires_at = ? WHERE user_id = 'u6'`).bind(Date.now() - 1000).run();
+    const cookie = await cookieFor('u6');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('spotify is down', { status: 500 })));
+
+    const res = await worker.fetch(new Request('http://localhost/api/me/player-token', { headers: { Cookie: cookie } }), env, {} as ExecutionContext);
+
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    expect(body.available).toBe(false);
+    expect(body.accessToken).toBeUndefined();
+    vi.unstubAllGlobals();
+  });
 });
 
 describe('GET /api/me/now-playing', () => {
