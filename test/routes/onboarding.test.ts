@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
 import { insertTestUser } from '../helpers/createUser';
@@ -188,6 +188,115 @@ describe('POST /api/onboarding', () => {
     // First-time onboarding is not a "location change" -- the cooldown clock
     // doesn't start until a later call actually changes lat/lng.
     expect(row.location_updated_at).toBeNull();
+  });
+
+  // Issue #145 (Round 7) item 3: "is it easy to translate lat lon on file
+  // to a city or state/region or country?" -- the browser-geolocation path
+  // (public/onboarding.html's/public/settings/preferences.js's
+  // useBrowserLocation()) sends the literal "Current location" placeholder
+  // as location_label; this route now resolves it via BigDataCloud's
+  // reverse-geocode-client endpoint (src/lib/geocode.ts) before persisting.
+  describe('reverse geocoding "Current location"', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    function stubGeocode(payload: Record<string, unknown>, status = 200) {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo) => {
+          const url = input.toString();
+          if (url.includes('bigdatacloud.net')) return new Response(JSON.stringify(payload), { status });
+          throw new Error(`unexpected fetch ${url}`);
+        })
+      );
+    }
+
+    it('replaces the placeholder with a resolved "City, Region" label', async () => {
+      stubGeocode({ city: 'Austin', principalSubdivision: 'Texas', countryName: 'United States' });
+      const cookie = await sessionCookieFor('u1');
+
+      const res = await worker.fetch(
+        new Request('http://localhost/api/onboarding', {
+          method: 'POST',
+          headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            display_name: 'Jordan',
+            date_of_birth: '1995-01-01',
+            location_label: 'Current location',
+            lat: 30.27,
+            lng: -97.74,
+            gender: 'female',
+            seeking: 'male',
+            intent: 'something_casual',
+          }),
+        }),
+        env,
+        {} as ExecutionContext
+      );
+
+      expect(res.status).toBe(200);
+      const row = await env.DB.prepare('SELECT location_label FROM users WHERE id = ?').bind('u1').first<any>();
+      expect(row.location_label).toBe('Austin, Texas');
+    });
+
+    it('leaves a manually-typed label untouched -- no geocode call at all', async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      const cookie = await sessionCookieFor('u1');
+
+      await worker.fetch(
+        new Request('http://localhost/api/onboarding', {
+          method: 'POST',
+          headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            display_name: 'Jordan',
+            date_of_birth: '1995-01-01',
+            location_label: 'My Hometown',
+            lat: 30.27,
+            lng: -97.74,
+            gender: 'female',
+            seeking: 'male',
+            intent: 'something_casual',
+          }),
+        }),
+        env,
+        {} as ExecutionContext
+      );
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      const row = await env.DB.prepare('SELECT location_label FROM users WHERE id = ?').bind('u1').first<any>();
+      expect(row.location_label).toBe('My Hometown');
+    });
+
+    it('falls back to keeping the placeholder when the geocode call fails', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
+      const cookie = await sessionCookieFor('u1');
+
+      const res = await worker.fetch(
+        new Request('http://localhost/api/onboarding', {
+          method: 'POST',
+          headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            display_name: 'Jordan',
+            date_of_birth: '1995-01-01',
+            location_label: 'Current location',
+            lat: 30.27,
+            lng: -97.74,
+            gender: 'female',
+            seeking: 'male',
+            intent: 'something_casual',
+          }),
+        }),
+        env,
+        {} as ExecutionContext
+      );
+
+      // Never blocks onboarding on a third-party outage.
+      expect(res.status).toBe(200);
+      const row = await env.DB.prepare('SELECT location_label FROM users WHERE id = ?').bind('u1').first<any>();
+      expect(row.location_label).toBe('Current location');
+    });
   });
 
   it('rejects and writes nothing when gender is missing or invalid', async () => {

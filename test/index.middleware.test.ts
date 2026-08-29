@@ -1,6 +1,8 @@
 import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { applySchema } from './apply-schema';
+import { createSession, SESSION_RENEWAL_INTERVAL_SECONDS } from '../src/lib/session';
+import { insertTestUser } from './helpers/createUser';
 import worker from '../src/index';
 
 beforeAll(async () => {
@@ -208,5 +210,55 @@ describe('global middleware', () => {
 
     consoleErrorSpy.mockRestore();
     vi.unstubAllGlobals();
+  });
+
+  // Issue #145 (Round 7) item 2: "still lose login state from time to
+  // time" -- sliding session renewal (src/lib/session.ts's
+  // renewSessionIfDue), wired in here rather than into any individual
+  // route, so it covers every authenticated endpoint uniformly.
+  describe('session renewal', () => {
+    beforeEach(async () => {
+      await env.DB.exec('DELETE FROM sessions; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;');
+      // skipSpotify: GET /api/me tries to decrypt a linked Spotify token if
+      // one exists -- irrelevant to what's under test here (session-cookie
+      // renewal), and insertTestUser's default token isn't real ciphertext.
+      await insertTestUser(env.DB, { id: 'u1', skipSpotify: true });
+    });
+
+    it('appends a renewed Set-Cookie once the session is within the renewal window', async () => {
+      const now = Date.now();
+      const id = 'due-session';
+      const almostExpired = now + SESSION_RENEWAL_INTERVAL_SECONDS * 1000 - 1000;
+      await env.DB.prepare(`INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, 'u1', ?, ?)`).bind(id, now, almostExpired).run();
+
+      const res = await worker.fetch(
+        new Request('http://localhost/api/me', { headers: { Cookie: `wl_session=${id}`, 'CF-Connecting-IP': '8.8.8.1' } }),
+        env,
+        {} as ExecutionContext
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Set-Cookie')).toContain(`wl_session=${id}`);
+    });
+
+    it('does not touch the response for a freshly-created, nowhere-near-due session', async () => {
+      const { id } = await createSession(env.DB, 'u1');
+
+      const res = await worker.fetch(
+        new Request('http://localhost/api/me', { headers: { Cookie: `wl_session=${id}`, 'CF-Connecting-IP': '8.8.8.2' } }),
+        env,
+        {} as ExecutionContext
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Set-Cookie')).toBeNull();
+    });
+
+    it('does not add a Set-Cookie for a request with no session at all', async () => {
+      const res = await worker.fetch(new Request('http://localhost/api/me', { headers: { 'CF-Connecting-IP': '8.8.8.3' } }), env, {} as ExecutionContext);
+
+      expect(res.status).toBe(401);
+      expect(res.headers.get('Set-Cookie')).toBeNull();
+    });
   });
 });

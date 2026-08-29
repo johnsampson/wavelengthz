@@ -517,13 +517,19 @@
 // (index.html's search dialog, now x-ref'd) and focuses the input both as
 // plain synchronous DOM calls with zero ticks in between, all still inside
 // the original click handler's own call stack.
-// v79 bumps the shared heart/like icon (artist.html's per-track and
+// v79 gives the player bar's like button (playerBar.js) a liked-state
+// indicator -- issue #145 (Round 7) item 4, "a circled white stroke icon
+// to mean liked". Previously gave zero visual feedback either way, unlike
+// every other like button in the app; now rings itself white
+// (ring-2 ring-white) once you tap it, same convention artist.html's own
+// like buttons already use.
+// v80 bumps the shared heart/like icon (artist.html's per-track and
 // artist-level like buttons, playerBar.js's like button) from h-5 to h-6 --
 // issue #145 (Round 7): "Like icon (wavelength icon) on track card is too
 // small." Button sizes are unchanged, only the icon inside each grew; all
 // three are bumped together since issue #108 already made them
 // deliberately share this exact icon.
-const CACHE_NAME = 'wavelengthz-shell-v79';
+const CACHE_NAME = 'wavelengthz-shell-v80';
 const APP_SHELL = [
   '/',
   '/app.js',

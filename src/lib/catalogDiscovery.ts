@@ -63,7 +63,16 @@ const MAX_SEARCH_OFFSET = 950;
 // catalog would show freshly-discovered artists with no play button until
 // someone happened to open their page. Set to 0 for strictly zero
 // track-related work of any kind.
-const TRACK_BACKFILL_PER_RUN = 3;
+//
+// Was 3 -- issue #145 (Round 7) item 5: "it does not appear to be pulling
+// down cron tracks frequently. Maybe 10 to 20 overnight." At 3 per run x 4
+// runs/day (wrangler.toml's "30 */6 * * *"), that's only 12 artists/day
+// getting a backfill queued at all, consistent with the complaint. Raising
+// this doesn't add burst risk: the backfill queue's own consumer
+// (wrangler.toml: max_concurrency = 1, one artist processed at a time) is
+// what actually paces the Spotify calls, so a bigger number here just grows
+// the queue's backlog, not the call rate.
+const TRACK_BACKFILL_PER_RUN = 10;
 
 // Matches ARTIST_PROFILE_TRACK_LIMIT (src/routes/catalog.ts) -- the same
 // depth a real first view of an artist page asks for, so a pre-warmed artist

@@ -34,8 +34,25 @@ export function registerPlayerRoutes(router: RouterType) {
       return Response.json({ available: false });
     }
 
-    const accessToken = await getValidAccessToken(user, env, env.DB);
-    return Response.json({ available: true, accessToken });
+    // Issue #145 (Round 7) item 2, a recurrence of Round 6 item 10: "paid
+    // Spotify members get the basic player" from time to time. Before this,
+    // a transient refresh failure here (Spotify momentarily erroring/rate-
+    // limiting the token endpoint -- see spotifyFetch's own retry-then-throw
+    // in src/lib/spotify.ts) escaped uncaught, turning into a generic 500.
+    // The client-side caller (wavelengthzPlayer.js's checkPlayerAvailability)
+    // already treats any non-2xx response as `{ available: false }` and,
+    // being a page-lifetime-cached singleton, never retries -- so a single
+    // bad refresh permanently downgraded an eligible Premium account to the
+    // read-only iframe for that whole page load. Caught here instead, same
+    // pattern as GET /api/me/now-playing just below: this is a "try again
+    // next page load" failure, not a real 500.
+    try {
+      const accessToken = await getValidAccessToken(user, env, env.DB);
+      return Response.json({ available: true, accessToken });
+    } catch (error) {
+      console.error('player-token: getValidAccessToken failed', error);
+      return Response.json({ available: false });
+    }
   });
 
   // Backs the one-tap "send what I'm listening to right now" affordance in
