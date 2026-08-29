@@ -16,6 +16,21 @@
   <div id="wl-header-root"></div>
   <div id="wl-app-root" x-data="pageApp()" x-init="init()">
 
+  <!-- Issue #145 (Round 7): "if you get to the artist profile, we need a
+       back button to take you back to the deck." A plain <a href="/">, not
+       a JS navigate() call -- router.js already intercepts internal anchor
+       clicks site-wide for an in-app transition, same convention
+       wavelength.html's/join.html's own "Back to..." links already use.
+       Outside the artist x-if below so it's there even while loading or on
+       an error, not just once the artist has actually loaded. -->
+  <div class="mx-auto mb-2 w-full max-w-md">
+    <a href="/" aria-label="Back to the deck" class="btn-ghost h-9 w-9 rounded-full">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto h-5 w-5">
+        <path d="M19 12H5M12 19l-7-7 7-7" />
+      </svg>
+    </a>
+  </div>
+
   <p x-show="error" x-text="error" class="mx-auto mb-4 max-w-md text-red-400" role="alert"></p>
 
   <template x-if="artist">

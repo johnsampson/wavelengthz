@@ -529,7 +529,13 @@
 // small." Button sizes are unchanged, only the icon inside each grew; all
 // three are bumped together since issue #108 already made them
 // deliberately share this exact icon.
-const CACHE_NAME = 'wavelengthz-shell-v80';
+// v81 adds a back button to the artist profile page (artist.html), issue
+// #145 (Round 7) item 7 -- "if you get to the artist profile, we need a
+// back button to take you back to the deck." A plain <a href="/">, same
+// convention as wavelength.html's/join.html's existing "Back to..." links,
+// relying on router.js's site-wide internal-anchor-click interception
+// rather than a JS navigate() call.
+const CACHE_NAME = 'wavelengthz-shell-v81';
 const APP_SHELL = [
   '/',
   '/app.js',
