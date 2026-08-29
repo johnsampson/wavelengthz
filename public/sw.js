@@ -517,7 +517,15 @@
 // (index.html's search dialog, now x-ref'd) and focuses the input both as
 // plain synchronous DOM calls with zero ticks in between, all still inside
 // the original click handler's own call stack.
-const CACHE_NAME = 'wavelengthz-shell-v78';
+// v79 makes the entire deck card (not just the artist name/match name
+// button) navigate to the artist page / profile on tap -- issue #145
+// (Round 7): "make the entire artist card clickable to the profile, not
+// just the artist name." swipe.js's attachSwipeDeck gains an onTap callback,
+// fired on pointerup only when the movement was a genuine near-zero-motion
+// tap (not a real swipe, and not an aborted drag attempt that just springs
+// back) -- index.js wires it to the same viewArtist()/viewProfile() the
+// name button already called.
+const CACHE_NAME = 'wavelengthz-shell-v79';
 const APP_SHELL = [
   '/',
   '/app.js',

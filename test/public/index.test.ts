@@ -100,6 +100,54 @@ describe('deck app', () => {
     expect(app.detachSwipe).toBeNull();
   });
 
+  // issue #145 (Round 7): "make the entire artist card clickable to the
+  // profile, not just the artist name" -- attachSwipeDeck's onTap (fired on
+  // a genuine tap, not a drag/swipe) should route the same place the name
+  // button's own click handler already does.
+  it('showNext wires onTap to viewArtist in Music mode', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { getElementById: vi.fn(() => ({})) });
+    stubApi((path) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
+      if (path.startsWith('/api/candidates/'))
+        return new Response(JSON.stringify({ candidates: [{ id: 'c1', itemId: 'a1', name: 'Artist' }] }), { status: 200 });
+      return new Response('not found', { status: 404 });
+    });
+    const app: any = createDeckApp();
+    app.$nextTick = (fn: () => void) => fn();
+    app.mode = 'music';
+
+    await app.init();
+
+    const onTap = (vi.mocked(attachSwipeDeck).mock.calls.at(-1) as any)?.[1]?.onTap;
+    expect(typeof onTap).toBe('function');
+    onTap();
+
+    expect(navigate).toHaveBeenCalledWith('/artist?id=a1');
+  });
+
+  it('showNext wires onTap to viewProfile in People mode', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { getElementById: vi.fn(() => ({})) });
+    stubApi((path) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
+      if (path.startsWith('/api/candidates/'))
+        return new Response(JSON.stringify({ candidates: [{ id: 'c1', displayName: 'Sam' }] }), { status: 200 });
+      return new Response('not found', { status: 404 });
+    });
+    const app: any = createDeckApp();
+    app.$nextTick = (fn: () => void) => fn();
+    app.mode = 'people';
+
+    await app.init();
+
+    const onTap = (vi.mocked(attachSwipeDeck).mock.calls.at(-1) as any)?.[1]?.onTap;
+    expect(typeof onTap).toBe('function');
+    onTap();
+
+    expect(navigate).toHaveBeenCalledWith('/profile?id=c1');
+  });
+
   it('destroy() is a safe no-op when nothing was ever attached', () => {
     vi.stubGlobal('window', fakeWindow());
     const app = createDeckApp();

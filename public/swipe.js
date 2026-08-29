@@ -6,7 +6,7 @@ export function resolveSwipeDirection(deltaX, thresholdPx) {
   return null;
 }
 
-export function attachSwipeDeck(container, { onSwipe, thresholdPx = 80 }) {
+export function attachSwipeDeck(container, { onSwipe, onTap = () => {}, thresholdPx = 80, tapThresholdPx = 10 }) {
   let startX = 0;
   let currentX = 0;
   let dragging = false;
@@ -56,7 +56,16 @@ export function attachSwipeDeck(container, { onSwipe, thresholdPx = 80 }) {
   function onPointerUp() {
     if (!dragging) return;
     dragging = false;
-    settle(resolveSwipeDirection(currentX, thresholdPx));
+    const direction = resolveSwipeDirection(currentX, thresholdPx);
+    settle(direction);
+    // A genuine tap (near-zero movement, not a swipe that committed and not
+    // an aborted drag that just snaps back) -- issue #145 (Round 7): "make
+    // the entire artist card clickable to the profile, not just the artist
+    // name". `tapThresholdPx` is deliberately far below `thresholdPx`: an
+    // in-between drag (the user tried to swipe but didn't cross the
+    // threshold) stays a no-op, same as before this, rather than surprising
+    // them with a navigation they didn't ask for.
+    if (!direction && Math.abs(currentX) <= tapThresholdPx) onTap?.();
     currentX = 0;
   }
 
