@@ -523,14 +523,20 @@
 // every other like button in the app; now rings itself white
 // (ring-2 ring-white) once you tap it, same convention artist.html's own
 // like buttons already use.
-// v80 changes the messaging-eligibility gate (issue #145, Round 7 item 8):
+// v80 bumps the shared heart/like icon (artist.html's per-track and
+// artist-level like buttons, playerBar.js's like button) from h-5 to h-6 --
+// issue #145 (Round 7): "Like icon (wavelength icon) on track card is too
+// small." Button sizes are unchanged, only the icon inside each grew; all
+// three are bumped together since issue #108 already made them
+// deliberately share this exact icon.
+// v81 changes the messaging-eligibility gate (issue #145, Round 7 item 8):
 // "change the criteria for messaging from liking 25 songs to acting on 50
 // artists that includes passing or liking or skipping." Settings ->
 // Messaging (public/settings/messaging.html/.js) now reports and requires
 // artistsActed (any verdict on 50 distinct artists) instead of likedSongs
 // (25 right-swiped tracks) -- see src/lib/messagingGate.ts's
 // artistsActedCountFor/MIN_ARTISTS_ACTED.
-const CACHE_NAME = 'wavelengthz-shell-v80';
+const CACHE_NAME = 'wavelengthz-shell-v81';
 const APP_SHELL = [
   '/',
   '/app.js',

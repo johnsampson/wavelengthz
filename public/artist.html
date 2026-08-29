@@ -49,8 +49,10 @@
           <!-- Same heart SVG as the per-track like buttons and the player
                bar (playerBar.js's likeButtonHtml), not the raw "♥" text
                glyph this used to be -- issue #108's "align... same
-               like/heart, etc." -->
-          <svg viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-5 w-5">
+               like/heart, etc." Sized h-6 (not h-5) for the same reason as
+               those two -- issue #145 (Round 7): "too small". Button size
+               (h-11) unchanged -- only the icon inside it grew. -->
+          <svg viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-6 w-6">
             <path d="M12 21C2 15 2 10 3 7L7 11L12 7L17 11L21 7C22 10 22 15 12 21Z" />
           </svg>
         </button>
@@ -94,8 +96,12 @@
                      every other heart in the app (the deck's Like button,
                      the player bar's). Issue #108 asked for the player bar
                      and the track view to share "same like/heart, etc." --
-                     this is that, using the exact same path. -->
-                <svg viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-5 w-5">
+                     this is that, using the exact same path. h-6 (not h-5,
+                     matching the artist-level like button above and the
+                     player bar's) since issue #145 (Round 7) flagged this
+                     one specifically as too small; the button itself (h-9)
+                     is unchanged. -->
+                <svg viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-6 w-6">
                   <path d="M12 21C2 15 2 10 3 7L7 11L12 7L17 11L21 7C22 10 22 15 12 21Z" />
                 </svg>
               </button>
