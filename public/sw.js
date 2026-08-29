@@ -517,7 +517,13 @@
 // (index.html's search dialog, now x-ref'd) and focuses the input both as
 // plain synchronous DOM calls with zero ticks in between, all still inside
 // the original click handler's own call stack.
-// v79 makes the entire deck card (not just the artist name/match name
+// v79 gives the player bar's like button (playerBar.js) a liked-state
+// indicator -- issue #145 (Round 7) item 4, "a circled white stroke icon
+// to mean liked". Previously gave zero visual feedback either way, unlike
+// every other like button in the app; now rings itself white
+// (ring-2 ring-white) once you tap it, same convention artist.html's own
+// like buttons already use.
+// v80 makes the entire deck card (not just the artist name/match name
 // button) navigate to the artist page / profile on tap -- issue #145
 // (Round 7): "make the entire artist card clickable to the profile, not
 // just the artist name." swipe.js's attachSwipeDeck gains an onTap callback,
@@ -525,7 +531,7 @@
 // tap (not a real swipe, and not an aborted drag attempt that just springs
 // back) -- index.js wires it to the same viewArtist()/viewProfile() the
 // name button already called.
-const CACHE_NAME = 'wavelengthz-shell-v79';
+const CACHE_NAME = 'wavelengthz-shell-v80';
 const APP_SHELL = [
   '/',
   '/app.js',

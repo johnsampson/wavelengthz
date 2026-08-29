@@ -27,7 +27,9 @@ export interface UserRow {
   updated_at: number;
 }
 
-const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
+// Exported so renewSessionIfDue's own threshold math, and its tests, don't
+// have to duplicate this value.
+export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
 // Safari (unlike Chromium) enforces `Secure` literally -- it refuses to store
 // or send the cookie back over plain HTTP even for localhost/127.0.0.1. Local
@@ -110,4 +112,49 @@ export async function getSessionUser(request: Request, db: D1Database): Promise<
     .first<UserRow>();
 
   return row ?? null;
+}
+
+// Session renewal on activity (issue #145, Round 7 item 2: "still lose
+// login state from time to time"). Before this, both the DB row's
+// expires_at AND the browser's Max-Age cookie were fixed at exactly
+// SESSION_TTL_SECONDS from the moment of login and never touched again --
+// so someone who opened the app somewhat regularly, just never within the
+// same 30-day window as their very first login, still hit a hard,
+// surprising logout. Renewing both here (called once per request from
+// src/index.ts's top-level fetch handler, after routing) turns that into
+// "30 days since your last visit" instead of "30 days since you first
+// logged in".
+//
+// Throttled to once every SESSION_RENEWAL_INTERVAL_SECONDS, not every
+// request: a daily active user costs one extra write (and one extra
+// Set-Cookie) per day, not one per request/poll tick.
+export const SESSION_RENEWAL_INTERVAL_SECONDS = 60 * 60 * 24; // 1 day
+
+// Returns a fresh Set-Cookie header value once the session is due for
+// renewal (and renews the DB row's expires_at to match), or null when
+// there's nothing to do -- no session cookie on the request, an
+// already-expired/unknown session id (nothing to renew -- getSessionUser
+// will 401 it same as before), or one that's simply not due yet. Callers
+// append the returned value onto their response's headers; a null return
+// means "don't touch the response."
+export async function renewSessionIfDue(request: Request, db: D1Database, secure: boolean): Promise<string | null> {
+  const sessionId = parseCookie(request, 'wl_session');
+  if (!sessionId) return null;
+
+  const now = Date.now();
+  const row = await db.prepare(`SELECT expires_at FROM sessions WHERE id = ? AND expires_at > ?`).bind(sessionId, now).first<{ expires_at: number }>();
+  if (!row) return null;
+
+  // Still fresh enough -- more than a renewal interval's worth of runway
+  // remains before this session actually expires, so renewing now would be
+  // pure wasted writes for the entire rest of a normal 30-day session
+  // lifetime. Only once it's down to its last day (by default) does this
+  // actually do anything.
+  const remainingMs = row.expires_at - now;
+  if (remainingMs > SESSION_RENEWAL_INTERVAL_SECONDS * 1000) return null;
+
+  const newExpiresAt = now + SESSION_TTL_SECONDS * 1000;
+  await db.prepare(`UPDATE sessions SET expires_at = ?, updated_at = ? WHERE id = ?`).bind(newExpiresAt, now, sessionId).run();
+
+  return sessionCookieHeader(sessionId, SESSION_TTL_SECONDS, secure);
 }
