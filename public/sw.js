@@ -517,14 +517,20 @@
 // (index.html's search dialog, now x-ref'd) and focuses the input both as
 // plain synchronous DOM calls with zero ticks in between, all still inside
 // the original click handler's own call stack.
-// v79 changes the messaging-eligibility gate (issue #145, Round 7 item 8):
+// v79 gives the player bar's like button (playerBar.js) a liked-state
+// indicator -- issue #145 (Round 7) item 4, "a circled white stroke icon
+// to mean liked". Previously gave zero visual feedback either way, unlike
+// every other like button in the app; now rings itself white
+// (ring-2 ring-white) once you tap it, same convention artist.html's own
+// like buttons already use.
+// v80 changes the messaging-eligibility gate (issue #145, Round 7 item 8):
 // "change the criteria for messaging from liking 25 songs to acting on 50
 // artists that includes passing or liking or skipping." Settings ->
 // Messaging (public/settings/messaging.html/.js) now reports and requires
 // artistsActed (any verdict on 50 distinct artists) instead of likedSongs
 // (25 right-swiped tracks) -- see src/lib/messagingGate.ts's
 // artistsActedCountFor/MIN_ARTISTS_ACTED.
-const CACHE_NAME = 'wavelengthz-shell-v79';
+const CACHE_NAME = 'wavelengthz-shell-v80';
 const APP_SHELL = [
   '/',
   '/app.js',
