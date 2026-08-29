@@ -41,6 +41,16 @@ import { setNowPlayingMetadata, setPlaybackState, clearNowPlayingMetadata, regis
 let currentTrack = null; // { spotifyId, id, name, artistName, imageUrl } | null
 let mode = null; // 'sdk' | 'iframe' | null -- null while currentTrack is set but availability hasn't resolved yet, or when currentTrack itself is null
 let sdkState = null; // { paused, position, duration } | null -- sdk mode only
+// Issue #145 (Round 7) item 4: "I want a circled white stroke icon to mean
+// liked" -- this button previously gave zero visual feedback either way,
+// unlike every other like button in the app (artist.html's, which already
+// rings itself with `ring-2 ring-white` once liked). Deliberately optimistic
+// and one-directional, not a true "is this track already liked" check: none
+// of this module's callers (index.js/artist.js/personProfile.js) currently
+// thread a track's existing liked state into play(), so this only tracks
+// "liked just now, this session" rather than reflecting a track someone
+// liked on a previous visit. Reset whenever the current track changes.
+let currentTrackLiked = false;
 
 // Guards startPlayback() (below) against overlapping invocations -- issue
 // #127: "there's still a player issue when you navigate around the site, on
@@ -357,7 +367,10 @@ export function shouldSnapOpen(offset, maxReveal = SWIPE_REVEAL_PX, thresholdRat
   return Math.abs(offset) > maxReveal * thresholdRatio;
 }
 
-function likeButtonHtml(currentTrack) {
+// `liked` mirrors artist.html's own like buttons: a `ring-2 ring-white`
+// circle around the button once liked, same heart icon otherwise -- issue
+// #145 (Round 7) item 4, "a circled white stroke icon to mean liked".
+function likeButtonHtml(currentTrack, liked) {
   // See the module comment on `currentTrack.id` above -- in practice every
   // current call site passes one, so this only hides the button for a
   // hypothetical future caller that passes neither an id nor a fallback.
@@ -366,8 +379,8 @@ function likeButtonHtml(currentTrack) {
     <button
       type="button"
       data-action="like"
-      aria-label="Like this track"
-      class="btn-ghost h-9 w-9 shrink-0 rounded-full text-brand-400"
+      aria-label="${liked ? 'Liked' : 'Like this track'}"
+      class="btn-ghost h-9 w-9 shrink-0 rounded-full text-brand-400${liked ? ' ring-2 ring-white' : ''}"
     >
       <svg viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-5 w-5">${HEART_ICON}</svg>
     </button>`;
@@ -399,7 +412,7 @@ function marqueeSpan(text, extraClass) {
 // is raw innerHTML construction, unlike Alpine's x-text/:src bindings
 // elsewhere in this app, which escape by construction.
 export function renderPlayerChromeHtml(state) {
-  const { currentTrack, mode, sdkState, revealed } = state;
+  const { currentTrack, mode, sdkState, revealed, liked } = state;
   if (!currentTrack) return '';
 
   const name = escapeHtml(currentTrack.name ?? '');
@@ -407,7 +420,7 @@ export function renderPlayerChromeHtml(state) {
   const imageUrl = currentTrack.imageUrl ?? '';
   const closeButton = `
     <button type="button" data-action="hide" aria-label="Close player" class="btn-ghost h-9 w-9 shrink-0 rounded-full text-lg">✕</button>`;
-  const likeButton = likeButtonHtml(currentTrack);
+  const likeButton = likeButtonHtml(currentTrack, liked);
   const textStack = `
     <div class="min-w-0 flex-1">
       ${marqueeSpan(name, 'text-sm font-medium text-neutral-100')}
@@ -548,7 +561,7 @@ function applyMarquee(el) {
 function renderChrome() {
   const root = document.getElementById('wl-player-chrome');
   if (!root) return;
-  root.innerHTML = renderPlayerChromeHtml({ currentTrack, mode, sdkState, revealed: swipeRevealed });
+  root.innerHTML = renderPlayerChromeHtml({ currentTrack, mode, sdkState, revealed: swipeRevealed, liked: currentTrackLiked });
   // Overflow can only be measured once the new markup has real layout, so
   // this runs as a follow-up pass over whatever marquee wrappers just got
   // inserted, not as part of the string built above.
@@ -629,6 +642,7 @@ async function startPlayback(track) {
   // event for the new one re-arms it.
   clearRadioAdvanceTimer();
   currentTrack = track;
+  currentTrackLiked = false; // a fresh track starts unliked, regardless of the outgoing track's state
   notifyNowPlayingChange();
   // iOS/Android "Now Playing" (lock screen, Control Center, Safari's status
   // bar) -- not mode-specific, so this is set here regardless of whether
@@ -792,6 +806,11 @@ export async function like() {
   try {
     await api.swipe('music', { item_type: 'track', item_id: currentTrack.id, direction: 'right' });
     showToast({ message: 'Liked', icon: '❤️' });
+    // Issue #145 (Round 7) item 4: the button itself now shows the same
+    // circled-white "liked" state artist.html's like buttons already do,
+    // not just the toast -- see the module comment on currentTrackLiked.
+    currentTrackLiked = true;
+    renderChrome();
   } catch (e) {
     showErrorToast('Could not like that track. Please try again.');
   }
@@ -805,6 +824,7 @@ export async function hide() {
   playToken++;
   if (mode === 'sdk') await pausePlayback();
   currentTrack = null;
+  currentTrackLiked = false;
   notifyNowPlayingChange();
   clearNowPlayingMetadata();
   mode = null;
@@ -951,6 +971,7 @@ export function _setCurrentTrackForTests(track) {
 // test/public/playerBar.test.ts.
 export function _resetForTests() {
   currentTrack = null;
+  currentTrackLiked = false;
   mode = null;
   sdkState = null;
   swipeRevealed = false;
@@ -960,4 +981,12 @@ export function _resetForTests() {
   mounted = false;
   nowPlayingListeners = new Set();
   playToken = 0;
+}
+
+// Test-only: exposes currentTrackLiked so like()'s tests can confirm it
+// flips after a successful swipe, without a real DOM to inspect
+// renderChrome()'s output through. Not called anywhere outside
+// test/public/playerBar.test.ts.
+export function _currentTrackLikedForTests() {
+  return currentTrackLiked;
 }

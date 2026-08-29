@@ -517,13 +517,19 @@
 // (index.html's search dialog, now x-ref'd) and focuses the input both as
 // plain synchronous DOM calls with zero ticks in between, all still inside
 // the original click handler's own call stack.
-// v79 adds a back button to the artist profile page (artist.html), issue
+// v79 gives the player bar's like button (playerBar.js) a liked-state
+// indicator -- issue #145 (Round 7) item 4, "a circled white stroke icon
+// to mean liked". Previously gave zero visual feedback either way, unlike
+// every other like button in the app; now rings itself white
+// (ring-2 ring-white) once you tap it, same convention artist.html's own
+// like buttons already use.
+// v80 adds a back button to the artist profile page (artist.html), issue
 // #145 (Round 7) item 7 -- "if you get to the artist profile, we need a
 // back button to take you back to the deck." A plain <a href="/">, same
 // convention as wavelength.html's/join.html's existing "Back to..." links,
 // relying on router.js's site-wide internal-anchor-click interception
 // rather than a JS navigate() call.
-const CACHE_NAME = 'wavelengthz-shell-v79';
+const CACHE_NAME = 'wavelengthz-shell-v80';
 const APP_SHELL = [
   '/',
   '/app.js',

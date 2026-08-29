@@ -34,6 +34,7 @@ import { checkRateLimit } from './lib/rateLimit';
 import { reportError } from './lib/sentry';
 import { constantTimeEqual } from './lib/crypto';
 import { SpotifyRateLimitError } from './lib/spotify';
+import { renewSessionIfDue, requestIsSecure } from './lib/session';
 
 export const router = Router();
 
@@ -285,7 +286,17 @@ export default {
         if (!generallyAllowed) return withSecurityHeaders(Response.json({ error: 'rate_limited' }, { status: 429 }));
       }
 
-      return withSecurityHeaders(await router.fetch(request, env, ctx));
+      const routed = withSecurityHeaders(await router.fetch(request, env, ctx));
+      // Sliding session renewal (issue #145, Round 7 item 2) -- see
+      // renewSessionIfDue's own comment in src/lib/session.ts. A no-op
+      // (returns null, response untouched) for the overwhelming majority of
+      // requests: no session cookie, an already-invalid one, or one simply
+      // not due for renewal yet.
+      const renewedCookie = await renewSessionIfDue(request, env.DB, requestIsSecure(request));
+      if (!renewedCookie) return routed;
+      const headers = new Headers(routed.headers);
+      headers.append('Set-Cookie', renewedCookie);
+      return new Response(routed.body, { status: routed.status, statusText: routed.statusText, headers });
     } catch (error) {
       // Always log locally first -- reportError only reaches Sentry, which
       // in local dev is typically an unmonitored placeholder DSN. Without

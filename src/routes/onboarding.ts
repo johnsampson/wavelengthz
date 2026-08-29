@@ -3,6 +3,15 @@ import { getSessionUser } from '../lib/session';
 import { computeAge } from '../lib/age';
 import { containsBlockedWord } from '../lib/messageFilter';
 import { grantInviteCodes } from '../lib/inviteCodes';
+import { reverseGeocodeLabel } from '../lib/geocode';
+
+// The literal placeholder both public/onboarding.html's and
+// public/settings/preferences.js's useBrowserLocation() send as
+// location_label whenever someone shares their browser's geolocation
+// rather than typing a city themselves -- see reverseGeocodeLabel's own
+// comment (src/lib/geocode.ts) for the issue #145 (Round 7) item 3 this
+// resolves.
+const BROWSER_LOCATION_PLACEHOLDER = 'Current location';
 
 interface OnboardingBody {
   display_name: string;
@@ -163,6 +172,18 @@ export function registerOnboardingRoutes(router: RouterType) {
     }
     const locationUpdatedAt = locationChanged ? now : user.location_updated_at;
 
+    // Resolve the "Current location" placeholder to a real "City, Region"
+    // (or as close as BigDataCloud's data can get) before it's ever
+    // persisted, so Settings/the profile page show something a person
+    // actually recognizes instead of the literal placeholder string.
+    // Skipped entirely for manual free-text entry -- someone who typed
+    // their own label already gave us exactly what they want shown.
+    let locationLabel = body.location_label;
+    if (locationLabel === BROWSER_LOCATION_PLACEHOLDER) {
+      const resolved = await reverseGeocodeLabel(body.lat, body.lng);
+      if (resolved) locationLabel = resolved;
+    }
+
     await env.DB.prepare(
       `UPDATE users SET display_name = ?, bio = ?, date_of_birth = ?, age_verified_at = ?, location_label = ?, lat = ?, lng = ?,
         location_updated_at = ?, gender = ?, seeking = ?, intent = ?,
@@ -175,7 +196,7 @@ export function registerOnboardingRoutes(router: RouterType) {
       body.bio ?? null,
       body.date_of_birth,
       now,
-      body.location_label,
+      locationLabel,
       body.lat,
       body.lng,
       locationUpdatedAt,
