@@ -5,7 +5,7 @@ import { haversineKm } from '../lib/scoring';
 import { isValidMessageBody, isValidTrackCaption } from '../lib/messageFilter';
 import { resolveSharedTrack, loadSharedTracks, type ShareableSpotifyTrack } from '../lib/trackSharing';
 import { canRecall } from '../lib/messageRecall';
-import { hasCompleteProfile, photoCountFor, likedSongCountFor } from '../lib/messagingGate';
+import { hasCompleteProfile, photoCountFor, artistsActedCountFor } from '../lib/messagingGate';
 import { primaryPhotoUrls } from '../lib/photos';
 
 const MAX_GROUP_NAME_LENGTH = 60;
@@ -349,7 +349,7 @@ export function registerGroupRoutes(router: RouterType) {
       .first();
     if (!membership) return new Response('Forbidden', { status: 403 });
 
-    if (!hasCompleteProfile(user, await photoCountFor(env.DB, user.id), await likedSongCountFor(env.DB, user.id))) {
+    if (!hasCompleteProfile(user, await photoCountFor(env.DB, user.id), await artistsActedCountFor(env.DB, user.id))) {
       return Response.json({ error: 'profile_incomplete' }, { status: 403 });
     }
 
