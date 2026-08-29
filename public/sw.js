@@ -523,7 +523,13 @@
 // every other like button in the app; now rings itself white
 // (ring-2 ring-white) once you tap it, same convention artist.html's own
 // like buttons already use.
-// v80 makes the entire deck card (not just the artist name/match name
+// v80 bumps the shared heart/like icon (artist.html's per-track and
+// artist-level like buttons, playerBar.js's like button) from h-5 to h-6 --
+// issue #145 (Round 7): "Like icon (wavelength icon) on track card is too
+// small." Button sizes are unchanged, only the icon inside each grew; all
+// three are bumped together since issue #108 already made them
+// deliberately share this exact icon.
+// v81 makes the entire deck card (not just the artist name/match name
 // button) navigate to the artist page / profile on tap -- issue #145
 // (Round 7): "make the entire artist card clickable to the profile, not
 // just the artist name." swipe.js's attachSwipeDeck gains an onTap callback,
@@ -531,7 +537,7 @@
 // tap (not a real swipe, and not an aborted drag attempt that just springs
 // back) -- index.js wires it to the same viewArtist()/viewProfile() the
 // name button already called.
-const CACHE_NAME = 'wavelengthz-shell-v80';
+const CACHE_NAME = 'wavelengthz-shell-v81';
 const APP_SHELL = [
   '/',
   '/app.js',
