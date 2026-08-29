@@ -375,6 +375,10 @@ function likeButtonHtml(currentTrack, liked) {
   // current call site passes one, so this only hides the button for a
   // hypothetical future caller that passes neither an id nor a fallback.
   if (!currentTrack.id) return '';
+  // Icon is h-6 (not h-5) inside the same h-9 button -- issue #127 (Round
+  // 7) flagged the heart icon as too small; bumped here and on artist.html's
+  // matching per-track/artist-level like buttons together, since issue
+  // #108 already made all three deliberately share this exact icon.
   return `
     <button
       type="button"
@@ -382,7 +386,7 @@ function likeButtonHtml(currentTrack, liked) {
       aria-label="${liked ? 'Liked' : 'Like this track'}"
       class="btn-ghost h-9 w-9 shrink-0 rounded-full text-brand-400${liked ? ' ring-2 ring-white' : ''}"
     >
-      <svg viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-5 w-5">${HEART_ICON}</svg>
+      <svg viewBox="0 0 24 24" fill="currentColor" class="mx-auto h-6 w-6">${HEART_ICON}</svg>
     </button>`;
 }
 
