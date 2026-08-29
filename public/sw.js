@@ -529,14 +529,20 @@
 // small." Button sizes are unchanged, only the icon inside each grew; all
 // three are bumped together since issue #108 already made them
 // deliberately share this exact icon.
-// v81 changes the messaging-eligibility gate (issue #145, Round 7 item 8):
+// v81 adds a back button to the artist profile page (artist.html), issue
+// #145 (Round 7) item 7 -- "if you get to the artist profile, we need a
+// back button to take you back to the deck." A plain <a href="/">, same
+// convention as wavelength.html's/join.html's existing "Back to..." links,
+// relying on router.js's site-wide internal-anchor-click interception
+// rather than a JS navigate() call.
+// v82 changes the messaging-eligibility gate (issue #145, Round 7 item 8):
 // "change the criteria for messaging from liking 25 songs to acting on 50
 // artists that includes passing or liking or skipping." Settings ->
 // Messaging (public/settings/messaging.html/.js) now reports and requires
 // artistsActed (any verdict on 50 distinct artists) instead of likedSongs
 // (25 right-swiped tracks) -- see src/lib/messagingGate.ts's
 // artistsActedCountFor/MIN_ARTISTS_ACTED.
-const CACHE_NAME = 'wavelengthz-shell-v81';
+const CACHE_NAME = 'wavelengthz-shell-v82';
 const APP_SHELL = [
   '/',
   '/app.js',
