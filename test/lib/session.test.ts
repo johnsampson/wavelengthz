@@ -1,7 +1,16 @@
 import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { applySchema } from '../apply-schema';
-import { createSession, getSessionUser, sessionCookieHeader, requestIsSecure, requestProtocol } from '../../src/lib/session';
+import {
+  createSession,
+  getSessionUser,
+  sessionCookieHeader,
+  requestIsSecure,
+  requestProtocol,
+  renewSessionIfDue,
+  SESSION_TTL_SECONDS,
+  SESSION_RENEWAL_INTERVAL_SECONDS,
+} from '../../src/lib/session';
 import { insertTestUser } from '../helpers/createUser';
 
 beforeAll(async () => {
@@ -60,6 +69,72 @@ describe('session', () => {
     });
     const user = await getSessionUser(req, env.DB);
     expect(user).toBeNull();
+  });
+});
+
+describe('renewSessionIfDue', () => {
+  it('does nothing when there is no session cookie on the request', async () => {
+    const req = new Request('http://localhost/api/me');
+    expect(await renewSessionIfDue(req, env.DB, true)).toBeNull();
+  });
+
+  it('does nothing for an unknown/expired session id', async () => {
+    const req = new Request('http://localhost/api/me', { headers: { Cookie: 'wl_session=nope' } });
+    expect(await renewSessionIfDue(req, env.DB, true)).toBeNull();
+  });
+
+  it('does nothing for a freshly-created session -- nowhere near due for renewal', async () => {
+    const { id } = await createSession(env.DB, 'u1');
+    const req = new Request('http://localhost/api/me', { headers: { Cookie: `wl_session=${id}` } });
+    expect(await renewSessionIfDue(req, env.DB, true)).toBeNull();
+
+    const row = await env.DB.prepare('SELECT expires_at FROM sessions WHERE id = ?').bind(id).first<any>();
+    // Untouched -- still (approximately) the original creation-time value,
+    // not pushed forward.
+    expect(row.expires_at).toBeLessThanOrEqual(Date.now() + SESSION_TTL_SECONDS * 1000);
+  });
+
+  it('renews both the DB row and returns a fresh Set-Cookie once inside the renewal window', async () => {
+    const id = 'due-for-renewal';
+    const now = Date.now();
+    // Due: less than SESSION_RENEWAL_INTERVAL_SECONDS remains before expiry.
+    const almostExpired = now + SESSION_RENEWAL_INTERVAL_SECONDS * 1000 - 1000;
+    await env.DB.prepare(`INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, 'u1', ?, ?)`).bind(id, now, almostExpired).run();
+    const req = new Request('http://localhost/api/me', { headers: { Cookie: `wl_session=${id}` } });
+
+    const cookie = await renewSessionIfDue(req, env.DB, true);
+
+    expect(cookie).toContain(`wl_session=${id}`);
+    expect(cookie).toContain('Secure');
+    const row = await env.DB.prepare('SELECT expires_at FROM sessions WHERE id = ?').bind(id).first<any>();
+    // Pushed forward to a fresh full TTL from now, not left at the
+    // near-expiry value it had before this call.
+    expect(row.expires_at).toBeGreaterThan(now + (SESSION_TTL_SECONDS - 1) * 1000);
+  });
+
+  it('omits Secure in the renewed cookie when the request was not https', async () => {
+    const id = 'due-for-renewal-insecure';
+    const now = Date.now();
+    const almostExpired = now + SESSION_RENEWAL_INTERVAL_SECONDS * 1000 - 1000;
+    await env.DB.prepare(`INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, 'u1', ?, ?)`).bind(id, now, almostExpired).run();
+    const req = new Request('http://localhost/api/me', { headers: { Cookie: `wl_session=${id}` } });
+
+    const cookie = await renewSessionIfDue(req, env.DB, false);
+
+    expect(cookie).not.toContain('Secure');
+  });
+
+  it('does not renew a session that is due-ish but still outside the renewal window', async () => {
+    const id = 'not-quite-due';
+    const now = Date.now();
+    // Just outside the renewal window -- one second more than the interval remains.
+    const notYetDue = now + SESSION_RENEWAL_INTERVAL_SECONDS * 1000 + 1000;
+    await env.DB.prepare(`INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, 'u1', ?, ?)`).bind(id, now, notYetDue).run();
+    const req = new Request('http://localhost/api/me', { headers: { Cookie: `wl_session=${id}` } });
+
+    expect(await renewSessionIfDue(req, env.DB, true)).toBeNull();
+    const row = await env.DB.prepare('SELECT expires_at FROM sessions WHERE id = ?').bind(id).first<any>();
+    expect(row.expires_at).toBe(notYetDue);
   });
 });
 
