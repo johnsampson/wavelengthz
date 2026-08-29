@@ -517,7 +517,13 @@
 // (index.html's search dialog, now x-ref'd) and focuses the input both as
 // plain synchronous DOM calls with zero ticks in between, all still inside
 // the original click handler's own call stack.
-const CACHE_NAME = 'wavelengthz-shell-v78';
+// v79 bumps the shared heart/like icon (artist.html's per-track and
+// artist-level like buttons, playerBar.js's like button) from h-5 to h-6 --
+// issue #145 (Round 7): "Like icon (wavelength icon) on track card is too
+// small." Button sizes are unchanged, only the icon inside each grew; all
+// three are bumped together since issue #108 already made them
+// deliberately share this exact icon.
+const CACHE_NAME = 'wavelengthz-shell-v79';
 const APP_SHELL = [
   '/',
   '/app.js',
