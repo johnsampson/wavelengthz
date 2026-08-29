@@ -529,7 +529,13 @@
 // small." Button sizes are unchanged, only the icon inside each grew; all
 // three are bumped together since issue #108 already made them
 // deliberately share this exact icon.
-// v81 makes the entire deck card (not just the artist name/match name
+// v81 adds a back button to the artist profile page (artist.html), issue
+// #145 (Round 7) item 7 -- "if you get to the artist profile, we need a
+// back button to take you back to the deck." A plain <a href="/">, same
+// convention as wavelength.html's/join.html's existing "Back to..." links,
+// relying on router.js's site-wide internal-anchor-click interception
+// rather than a JS navigate() call.
+// v82 makes the entire deck card (not just the artist name/match name
 // button) navigate to the artist page / profile on tap -- issue #145
 // (Round 7): "make the entire artist card clickable to the profile, not
 // just the artist name." swipe.js's attachSwipeDeck gains an onTap callback,
@@ -537,7 +543,7 @@
 // tap (not a real swipe, and not an aborted drag attempt that just springs
 // back) -- index.js wires it to the same viewArtist()/viewProfile() the
 // name button already called.
-const CACHE_NAME = 'wavelengthz-shell-v81';
+const CACHE_NAME = 'wavelengthz-shell-v82';
 const APP_SHELL = [
   '/',
   '/app.js',
