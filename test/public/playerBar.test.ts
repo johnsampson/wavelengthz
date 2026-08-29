@@ -18,6 +18,7 @@ import {
   _setCurrentTrackForTests,
   _resetForTests,
   _playTrackingStateForTests,
+  _currentTrackLikedForTests,
 } from '../../public/playerBar.js';
 import { showToast, showErrorToast } from '../../public/toast.js';
 import { checkPlayerAvailability, playTrack } from '../../public/wavelengthzPlayer.js';
@@ -149,6 +150,33 @@ describe('renderPlayerChromeHtml', () => {
     });
 
     expect(html).not.toContain('data-action="like"');
+  });
+
+  // Issue #145 (Round 7) item 4: "a circled white stroke icon to mean
+  // liked" -- same ring-2 ring-white convention artist.html's like buttons
+  // already use.
+  it('shows the like button unringed and labeled "Like this track" when not liked', () => {
+    const html = renderPlayerChromeHtml({
+      currentTrack: { spotifyId: 'trk1', id: 'catalog-trk1', name: 'Valborg', imageUrl: '' },
+      mode: 'sdk',
+      sdkState: null,
+      liked: false,
+    });
+
+    expect(html).toContain('aria-label="Like this track"');
+    expect(html).not.toContain('ring-2 ring-white');
+  });
+
+  it('rings the like button white and relabels it "Liked" once liked', () => {
+    const html = renderPlayerChromeHtml({
+      currentTrack: { spotifyId: 'trk1', id: 'catalog-trk1', name: 'Valborg', imageUrl: '' },
+      mode: 'sdk',
+      sdkState: null,
+      liked: true,
+    });
+
+    expect(html).toContain('aria-label="Liked"');
+    expect(html).toContain('ring-2 ring-white');
   });
 
   it('renders the sdk chrome with a pause button and the live progress percentage once playing', () => {
@@ -290,6 +318,19 @@ describe('like', () => {
     vi.unstubAllGlobals();
   });
 
+  // Issue #145 (Round 7) item 4: the button's own state (not just the
+  // toast) reflects a successful like.
+  it('marks the current track liked on success', async () => {
+    _setCurrentTrackForTests({ spotifyId: 'sp1', id: 'trk1', name: 'Song', imageUrl: '' });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+
+    expect(_currentTrackLikedForTests()).toBe(false);
+    await like();
+
+    expect(_currentTrackLikedForTests()).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
   it('growls an error toast when the swipe request fails', async () => {
     _setCurrentTrackForTests({ spotifyId: 'sp1', id: 'trk1', name: 'Song', imageUrl: '' });
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
@@ -297,6 +338,16 @@ describe('like', () => {
     await like();
 
     expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('like'));
+    vi.unstubAllGlobals();
+  });
+
+  it('does not mark the track liked when the swipe request fails', async () => {
+    _setCurrentTrackForTests({ spotifyId: 'sp1', id: 'trk1', name: 'Song', imageUrl: '' });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
+
+    await like();
+
+    expect(_currentTrackLikedForTests()).toBe(false);
     vi.unstubAllGlobals();
   });
 });

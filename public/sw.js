@@ -517,7 +517,13 @@
 // (index.html's search dialog, now x-ref'd) and focuses the input both as
 // plain synchronous DOM calls with zero ticks in between, all still inside
 // the original click handler's own call stack.
-const CACHE_NAME = 'wavelengthz-shell-v78';
+// v79 gives the player bar's like button (playerBar.js) a liked-state
+// indicator -- issue #145 (Round 7) item 4, "a circled white stroke icon
+// to mean liked". Previously gave zero visual feedback either way, unlike
+// every other like button in the app; now rings itself white
+// (ring-2 ring-white) once you tap it, same convention artist.html's own
+// like buttons already use.
+const CACHE_NAME = 'wavelengthz-shell-v79';
 const APP_SHELL = [
   '/',
   '/app.js',
