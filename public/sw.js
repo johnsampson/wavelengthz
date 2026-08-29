@@ -523,7 +523,13 @@
 // every other like button in the app; now rings itself white
 // (ring-2 ring-white) once you tap it, same convention artist.html's own
 // like buttons already use.
-const CACHE_NAME = 'wavelengthz-shell-v79';
+// v80 bumps the shared heart/like icon (artist.html's per-track and
+// artist-level like buttons, playerBar.js's like button) from h-5 to h-6 --
+// issue #145 (Round 7): "Like icon (wavelength icon) on track card is too
+// small." Button sizes are unchanged, only the icon inside each grew; all
+// three are bumped together since issue #108 already made them
+// deliberately share this exact icon.
+const CACHE_NAME = 'wavelengthz-shell-v80';
 const APP_SHELL = [
   '/',
   '/app.js',
