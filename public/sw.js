@@ -550,7 +550,14 @@
 // tap (not a real swipe, and not an aborted drag attempt that just springs
 // back) -- index.js wires it to the same viewArtist()/viewProfile() the
 // name button already called.
-// v84 replaces the deck card's small tap-to-play text chip with an inline
+// v84 makes Google sign-on the primary login option (issue #156, part of
+// the 250K-users strategy): index.html's logged-out state copy drops its
+// Spotify-specific "Log in with Spotify" wording in favor of a
+// provider-neutral "Log in" -- the button already pointed at /login (the
+// provider picker), only the copy assumed Spotify. login.html itself
+// (Google now btn-primary, Spotify btn-secondary) is in BYPASS_PATHS and
+// needs no cache entry.
+// v85 replaces the deck card's small tap-to-play text chip with an inline
 // Spotify embed frame (issue #159/#160, part of the 250K-users strategy):
 // the artist's most-liked cataloged track is now visible and playable
 // directly on the card, autoplaying where the browser allows it, instead
@@ -559,7 +566,7 @@
 // iframe -- Spotify's embed can't be redirected to a new track in place);
 // togglePreviewTrack()/isCurrentPreviewTrack() are removed, no longer
 // reachable from index.html.
-const CACHE_NAME = 'wavelengthz-shell-v84';
+const CACHE_NAME = 'wavelengthz-shell-v85';
 const APP_SHELL = [
   '/',
   '/app.js',
