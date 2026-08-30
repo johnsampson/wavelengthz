@@ -346,3 +346,69 @@ describe('GET /internal/analytics/mau', () => {
     }
   });
 });
+
+// Issue #157 (part of the 250K-users strategy discussion): checking
+// pre-seed progress before declaring the catalog ready for a traffic push.
+describe('GET /internal/catalog/coverage', () => {
+  beforeEach(async () => {
+    await env.DB.exec('DELETE FROM tracks; DELETE FROM artists;');
+  });
+
+  it('rejects requests without the correct seed secret', async () => {
+    const req = new Request('http://localhost/internal/catalog/coverage', { method: 'GET' });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(403);
+  });
+
+  it('reports 0/0/0 against an empty catalog, without dividing by zero', async () => {
+    const req = new Request('http://localhost/internal/catalog/coverage', {
+      headers: { 'X-Seed-Secret': env.SEED_SECRET },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ totalApprovedArtists: 0, artistsWithAtLeastOneTrack: 0, coveragePercent: 0 });
+  });
+
+  it('counts an artist with multiple tracks once, not once per track', async () => {
+    await env.DB.prepare(
+      `INSERT INTO artists (id, spotify_id, name, genres, source, approved, created_at) VALUES ('a1', 'sp-a1', 'A1', '{}', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO artists (id, spotify_id, name, genres, source, approved, created_at) VALUES ('a2', 'sp-a2', 'A2', '{}', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, source, approved, created_at) VALUES ('t1', 'T1', 'a1', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, source, approved, created_at) VALUES ('t2', 'T2', 'a1', 'seed', 1, 1000)`
+    ).run();
+
+    const req = new Request('http://localhost/internal/catalog/coverage', {
+      headers: { 'X-Seed-Secret': env.SEED_SECRET },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.totalApprovedArtists).toBe(2);
+    expect(body.artistsWithAtLeastOneTrack).toBe(1); // a1 only -- a2 has zero tracks
+    expect(body.coveragePercent).toBe(50);
+  });
+
+  it('excludes an unapproved artist from the total, even if it has tracks', async () => {
+    await env.DB.prepare(
+      `INSERT INTO artists (id, spotify_id, name, genres, source, approved, created_at) VALUES ('a1', 'sp-a1', 'A1', '{}', 'seed', 0, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, name, artist_id, source, approved, created_at) VALUES ('t1', 'T1', 'a1', 'seed', 1, 1000)`
+    ).run();
+
+    const req = new Request('http://localhost/internal/catalog/coverage', {
+      headers: { 'X-Seed-Secret': env.SEED_SECRET },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const body = await res.json<any>();
+
+    expect(body.totalApprovedArtists).toBe(0);
+    expect(body.artistsWithAtLeastOneTrack).toBe(0);
+  });
+});

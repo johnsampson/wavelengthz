@@ -46,6 +46,13 @@ interface Env {
   TWILIO_ACCOUNT_SID: string;
   TWILIO_AUTH_TOKEN: string;
   TWILIO_VERIFY_SERVICE_SID: string;
+  // Issue #158 (part of the 250K-users strategy discussion): manual
+  // circuit-breaker for a deliberate high-traffic push. Unset (the normal
+  // case) means the live-fallback paths below behave exactly as they do
+  // today. Set to the literal string 'true' via `wrangler secret put` for
+  // the duration of a push, then unset again -- see
+  // isLiveSpotifyFallbackDisabled (src/lib/spotifyThrottle.ts).
+  SPOTIFY_LIVE_FALLBACK_DISABLED?: string;
 }
 
 // `cloudflare:test`'s `env` export is typed as `Cloudflare.Env` (a separate
@@ -76,5 +83,6 @@ declare namespace Cloudflare {
     TWILIO_ACCOUNT_SID: string;
     TWILIO_AUTH_TOKEN: string;
     TWILIO_VERIFY_SERVICE_SID: string;
+    SPOTIFY_LIVE_FALLBACK_DISABLED?: string;
   }
 }

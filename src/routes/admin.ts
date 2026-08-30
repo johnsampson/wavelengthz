@@ -124,4 +124,30 @@ export function registerAdminRoutes(router: RouterType) {
     const result = await distinctActiveUserCount(env.DB, sinceMs);
     return Response.json({ days, sinceMs, ...result });
   });
+
+  // Issue #157 (part of the 250K-users strategy discussion): a way to
+  // actually check pre-seed progress before declaring the catalog ready
+  // for a traffic push, rather than "we raised the constants and hoped."
+  // Track coverage specifically (not just artist count) is what matters --
+  // an artist with zero cataloged tracks has no representative track for
+  // the deck's "play a song" chip (src/routes/musicSwipes.ts's
+  // trackPreviewJoin) at all.
+  router.get('/internal/catalog/coverage', async (request: Request, env: Env) => {
+    if (!constantTimeEqual(request.headers.get('X-Seed-Secret') ?? '', env.SEED_SECRET)) {
+      return new Response('Forbidden', { status: 403 });
+    }
+
+    const [totalRow, coveredRow] = await Promise.all([
+      env.DB.prepare('SELECT COUNT(*) as count FROM artists WHERE approved = 1').first<{ count: number }>(),
+      env.DB
+        .prepare('SELECT COUNT(DISTINCT artist_id) as count FROM tracks t JOIN artists a ON a.id = t.artist_id WHERE a.approved = 1')
+        .first<{ count: number }>(),
+    ]);
+
+    const totalApprovedArtists = totalRow?.count ?? 0;
+    const artistsWithAtLeastOneTrack = coveredRow?.count ?? 0;
+    const coveragePercent = totalApprovedArtists > 0 ? Math.round((artistsWithAtLeastOneTrack / totalApprovedArtists) * 1000) / 10 : 0;
+
+    return Response.json({ totalApprovedArtists, artistsWithAtLeastOneTrack, coveragePercent });
+  });
 }
