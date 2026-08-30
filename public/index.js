@@ -185,7 +185,14 @@ export function createDeckApp() {
       this.$nextTick(() => {
         const card = document.getElementById('card');
         if (card && this.current) {
-          this.detachSwipe = attachSwipeDeck(card, { onSwipe: (dir) => this.decide(dir) });
+          this.detachSwipe = attachSwipeDeck(card, {
+            onSwipe: (dir) => this.decide(dir),
+            // issue #145 (Round 7): a tap anywhere on the card (not just the
+            // name button, which still works via its own click handler and
+            // never reaches here since it stops the pointerdown that would
+            // otherwise start a drag) opens the same artist/profile view.
+            onTap: () => (this.mode === 'music' ? this.viewArtist() : this.viewProfile()),
+          });
         }
       });
       preloadCandidateImage(this.queue[0], this.mode);

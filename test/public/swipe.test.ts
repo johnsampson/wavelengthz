@@ -97,4 +97,62 @@ describe('attachSwipeDeck', () => {
     expect(vibrate).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
+
+  // issue #145 (Round 7): "make the entire artist card clickable to the
+  // profile, not just the artist name".
+  describe('onTap', () => {
+    it('fires on a near-zero-movement tap', () => {
+      vi.stubGlobal('window', { innerWidth: 400 });
+      const container = fakeDraggableCardElement();
+      const onTap = vi.fn();
+      attachSwipeDeck(container, { onSwipe: () => {}, onTap });
+
+      container._handlers['pointerdown']({ clientX: 100, pointerId: 1 });
+      container._handlers['pointermove']({ clientX: 103 }); // 3px, well under the 10px tap threshold
+      container._handlers['pointerup']();
+
+      expect(onTap).toHaveBeenCalledTimes(1);
+      vi.unstubAllGlobals();
+    });
+
+    it('does not fire for an aborted drag that springs back without being a real tap', () => {
+      vi.stubGlobal('window', { innerWidth: 400 });
+      const container = fakeDraggableCardElement();
+      const onTap = vi.fn();
+      attachSwipeDeck(container, { onSwipe: () => {}, onTap });
+
+      container._handlers['pointerdown']({ clientX: 0, pointerId: 1 });
+      container._handlers['pointermove']({ clientX: 20 }); // under the swipe threshold, over the tap one
+      container._handlers['pointerup']();
+
+      expect(onTap).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
+
+    it('does not fire when the drag commits to a real swipe', () => {
+      vi.stubGlobal('window', { innerWidth: 400 });
+      const container = fakeDraggableCardElement();
+      const onTap = vi.fn();
+      attachSwipeDeck(container, { onSwipe: () => {}, onTap });
+
+      container._handlers['pointerdown']({ clientX: 0, pointerId: 1 });
+      container._handlers['pointermove']({ clientX: 200 }); // past the 80px default threshold
+      container._handlers['pointerup']();
+
+      expect(onTap).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
+
+    it('does not throw when onTap is not provided', () => {
+      vi.stubGlobal('window', { innerWidth: 400 });
+      const container = fakeDraggableCardElement();
+      attachSwipeDeck(container, { onSwipe: () => {} });
+
+      container._handlers['pointerdown']({ clientX: 0, pointerId: 1 });
+      container._handlers['pointermove']({ clientX: 1 });
+
+      expect(() => container._handlers['pointerup']()).not.toThrow();
+      vi.unstubAllGlobals();
+    });
+  });
 });
