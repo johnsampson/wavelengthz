@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, vi, afterEach } from 'vitest';
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
 import { insertTestUser } from '../helpers/createUser';
@@ -92,5 +92,68 @@ describe('POST /api/analytics/event', () => {
 
     expect(res.status).toBe(400);
     expect(await env.DB.prepare('SELECT COUNT(*) as c FROM analytics_events').first<{ c: number }>()).toEqual({ c: 0 });
+  });
+});
+
+// Issue #168 (part of the 250K-users strategy discussion).
+describe('POST /api/analytics/event -- GA4 forwarding', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('does not call GA4 when GA4_MEASUREMENT_ID/GA4_API_SECRET are unset (the default)', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const req = new Request('http://localhost/api/analytics/event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ eventType: 'session_start', clientId: 'c1', sessionId: 's1' }),
+    });
+
+    const res = await worker.fetch(req, env, ctx);
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('forwards to GA4 with the same event data once GA4 secrets are configured', async () => {
+    const fetchMock = vi.fn(async (url: string, options?: any) => new Response('', { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await insertTestUser(env.DB, { id: 'u1' });
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/analytics/event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ eventType: 'song_play', metadata: { spotifyId: 'sp1' }, clientId: 'c1', sessionId: 's1' }),
+    });
+    const ga4Env = { ...env, GA4_MEASUREMENT_ID: 'G-TEST123', GA4_API_SECRET: 'secret123' };
+
+    const res = await worker.fetch(req, ga4Env, ctx);
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://www.google-analytics.com/mp/collect?measurement_id=G-TEST123&api_secret=secret123');
+    const body = JSON.parse((options as any).body);
+    expect(body.client_id).toBe('c1');
+    expect(body.user_id).toBe('u1');
+    expect(body.events[0].name).toBe('song_play');
+    expect(body.events[0].params).toEqual({ spotifyId: 'sp1', session_id: 's1', engagement_time_msec: 1 });
+  });
+
+  it('does not call GA4 when clientId is absent from the request, even with secrets configured', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const req = new Request('http://localhost/api/analytics/event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ eventType: 'session_start' }),
+    });
+    const ga4Env = { ...env, GA4_MEASUREMENT_ID: 'G-TEST123', GA4_API_SECRET: 'secret123' };
+
+    const res = await worker.fetch(req, ga4Env, ctx);
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

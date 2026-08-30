@@ -101,7 +101,11 @@ describe('deck app', () => {
 
     const call = fetchMock.mock.calls.find((c) => c[0] === '/api/analytics/event');
     expect(call).toBeTruthy();
-    expect(JSON.parse((call![1] as any).body)).toEqual({ eventType: 'session_start', metadata: undefined });
+    const body = JSON.parse((call![1] as any).body);
+    // Issue #168: clientId/sessionId ride along on every event for GA4
+    // forwarding -- asserted as "some string", not an exact UUID, since
+    // the actual value is randomly generated.
+    expect(body).toEqual({ eventType: 'session_start', metadata: undefined, clientId: expect.any(String), sessionId: expect.any(String) });
   });
 
   it('does not record a second session_start event on a second init() within the same session', async () => {
@@ -281,7 +285,12 @@ describe('deck app', () => {
 
     const call = fetchMock.mock.calls.find((c) => c[0] === '/api/analytics/event');
     expect(call).toBeTruthy();
-    expect(JSON.parse((call![1] as any).body)).toEqual({ eventType: 'song_play', metadata: { trackId: 'sp1' } });
+    expect(JSON.parse((call![1] as any).body)).toEqual({
+      eventType: 'song_play',
+      metadata: { trackId: 'sp1' },
+      clientId: expect.any(String),
+      sessionId: expect.any(String),
+    });
 
     fetchMock.mockClear();
     vi.mocked(isCurrentTrack).mockReturnValue(true); // now "currently playing" -- next call is a resume
@@ -389,7 +398,12 @@ describe('deck app', () => {
     const analyticsCalls = fetchMock.mock.calls.filter((c) => c[0] === '/api/analytics/event');
     const call = analyticsCalls.find((c) => JSON.parse((c[1] as any).body).eventType === 'song_play');
     expect(call).toBeTruthy();
-    expect(JSON.parse((call![1] as any).body)).toEqual({ eventType: 'song_play', metadata: { spotifyId: 'sp1' } });
+    expect(JSON.parse((call![1] as any).body)).toEqual({
+      eventType: 'song_play',
+      metadata: { spotifyId: 'sp1' },
+      clientId: expect.any(String),
+      sessionId: expect.any(String),
+    });
   });
 
   it('showNext never mounts the card embed in People mode, even if a candidate carries a track field', async () => {

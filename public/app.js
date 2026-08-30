@@ -196,6 +196,47 @@ export const api = {
   // first-party usage tracking -- works for a logged-out visitor too (no
   // session required server-side), so callers shouldn't await this on any
   // user-visible path. metadata is optional, free-form per eventType.
+  // clientId/sessionId (issue #168) ride along so the server can forward
+  // the same event to Google Analytics 4's Measurement Protocol -- see
+  // getOrCreateAnalyticsClientId/getOrCreateAnalyticsSessionId below.
   recordEvent: (eventType, metadata) =>
-    request('/api/analytics/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ eventType, metadata }) }),
+    request('/api/analytics/event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ eventType, metadata, clientId: getOrCreateAnalyticsClientId(), sessionId: getOrCreateAnalyticsSessionId() }),
+    }),
 };
+
+// Issue #168 (part of the 250K-users strategy discussion): GA4's
+// Measurement Protocol requires a client_id on every hit. This app
+// deliberately doesn't load gtag.js client-side (src/lib/googleAnalytics.ts's
+// own comment explains why), so there's no _ga cookie to reuse -- generate
+// our own, persisted in localStorage so it survives across sessions the
+// same way GA's own client_id normally would. Guarded for localStorage
+// being unavailable (this test pool has no browser globals unless a test
+// stubs them), same reasoning as index.js's preloadCandidateImage guarding
+// on `Image`.
+function getOrCreateAnalyticsClientId() {
+  if (typeof localStorage === 'undefined') return undefined;
+  let id = localStorage.getItem('wl_ga_client_id');
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem('wl_ga_client_id', id);
+  }
+  return id;
+}
+
+// Same idea, but sessionStorage-scoped (one per tab session) -- backs
+// GA4's own session_id param, needed for its session/engagement reporting
+// to populate correctly. A distinct key from index.js's own
+// 'wl_session_start_recorded' flag -- that one is a boolean dedup marker,
+// this one is the actual id value GA expects.
+function getOrCreateAnalyticsSessionId() {
+  if (typeof sessionStorage === 'undefined') return undefined;
+  let id = sessionStorage.getItem('wl_ga_session_id');
+  if (!id) {
+    id = crypto.randomUUID();
+    sessionStorage.setItem('wl_ga_session_id', id);
+  }
+  return id;
+}

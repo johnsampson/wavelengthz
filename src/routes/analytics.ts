@@ -1,6 +1,7 @@
 import type { RouterType } from 'itty-router';
 import { getSessionUser } from '../lib/session';
 import { recordEvent, type AnalyticsEventType } from '../lib/analytics';
+import { sendToGA4 } from '../lib/googleAnalytics';
 
 const VALID_EVENT_TYPES: AnalyticsEventType[] = ['session_start', 'song_play'];
 
@@ -12,10 +13,10 @@ export function registerAnalyticsRoutes(router: RouterType) {
   // is present; recordEvent's own userId parameter accepts null otherwise.
   // Rate-limited the same as every other /api/* route via src/index.ts's
   // general per-IP limiter -- no dedicated bucket needed for this.
-  router.post('/api/analytics/event', async (request: Request, env: Env) => {
+  router.post('/api/analytics/event', async (request: Request, env: Env, ctx: ExecutionContext) => {
     const user = await getSessionUser(request, env.DB);
 
-    let body: { eventType?: string; metadata?: unknown };
+    let body: { eventType?: string; metadata?: unknown; clientId?: string; sessionId?: string };
     try {
       body = await request.json();
     } catch {
@@ -39,6 +40,26 @@ export function registerAnalyticsRoutes(router: RouterType) {
     }
 
     await recordEvent(env.DB, { userId: user?.id ?? null, eventType: body.eventType as AnalyticsEventType, metadata }, Date.now());
+
+    // Issue #168: forwarded to GA4 alongside the first-party write above,
+    // fire-and-forget via ctx.waitUntil -- a GA outage or misconfiguration
+    // (GA4_MEASUREMENT_ID/GA4_API_SECRET unset entirely no-ops this) must
+    // never affect this response. Requires clientId -- GA4's own per-hit
+    // identity, generated client-side in public/app.js -- skipped if
+    // absent (e.g. localStorage unavailable) since GA4 rejects a hit with
+    // no client_id anyway.
+    if (body.clientId) {
+      ctx.waitUntil(
+        sendToGA4(env, {
+          clientId: body.clientId,
+          userId: user?.id ?? null,
+          sessionId: body.sessionId,
+          eventName: body.eventType as string,
+          params: (body.metadata ?? undefined) as Record<string, string | number> | undefined,
+        })
+      );
+    }
+
     return Response.json({ ok: true });
   });
 }

@@ -205,4 +205,61 @@ describe('api client', () => {
     await expect(api.me()).rejects.toThrow();
     vi.unstubAllGlobals();
   });
+
+  // Issue #168 (part of the 250K-users strategy discussion): clientId/
+  // sessionId ride along on every recordEvent call so the server can
+  // forward the same event to GA4's Measurement Protocol.
+  describe('api.recordEvent -- GA4 client/session ids', () => {
+    function fakeStorage() {
+      const store = new Map<string, string>();
+      return {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => store.set(k, v),
+        removeItem: (k: string) => store.delete(k),
+      };
+    }
+
+    it('includes a generated clientId and sessionId in the request body', async () => {
+      vi.stubGlobal('localStorage', fakeStorage());
+      vi.stubGlobal('sessionStorage', fakeStorage());
+      const fetchMock = vi.fn(async (path: string, options?: any) => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await api.recordEvent('session_start');
+
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(typeof body.clientId).toBe('string');
+      expect(typeof body.sessionId).toBe('string');
+      vi.unstubAllGlobals();
+    });
+
+    it('reuses the same clientId across calls, rather than generating a new one each time', async () => {
+      vi.stubGlobal('localStorage', fakeStorage());
+      vi.stubGlobal('sessionStorage', fakeStorage());
+      const fetchMock = vi.fn(async (path: string, options?: any) => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await api.recordEvent('session_start');
+      await api.recordEvent('song_play', { trackId: 't1' });
+
+      const firstClientId = JSON.parse(fetchMock.mock.calls[0][1].body).clientId;
+      const secondClientId = JSON.parse(fetchMock.mock.calls[1][1].body).clientId;
+      expect(firstClientId).toBe(secondClientId);
+      vi.unstubAllGlobals();
+    });
+
+    it('omits clientId/sessionId (undefined, dropped by JSON.stringify) when localStorage/sessionStorage are unavailable', async () => {
+      // Deliberately not stubbed -- this test pool has no browser globals
+      // by default, exercising the same guard index.js's own
+      // preloadCandidateImage relies on for `Image`.
+      const fetchMock = vi.fn(async (path: string, options?: any) => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await api.recordEvent('session_start');
+
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body).toEqual({ eventType: 'session_start', metadata: undefined });
+      vi.unstubAllGlobals();
+    });
+  });
 });

@@ -53,6 +53,16 @@ interface Env {
   // the duration of a push, then unset again -- see
   // isLiveSpotifyFallbackDisabled (src/lib/spotifyThrottle.ts).
   SPOTIFY_LIVE_FALLBACK_DISABLED?: string;
+  // Issue #168 (part of the 250K-users strategy discussion): forwards
+  // analytics_events rows to Google Analytics 4's Measurement Protocol
+  // (src/lib/googleAnalytics.ts). Both unset (the default, until a GA4
+  // property exists) means that forwarding no-ops entirely -- the app's
+  // own first-party analytics_events writes are unaffected either way.
+  // GA4_MEASUREMENT_ID is the "G-XXXXXXX" id from a GA4 Web data stream;
+  // GA4_API_SECRET is a Measurement Protocol API secret created under
+  // that same stream's settings. Set both via `wrangler secret put`.
+  GA4_MEASUREMENT_ID?: string;
+  GA4_API_SECRET?: string;
 }
 
 // `cloudflare:test`'s `env` export is typed as `Cloudflare.Env` (a separate
@@ -84,5 +94,7 @@ declare namespace Cloudflare {
     TWILIO_AUTH_TOKEN: string;
     TWILIO_VERIFY_SERVICE_SID: string;
     SPOTIFY_LIVE_FALLBACK_DISABLED?: string;
+    GA4_MEASUREMENT_ID?: string;
+    GA4_API_SECRET?: string;
   }
 }
