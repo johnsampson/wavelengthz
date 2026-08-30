@@ -190,19 +190,34 @@ export function registerMusicSwipeRoutes(router: RouterType) {
     // "play a song" chip without a live per-candidate fetch just to
     // discover whether one's available -- batched into this same query,
     // same reasoning as every other batched-not-per-row lookup in this
-    // codebase. Picked by insertion order (rowid), matching the "oldest
-    // inserted = earliest release" convention GET /api/artists/:id's own
-    // track ordering already uses. The scalar subquery as the JOIN key
-    // (rather than a plain `rt.artist_id = artists.id` join) is required to
-    // keep exactly one row per artist candidate -- a plain join would
-    // multiply rows for any artist with more than one cataloged track,
-    // silently breaking this query's `LIMIT`. `artists`/`tracks` share
-    // several column names (id, name, approved, created_at, spotify_id) --
-    // every reference below is qualified with `${table}.`/`rt.` accordingly
-    // to avoid "ambiguous column name" once this join is present.
+    // codebase. Picked by aggregate right-swipe count across all users
+    // (music_swipes WHERE item_type = 'track' AND direction = 'right'),
+    // highest first -- issue #159 (part of the 250K-users strategy): the
+    // deck should lead with what people have actually liked, not an
+    // accident of catalog insertion order. Ties (most commonly "every
+    // track for this artist has zero likes yet", the norm right after a
+    // fresh backfill) fall back to the old ORDER BY rowid ASC ("oldest
+    // inserted = earliest release") behavior, so an artist with no
+    // like data yet regresses to exactly today's selection rather than to
+    // an arbitrary one. The scalar subquery as the JOIN key (rather than a
+    // plain `rt.artist_id = artists.id` join) is required to keep exactly
+    // one row per artist candidate -- a plain join would multiply rows for
+    // any artist with more than one cataloged track, silently breaking
+    // this query's `LIMIT`. `artists`/`tracks` share several column names
+    // (id, name, approved, created_at, spotify_id) -- every reference
+    // below is qualified with `${table}.`/`rt.` accordingly to avoid
+    // "ambiguous column name" once this join is present.
     const trackPreviewJoin =
       itemType === 'artist'
-        ? `LEFT JOIN tracks rt ON rt.id = (SELECT id FROM tracks WHERE artist_id = ${table}.id ORDER BY rowid ASC LIMIT 1)`
+        ? `LEFT JOIN tracks rt ON rt.id = (
+             SELECT t.id FROM tracks t
+             WHERE t.artist_id = ${table}.id
+             ORDER BY (
+               SELECT COUNT(*) FROM music_swipes
+               WHERE item_type = 'track' AND direction = 'right' AND item_id = t.id
+             ) DESC, t.rowid ASC
+             LIMIT 1
+           )`
         : '';
     const trackPreviewSelect =
       itemType === 'artist' ? `, rt.id as track_id, rt.spotify_id as track_spotify_id, rt.name as track_name, rt.album_image_url as track_image_url, rt.duration_ms as track_duration_ms` : '';

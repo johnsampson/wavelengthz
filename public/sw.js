@@ -550,12 +550,19 @@
 // tap (not a real swipe, and not an aborted drag attempt that just springs
 // back) -- index.js wires it to the same viewArtist()/viewProfile() the
 // name button already called.
-// v84 adds first-party analytics instrumentation (issue #161, part of the
+// v84 makes Google sign-on the primary login option (issue #156, part of
+// the 250K-users strategy): index.html's logged-out state copy drops its
+// Spotify-specific "Log in with Spotify" wording in favor of a
+// provider-neutral "Log in" -- the button already pointed at /login (the
+// provider picker), only the copy assumed Spotify. login.html itself
+// (Google now btn-primary, Spotify btn-secondary) is in BYPASS_PATHS and
+// needs no cache entry.
+// v85 adds first-party analytics instrumentation (issue #161, part of the
 // 250K-users strategy discussion) -- index.js now records a session_start
 // event once per session on init(), and a song_play event from
 // togglePreviewTrack()/toggleAnthem() on a fresh (non-resume) play. app.js
 // gains the new api.recordEvent() client method both call.
-const CACHE_NAME = 'wavelengthz-shell-v84';
+const CACHE_NAME = 'wavelengthz-shell-v85';
 const APP_SHELL = [
   '/',
   '/app.js',

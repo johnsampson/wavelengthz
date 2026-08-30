@@ -239,6 +239,33 @@ describe('GET /api/candidates/music', () => {
     expect(a1.track.id).toBe('t1');
   });
 
+  it('picks the most-liked track as the representative one, even over an earlier-inserted unliked track', async () => {
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('t1', 'sp-t1', 'First Track', 'a1', 'https://img.example/t1.jpg', 'seed', 1, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('t2', 'sp-t2', 'Second Track', 'a1', 'https://img.example/t2.jpg', 'seed', 1, 1000)`
+    ).run();
+    // Right-swipes from other users -- this candidate query's own
+    // "already swiped by me" exclusion only ever looks at the requesting
+    // user's own swipes, so these count toward t2's like total without
+    // making a1/t2 disappear from u1's own candidate pool.
+    await insertTestUser(env.DB, { id: 'u2', spotifyId: 'sp2', accessToken: 'a', refreshToken: 'r', tokenExpiresAt: 9999999999999, createdAt: 1000, updatedAt: 1000 });
+    await insertTestUser(env.DB, { id: 'u3', spotifyId: 'sp3', accessToken: 'a', refreshToken: 'r', tokenExpiresAt: 9999999999999, createdAt: 1000, updatedAt: 1000 });
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s1', 'u2', 'track', 't2', 'right', 1000, 1000)`
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES ('s2', 'u3', 'track', 't2', 'right', 1000, 1000)`
+    ).run();
+    const cookie = await cookieFor('u1');
+    const req = new Request('http://localhost/api/candidates/music?limit=10', { headers: { Cookie: cookie } });
+    const res = await worker.fetch(req, env, ctx);
+    const body = await res.json<any>();
+    const a1 = body.candidates.find((c: any) => c.itemId === 'a1');
+    expect(a1.track.id).toBe('t2');
+  });
+
   it('omits track info for track-type candidates -- the preview feature is artist-mode only', async () => {
     await env.DB.prepare(
       `INSERT INTO tracks (id, spotify_id, name, artist_id, album_image_url, source, approved, created_at) VALUES ('t1', 'sp-t1', 'Track One', 'a1', 'https://img.example/t1.jpg', 'seed', 1, 1000)`
