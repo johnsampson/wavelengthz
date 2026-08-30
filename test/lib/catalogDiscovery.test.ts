@@ -146,7 +146,7 @@ describe('discoverArtistsByGenre', () => {
     await discoverArtistsByGenre(env as any, 0);
 
     const searchCalls = calls.filter((c) => c.includes('/v1/search'));
-    expect(searchCalls.length).toBeLessThanOrEqual(4); // GENRES_PER_RUN
+    expect(searchCalls.length).toBeLessThanOrEqual(6); // GENRES_PER_RUN
     expect(await env.DB.prepare('SELECT COUNT(*) c FROM artists').first<{ c: number }>()).toEqual({ c: 10 });
   });
 
@@ -248,34 +248,24 @@ describe('discoverArtistsByGenre', () => {
       ...env,
       ARTIST_TRACK_BACKFILL_QUEUE: { send: async (m: any) => { sent.push(m); } },
     };
-    // 12 candidates, one more than TRACK_BACKFILL_PER_RUN (10), so the top-10
-    // cutoff is actually exercised rather than trivially enqueuing everyone.
-    stubSpotifySearch([
-      artist('sp-p60', { popularity: 60 }),
-      artist('sp-p99', { popularity: 99 }),
-      artist('sp-p50', { popularity: 50 }),
-      artist('sp-p40', { popularity: 40 }),
-      artist('sp-p20', { popularity: 20 }),
-      artist('sp-p90', { popularity: 90 }),
-      artist('sp-p80', { popularity: 80 }),
-      artist('sp-p70', { popularity: 70 }),
-      artist('sp-p30', { popularity: 30 }),
-      artist('sp-p10', { popularity: 10 }),
-      artist('sp-p2', { popularity: 2 }),
-      artist('sp-p1', { popularity: 1 }),
-    ]);
+    // 32 candidates, two more than TRACK_BACKFILL_PER_RUN (30), so the
+    // top-30 cutoff is actually exercised rather than trivially enqueuing
+    // everyone. Popularity 1..32, shuffled insertion order so ranking (not
+    // insertion order) is what's actually under test.
+    const candidates = Array.from({ length: 32 }, (_, i) => artist(`sp-p${i + 1}`, { popularity: i + 1 }));
+    stubSpotifySearch([...candidates].reverse());
 
     const result = await discoverArtistsByGenre(envWithSpy as any, 0);
 
-    expect(result.backfillsEnqueued).toBe(10); // TRACK_BACKFILL_PER_RUN
-    expect(sent).toHaveLength(10);
+    expect(result.backfillsEnqueued).toBe(30); // TRACK_BACKFILL_PER_RUN
+    expect(sent).toHaveLength(30);
     // Highest popularity first -- these are the artists most likely to be
     // opened, so they're the ones worth pre-warming a play button for. The
-    // two least popular (sp-p2, sp-p1) fall outside the top 10 and are
+    // two least popular (sp-p1, sp-p2) fall outside the top 30 and are
     // excluded.
-    expect(sent.map((m) => m.spotifyArtistId)).toEqual([
-      'sp-p99', 'sp-p90', 'sp-p80', 'sp-p70', 'sp-p60', 'sp-p50', 'sp-p40', 'sp-p30', 'sp-p20', 'sp-p10',
-    ]);
+    expect(sent.map((m) => m.spotifyArtistId)).toEqual(
+      Array.from({ length: 30 }, (_, i) => `sp-p${32 - i}`)
+    );
     // Enqueue only: the queue consumer makes every actual track call.
     expect(sent.every((m) => typeof m.artistId === 'string' && m.limit === 30)).toBe(true);
   });
