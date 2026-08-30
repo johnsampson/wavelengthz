@@ -31,3 +31,16 @@ export async function isSpotifyCoolingDown(kv: KVNamespace): Promise<number | nu
   const remaining = Number(stored) - Date.now();
   return remaining > 0 ? remaining : null;
 }
+
+// Issue #158 (part of the 250K-users strategy discussion): a manual,
+// coarser safety valve alongside the reactive cooldown above -- not a
+// replacement for it. isSpotifyCoolingDown reacts to a real 429 Spotify
+// already sent; this instead lets a human deliberately turn off specific
+// live-fallback Spotify calls ahead of a deliberate high-traffic push,
+// before any 429 has actually happened, and turn it back on once the push
+// is over. See src/lib/artistTopUp.ts's topUpArtistsForUser and
+// src/routes/catalog.ts's GET /api/artists/:id cold-start path for the two
+// call sites that check this.
+export function isLiveSpotifyFallbackDisabled(env: Env): boolean {
+  return env.SPOTIFY_LIVE_FALLBACK_DISABLED === 'true';
+}

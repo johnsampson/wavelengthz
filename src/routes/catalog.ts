@@ -20,6 +20,7 @@ import { upsertArtist, upsertTrack } from '../lib/catalogUpsert';
 import { haversineKm } from '../lib/scoring';
 import { readArtistTracksCache, writeArtistTracksCache } from '../lib/artistTracksCache';
 import { enqueueArtistTrackBackfill } from '../lib/artistTrackBackfill';
+import { isLiveSpotifyFallbackDisabled } from '../lib/spotifyThrottle';
 
 // Raised from 10 -- fetchArtistTracks (src/lib/spotify.ts) now fans out
 // across up to 10 albums/singles in parallel rather than fetching
@@ -301,11 +302,17 @@ export function registerCatalogRoutes(router: RouterType) {
       // sourced from our own database instead of a fresh live call.
       resolvedTracks = dbTracks.results.map(rowToResolvedTrack);
       quickPath = true;
-      await enqueueArtistTrackBackfill(env, {
-        artistId: artistRow.id,
-        spotifyArtistId: artistRow.spotify_id,
-        limit: trackLimit,
-      });
+      // Issue #158 (part of the 250K-users strategy discussion): a manual
+      // circuit-breaker skips queueing MORE background Spotify-call-
+      // generating work during a deliberate high-traffic push -- serving
+      // what D1 already has (above) is unaffected either way.
+      if (!isLiveSpotifyFallbackDisabled(env)) {
+        await enqueueArtistTrackBackfill(env, {
+          artistId: artistRow.id,
+          spotifyArtistId: artistRow.spotify_id,
+          limit: trackLimit,
+        });
+      }
     } else {
       // Nothing in D1 for this artist at all -- the common case only for a
       // genuinely brand-new artist. Previously always ran the full ~10-album
@@ -332,15 +339,27 @@ export function registerCatalogRoutes(router: RouterType) {
         const quickCached = await readArtistTracksCache(env.RATE_LIMIT_KV, artistRow.spotify_id, QUICK_TRACK_LIMIT);
         if (quickCached) {
           topTracks = quickCached;
+        } else if (isLiveSpotifyFallbackDisabled(env)) {
+          // Issue #158 (part of the 250K-users strategy discussion): a
+          // manual circuit-breaker for a deliberate high-traffic push --
+          // skip the live quick-fetch (and the backfill enqueue below)
+          // entirely rather than attempting it under concentrated
+          // concurrent load. Degrades to "no tracks yet" for a genuinely
+          // brand-new artist someone opens for the first time during the
+          // push, exactly like a true cache miss with nothing else to
+          // serve -- the honest outcome, not a broken response.
+          topTracks = [];
         } else {
           topTracks = await fetchArtistTracksQuick(await getToken(), artistRow.spotify_id, env.RATE_LIMIT_KV);
           await writeArtistTracksCache(env.RATE_LIMIT_KV, artistRow.spotify_id, QUICK_TRACK_LIMIT, topTracks);
         }
-        await enqueueArtistTrackBackfill(env, {
-          artistId: artistRow.id,
-          spotifyArtistId: artistRow.spotify_id,
-          limit: trackLimit,
-        });
+        if (!isLiveSpotifyFallbackDisabled(env)) {
+          await enqueueArtistTrackBackfill(env, {
+            artistId: artistRow.id,
+            spotifyArtistId: artistRow.spotify_id,
+            limit: trackLimit,
+          });
+        }
       }
       resolvedTracks = await upsertResolvedTracks(env.DB, topTracks, artistRow.id, artistGenres, user.id, now);
     }
