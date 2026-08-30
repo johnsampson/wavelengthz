@@ -557,7 +557,16 @@
 // provider picker), only the copy assumed Spotify. login.html itself
 // (Google now btn-primary, Spotify btn-secondary) is in BYPASS_PATHS and
 // needs no cache entry.
-const CACHE_NAME = 'wavelengthz-shell-v84';
+// v85 replaces the deck card's small tap-to-play text chip with an inline
+// Spotify embed frame (issue #159/#160, part of the 250K-users strategy):
+// the artist's most-liked cataloged track is now visible and playable
+// directly on the card, autoplaying where the browser allows it, instead
+// of handing off to the shared player bar. index.js's showNext() mounts/
+// tears down the embed imperatively (same reasoning as playerBar.js's own
+// iframe -- Spotify's embed can't be redirected to a new track in place);
+// togglePreviewTrack()/isCurrentPreviewTrack() are removed, no longer
+// reachable from index.html.
+const CACHE_NAME = 'wavelengthz-shell-v85';
 const APP_SHELL = [
   '/',
   '/app.js',
