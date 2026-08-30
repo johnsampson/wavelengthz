@@ -660,6 +660,23 @@ describe('GET /api/artists/:id', () => {
       vi.unstubAllGlobals();
     });
 
+    // Issue #158 (part of the 250K-users strategy discussion).
+    it('serves an empty track list without calling Spotify or enqueueing a backfill when the live-fallback circuit-breaker is enabled', async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      const cookie = await cookieFor('u1');
+      const req = new Request('http://localhost/api/artists/local-1', { headers: { Cookie: cookie } });
+
+      const res = await worker.fetch(req, { ...env, SPOTIFY_LIVE_FALLBACK_DISABLED: 'true' }, {} as ExecutionContext);
+      const body = await res.json<any>();
+
+      expect(res.status).toBe(200);
+      expect(body.tracks).toEqual([]);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(await env.RATE_LIMIT_KV.get('artist-backfill-pending:spotify-local-1')).toBeNull();
+      vi.unstubAllGlobals();
+    });
+
     it('once the backfill queue consumer completes, a later no-?limit= view serves the full set instantly from cache, with no further live Spotify calls', async () => {
       const getAlbumsCalls = stubTrackSearchCounting(makeTracks(30));
       const cookie = await cookieFor('u1');

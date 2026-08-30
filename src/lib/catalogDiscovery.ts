@@ -44,7 +44,14 @@ const ARTISTS_PER_SEARCH = 10;
 // per artist) and so the cursor below spreads coverage evenly across the
 // whole genre list over successive runs rather than racing one genre to
 // exhaustion.
-const GENRES_PER_RUN = 4;
+//
+// Was 4 -- issue #157 (part of the 250K-users strategy discussion) raises
+// this to 6, so the full SEED_GENRES list (12) cycles roughly every 2 runs
+// (~12h at wrangler.toml's "30 */6 * * *" cadence) instead of 3 (~18h). Each
+// genre still costs exactly one cheap /v1/search call (ARTISTS_PER_SEARCH's
+// own comment: artists cost ~0.1 calls each), so this is a modest, low-risk
+// increase in per-run Spotify call count, not a burst-risk change.
+const GENRES_PER_RUN = 6;
 
 // Spotify caps offset+limit at 1000 for search (SPOTIFY_MAX_OFFSET in
 // src/db/seed.ts). Past this the API errors rather than returning an empty
@@ -65,14 +72,17 @@ const MAX_SEARCH_OFFSET = 950;
 // track-related work of any kind.
 //
 // Was 3 -- issue #145 (Round 7) item 5: "it does not appear to be pulling
-// down cron tracks frequently. Maybe 10 to 20 overnight." At 3 per run x 4
-// runs/day (wrangler.toml's "30 */6 * * *"), that's only 12 artists/day
-// getting a backfill queued at all, consistent with the complaint. Raising
+// down cron tracks frequently. Maybe 10 to 20 overnight." Raised to 10,
+// then to 30 here -- issue #157 (part of the 250K-users strategy
+// discussion): 10/run x 4 runs/day was only 40 artists/day getting a real
+// backfill queued, nowhere near enough breadth for a cold-start audience
+// where most deck artists have never been opened by anyone yet. Raising
 // this doesn't add burst risk: the backfill queue's own consumer
 // (wrangler.toml: max_concurrency = 1, one artist processed at a time) is
 // what actually paces the Spotify calls, so a bigger number here just grows
-// the queue's backlog, not the call rate.
-const TRACK_BACKFILL_PER_RUN = 10;
+// the queue's backlog, not the call rate -- confirmed unchanged reasoning
+// from the original 3->10 raise, still holds at 10->30.
+const TRACK_BACKFILL_PER_RUN = 30;
 
 // Matches ARTIST_PROFILE_TRACK_LIMIT (src/routes/catalog.ts) -- the same
 // depth a real first view of an artist page asks for, so a pre-warmed artist
