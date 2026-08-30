@@ -39,6 +39,19 @@ function stubSpotify(artistsByGenre: Record<string, any[]>) {
 }
 
 describe('topUpArtistsForUser', () => {
+  // Issue #158 (part of the 250K-users strategy discussion).
+  it('returns 0 without calling Spotify at all when the live-fallback circuit-breaker is enabled', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const inserted = await topUpArtistsForUser({ ...env, SPOTIFY_LIVE_FALLBACK_DISABLED: 'true' } as any, await loadUser());
+
+    expect(inserted).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+
   it('inserts artists from the user\'s top genre by affinity', async () => {
     await env.DB.prepare(
       `INSERT INTO user_genres (id, user_id, genre, artist_count, track_count, created_at, updated_at) VALUES ('ug1', 'u1', 'indie', 5, 2, 1000, 1000)`

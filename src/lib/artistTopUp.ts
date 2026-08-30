@@ -3,6 +3,7 @@ import { fetchArtistTracks, getClientCredentialsToken, searchArtistsByGenre } fr
 import { recordCatalogGenres } from './genreCatalog';
 import { upsertArtist, upsertTrack } from './catalogUpsert';
 import { SEED_GENRES } from '../db/seed';
+import { isLiveSpotifyFallbackDisabled } from './spotifyThrottle';
 import type { UserRow } from './session';
 
 export const TOP_UP_COUNT = 10;
@@ -31,6 +32,17 @@ async function topGenresForUser(db: D1Database, userId: string, limit: number): 
  * knows whether it's worth re-querying for candidates.
  */
 export async function topUpArtistsForUser(env: Env, user: UserRow): Promise<number> {
+  // Issue #158 (part of the 250K-users strategy discussion): manual
+  // circuit-breaker for a deliberate high-traffic push -- skips this
+  // function's live Spotify calls entirely rather than attempting them
+  // under concentrated concurrent load. Checked before resolving a token
+  // (itself a live call on the fallback path) so the breaker actually
+  // prevents that too, not just the search/track calls after it. Callers
+  // already treat 0 as "nothing to top up right now" -- the exact same
+  // outcome a real empty search result would produce, so no caller needs
+  // to know the breaker exists.
+  if (isLiveSpotifyFallbackDisabled(env)) return 0;
+
   const token = await getValidAccessToken(user, env, env.DB).catch(() => getClientCredentialsToken(env));
   const genres = await topGenresForUser(env.DB, user.id, 3);
   const now = Date.now();
