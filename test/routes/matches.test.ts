@@ -4,7 +4,7 @@ import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
 import { insertTestUser } from '../helpers/createUser';
 import { getMatchNotificationDelayMs } from '../../src/lib/notifications';
-import { MIN_PHOTOS, MIN_LIKED_SONGS } from '../../src/lib/messagingGate';
+import { MIN_PHOTOS, MIN_ARTISTS_ACTED } from '../../src/lib/messagingGate';
 import worker from '../../src/index';
 
 beforeAll(async () => {
@@ -36,13 +36,13 @@ async function makeUser(id: string, email: string | null, displayName: string | 
       .bind(`photo-${id}-${i}`, id, `users/${id}/photo${i}.jpg`, i)
       .run();
   }
-  // item_id carries no FK to tracks (see messagingGate.test.ts's identical
+  // item_id carries no FK to artists (see messagingGate.test.ts's identical
   // comment) -- fabricated ids are fine, this is a plain COUNT query.
-  for (let i = 0; i < MIN_LIKED_SONGS; i++) {
+  for (let i = 0; i < MIN_ARTISTS_ACTED; i++) {
     await env.DB.prepare(
-      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES (?, ?, 'track', ?, 'right', 1000, 1000)`
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES (?, ?, 'artist', ?, 'right', 1000, 1000)`
     )
-      .bind(`liked-${id}-${i}`, id, `track-${id}-${i}`)
+      .bind(`swiped-${id}-${i}`, id, `artist-${id}-${i}`)
       .run();
   }
 }
@@ -265,7 +265,7 @@ describe('messages', () => {
     expect(messages.results.length).toBe(0);
   });
 
-  it('rejects sending with fewer than MIN_LIKED_SONGS liked tracks, even with bio/photos/phone all satisfied', async () => {
+  it('rejects sending with fewer than MIN_ARTISTS_ACTED artists acted on, even with bio/photos/phone all satisfied', async () => {
     await env.DB.prepare(`DELETE FROM music_swipes WHERE user_id = 'u1'`).run();
     const cookie = await cookieFor('u1');
 
@@ -284,7 +284,7 @@ describe('messages', () => {
     expect(body.error).toBe('profile_incomplete');
   });
 
-  it('rejects sending with no verified phone number, even with bio/photos/liked songs all satisfied', async () => {
+  it('rejects sending with no verified phone number, even with bio/photos/artists-acted-on all satisfied', async () => {
     await env.DB.prepare(`UPDATE users SET phone_verified_at = NULL WHERE id = 'u1'`).run();
     const cookie = await cookieFor('u1');
 

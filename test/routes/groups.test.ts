@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vite
 import { applySchema } from '../apply-schema';
 import { createSession } from '../../src/lib/session';
 import { insertTestUser } from '../helpers/createUser';
-import { MIN_PHOTOS, MIN_LIKED_SONGS } from '../../src/lib/messagingGate';
+import { MIN_PHOTOS, MIN_ARTISTS_ACTED } from '../../src/lib/messagingGate';
 import worker from '../../src/index';
 
 beforeAll(async () => {
@@ -36,11 +36,11 @@ async function makeUser(id: string, lat = 30.27, lng = -97.74, maxDistanceKm = 8
       .bind(`photo-${id}-${i}`, id, `users/${id}/photo${i}.jpg`, i)
       .run();
   }
-  for (let i = 0; i < MIN_LIKED_SONGS; i++) {
+  for (let i = 0; i < MIN_ARTISTS_ACTED; i++) {
     await env.DB.prepare(
-      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES (?, ?, 'track', ?, 'right', 1000, 1000)`
+      `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES (?, ?, 'artist', ?, 'right', 1000, 1000)`
     )
-      .bind(`liked-${id}-${i}`, id, `track-${id}-${i}`)
+      .bind(`swiped-${id}-${i}`, id, `artist-${id}-${i}`)
       .run();
   }
 }
@@ -546,7 +546,7 @@ describe('group messages', () => {
     expect(body.error).toBe('profile_incomplete');
   });
 
-  it('rejects sending with fewer than MIN_LIKED_SONGS liked tracks, even with bio/photos/phone all satisfied', async () => {
+  it('rejects sending with fewer than MIN_ARTISTS_ACTED artists acted on, even with bio/photos/phone all satisfied', async () => {
     const cookie = await cookieFor('u1');
     const groupId = await createGroup(cookie);
     await env.DB.prepare(`DELETE FROM music_swipes WHERE user_id = 'u1'`).run();

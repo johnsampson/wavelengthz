@@ -535,7 +535,14 @@
 // convention as wavelength.html's/join.html's existing "Back to..." links,
 // relying on router.js's site-wide internal-anchor-click interception
 // rather than a JS navigate() call.
-// v82 makes the entire deck card (not just the artist name/match name
+// v82 changes the messaging-eligibility gate (issue #145, Round 7 item 8):
+// "change the criteria for messaging from liking 25 songs to acting on 50
+// artists that includes passing or liking or skipping." Settings ->
+// Messaging (public/settings/messaging.html/.js) now reports and requires
+// artistsActed (any verdict on 50 distinct artists) instead of likedSongs
+// (25 right-swiped tracks) -- see src/lib/messagingGate.ts's
+// artistsActedCountFor/MIN_ARTISTS_ACTED.
+// v83 makes the entire deck card (not just the artist name/match name
 // button) navigate to the artist page / profile on tap -- issue #145
 // (Round 7): "make the entire artist card clickable to the profile, not
 // just the artist name." swipe.js's attachSwipeDeck gains an onTap callback,
@@ -543,7 +550,7 @@
 // tap (not a real swipe, and not an aborted drag attempt that just springs
 // back) -- index.js wires it to the same viewArtist()/viewProfile() the
 // name button already called.
-const CACHE_NAME = 'wavelengthz-shell-v82';
+const CACHE_NAME = 'wavelengthz-shell-v83';
 const APP_SHELL = [
   '/',
   '/app.js',
