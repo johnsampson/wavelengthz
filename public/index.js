@@ -293,7 +293,12 @@ export function createDeckApp() {
       try {
         if (this.mode === 'people') {
           const res = await api.swipe('people', { target_id: swiped.id, direction });
+          // Issue #170: fire-and-forget, same as every other recordEvent call
+          // in this file -- a dropped analytics write must never block or
+          // fail the swipe itself.
+          api.recordEvent('people_swipe', { direction }).catch(() => {});
           if (res.matched) {
+            api.recordEvent('match_created', { matchId: res.matchId }).catch(() => {});
             // Hold on the celebration instead of immediately advancing --
             // dismissMatch() (or the deck's own showNext/loadQueue logic)
             // moves to the next candidate once the user is ready.
@@ -302,6 +307,7 @@ export function createDeckApp() {
           }
         } else {
           const res = await api.swipe('music', { item_type: swiped.itemType, item_id: swiped.itemId, direction });
+          api.recordEvent('music_swipe', { direction }).catch(() => {});
           // Shown once the queue/card transition below has already moved
           // on -- the prompt is about a genre in general, not this specific
           // card, so it doesn't need to block advancing.
@@ -442,6 +448,10 @@ export function createDeckApp() {
           trackId = trackRes.trackId;
         }
         await api.swipe('music', { item_type: 'track', item_id: trackId, direction: 'right' });
+        // Issue #170: same event as the deck's own swipe (decide()), tagged
+        // with its source since this is the one-step search "quick like"
+        // path (issue #108), not a deck card.
+        api.recordEvent('music_swipe', { direction: 'right', source: 'search' }).catch(() => {});
         showToast({ message: `Liked "${result.name}"`, icon: '❤️' });
         this.closeSearch();
       } catch (e) {

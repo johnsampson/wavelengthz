@@ -5,7 +5,22 @@
 // process wants an export from our analytics, not anything Spotify itself
 // can see).
 
-export type AnalyticsEventType = 'session_start' | 'song_play';
+// Issue #170: Tier 1 of the broader event-coverage expansion -- the app's
+// core engagement loop (swipe, match, message, group, Daily Drop), so the
+// analytics_events table (and the GA4 forwarding riding alongside it, see
+// src/lib/googleAnalytics.ts) reflects real usage, not just reach. Deliberately
+// excludes safety actions (block/report) -- forwarding those to a third-party
+// vendor is its own decision, not bundled in here.
+export type AnalyticsEventType =
+  | 'session_start'
+  | 'song_play'
+  | 'people_swipe'
+  | 'music_swipe'
+  | 'match_created'
+  | 'message_sent'
+  | 'group_created'
+  | 'group_joined'
+  | 'daily_drop_answered';
 
 /**
  * Records one analytics event. userId is optional -- an anonymous visitor

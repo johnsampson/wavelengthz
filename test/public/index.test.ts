@@ -406,6 +406,69 @@ describe('deck app', () => {
     });
   });
 
+  // Issue #170: Tier 1 event-coverage expansion.
+  it('decide records a people_swipe event, and a match_created event too when the swipe results in a mutual match', async () => {
+    const fetchMock = vi.fn(async (path: string, options?: any) =>
+      path === '/api/swipe/people'
+        ? new Response(JSON.stringify({ ok: true, matched: true, matchId: 'm1' }), { status: 200 })
+        : new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const app: any = createDeckApp();
+    app.mode = 'people';
+    app.current = { id: 'p1', displayName: 'Alex', primaryPhotoUrl: 'https://example.com/p.jpg' };
+
+    await app.decide('right');
+
+    const analyticsCalls = fetchMock.mock.calls.filter((c) => c[0] === '/api/analytics/event');
+    const swipeCall = analyticsCalls.find((c) => JSON.parse((c[1] as any).body).eventType === 'people_swipe');
+    const matchCall = analyticsCalls.find((c) => JSON.parse((c[1] as any).body).eventType === 'match_created');
+    expect(JSON.parse((swipeCall![1] as any).body)).toEqual({
+      eventType: 'people_swipe',
+      metadata: { direction: 'right' },
+      clientId: expect.any(String),
+      sessionId: expect.any(String),
+    });
+    expect(JSON.parse((matchCall![1] as any).body)).toEqual({
+      eventType: 'match_created',
+      metadata: { matchId: 'm1' },
+      clientId: expect.any(String),
+      sessionId: expect.any(String),
+    });
+    // decide() returns immediately on a match, so the matchModal celebration
+    // never got clobbered by a showNext()/loadQueue() call underneath it.
+    expect(app.matchModal).toEqual({ name: 'Alex', photoUrl: 'https://example.com/p.jpg', matchId: 'm1' });
+    vi.unstubAllGlobals();
+  });
+
+  it('decide records a music_swipe event for a Music-mode swipe that does not match', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    const doc = fakeDocumentWithCardHost();
+    vi.stubGlobal('document', doc);
+    const fetchMock = vi.fn(async (path: string, options?: any) =>
+      path === '/api/swipe/music' ? new Response(JSON.stringify({ ok: true }), { status: 200 }) : new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const app: any = createDeckApp();
+    app.$nextTick = (fn: () => void) => fn();
+    app.mode = 'music';
+    app.current = { id: 'c1', itemId: 'a1', itemType: 'artist' };
+    // Non-empty so decide()'s tail calls showNext() rather than loadQueue().
+    app.queue = [{ id: 'c2', itemId: 'a2', itemType: 'artist' }];
+
+    await app.decide('left');
+
+    const analyticsCalls = fetchMock.mock.calls.filter((c) => c[0] === '/api/analytics/event');
+    const call = analyticsCalls.find((c) => JSON.parse((c[1] as any).body).eventType === 'music_swipe');
+    expect(JSON.parse((call![1] as any).body)).toEqual({
+      eventType: 'music_swipe',
+      metadata: { direction: 'left' },
+      clientId: expect.any(String),
+      sessionId: expect.any(String),
+    });
+    vi.unstubAllGlobals();
+  });
+
   it('showNext never mounts the card embed in People mode, even if a candidate carries a track field', async () => {
     vi.stubGlobal('window', fakeWindow());
     const doc = fakeDocumentWithCardHost();
@@ -787,17 +850,43 @@ describe('deck app', () => {
     vi.unstubAllGlobals();
   });
 
+  // Issue #170: Tier 1 event-coverage expansion. Tagged with source: 'search'
+  // since this is the one-step search "quick like" path (issue #108), not a
+  // deck card swipe -- decide()'s own music_swipe event carries no such tag.
+  it('selectTrack records a music_swipe event tagged with source: search', async () => {
+    const fetchMock = vi.fn(async (path: string, options?: any) =>
+      path === '/api/swipe/music' ? new Response(JSON.stringify({ ok: true }), { status: 200 }) : new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createDeckApp();
+
+    await app.selectTrack({ id: 't1', name: 'Landslide', inCatalog: true });
+
+    const analyticsCalls = fetchMock.mock.calls.filter((c) => c[0] === '/api/analytics/event');
+    const call = analyticsCalls.find((c) => JSON.parse((c[1] as any).body).eventType === 'music_swipe');
+    expect(JSON.parse((call![1] as any).body)).toEqual({
+      eventType: 'music_swipe',
+      metadata: { direction: 'right', source: 'search' },
+      clientId: expect.any(String),
+      sessionId: expect.any(String),
+    });
+    vi.unstubAllGlobals();
+  });
+
   it('selectTrack catalogs the artist then the track before liking one that is not yet cataloged', async () => {
     const calls: string[] = [];
     const fetchMock = vi.fn(async (path: string, init?: any) => {
-      calls.push(path);
+      // Issue #170: selectTrack also fires a fire-and-forget music_swipe
+      // analytics event -- excluded from `calls` since it's not part of the
+      // catalog-then-swipe sequence this test is asserting on.
+      if (path !== '/api/analytics/event') calls.push(path);
       if (path === '/api/artists') return new Response(JSON.stringify({ artistId: 'new-a1' }), { status: 200 });
       if (path === '/api/tracks') {
         expect(JSON.parse(init.body)).toEqual({ spotifyTrackId: 'sp-t1', artistId: 'new-a1' });
         return new Response(JSON.stringify({ trackId: 'new-t1' }), { status: 200 });
       }
       if (path === '/api/swipe/music') return new Response(JSON.stringify({ ok: true }), { status: 200 });
-      return new Response('unexpected', { status: 500 });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
     });
     vi.stubGlobal('fetch', fetchMock);
     const app = createDeckApp();
@@ -842,7 +931,11 @@ describe('deck app', () => {
     resolveSwipe!();
     await Promise.all([first, second]);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // Issue #170: selectTrack also fires a fire-and-forget music_swipe
+    // analytics event after the swipe resolves -- count only the swipe
+    // call itself, which is what this dedup guard actually protects.
+    const swipeCalls = fetchMock.mock.calls.filter((c) => c[0] === '/api/swipe/music');
+    expect(swipeCalls.length).toBe(1);
     vi.unstubAllGlobals();
   });
 });

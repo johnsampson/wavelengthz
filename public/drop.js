@@ -109,6 +109,8 @@ export function createDropApp() {
           artists: result.artistName ? [{ id: result.spotifyArtistId ?? '', name: result.artistName }] : [],
           album: { images: result.imageUrl ? [{ url: result.imageUrl }] : [] },
         });
+        // Issue #170: fire-and-forget, same as every other recordEvent call.
+        api.recordEvent('daily_drop_answered').catch(() => {});
         this.myAnswer = res.myAnswer;
         this.answerCount = Math.max(this.answerCount, 1);
         this.searchQuery = '';

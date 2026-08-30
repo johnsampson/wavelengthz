@@ -136,6 +136,33 @@ describe('messages thread', () => {
 
     expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('Messaging'));
   });
+
+  // Issue #170: Tier 1 event-coverage expansion.
+  it('records a message_sent analytics event on a successful send', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', fakeDocument());
+    const fetchMock = vi.fn(async (path: string, options?: any) =>
+      path === '/api/matches/m1/messages'
+        ? new Response(JSON.stringify({ messages: [] }), { status: 200 })
+        : new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createMessagesApp();
+    app.draft = 'hello there';
+
+    await app.send();
+
+    const analyticsCalls = fetchMock.mock.calls.filter((c) => c[0] === '/api/analytics/event');
+    const call = analyticsCalls.find((c) => JSON.parse((c[1] as any).body).eventType === 'message_sent');
+    // localStorage/sessionStorage aren't stubbed in this file, so
+    // clientId/sessionId come back undefined and are dropped by
+    // JSON.stringify -- same as test/public/app.test.ts's own
+    // "unavailable" case.
+    expect(JSON.parse((call![1] as any).body)).toEqual({
+      eventType: 'message_sent',
+      metadata: { surface: 'match', kind: 'text' },
+    });
+  });
 });
 
 describe('scrollToBottom', () => {

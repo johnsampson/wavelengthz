@@ -14,7 +14,7 @@ import { focusAfterReveal } from './domUtils.js';
 // calls injected: `share(track, caption)` and `loadPlaylist()`.
 
 /**
- * @param {{ share: (track: any, body: string) => Promise<any>, loadPlaylist: () => Promise<{tracks: any[], count: number}> }} deps
+ * @param {{ share: (track: any, body: string) => Promise<any>, loadPlaylist: () => Promise<{tracks: any[], count: number}>, surface: 'match'|'group' }} deps
  */
 export function createTrackPicker(deps) {
   return {
@@ -151,6 +151,9 @@ export function createTrackPicker(deps) {
       const caption = this.trackCaption.trim();
       try {
         await deps.share(track, caption);
+        // Issue #170: fire-and-forget, same as every other recordEvent call --
+        // a dropped analytics write must never fail the share itself.
+        api.recordEvent('message_sent', { surface: deps.surface, kind: 'track' }).catch(() => {});
         this.closeTrackPicker();
         await this.load();
         await this.refreshPlaylist();

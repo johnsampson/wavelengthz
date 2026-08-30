@@ -581,7 +581,14 @@
 // Protocol (src/lib/googleAnalytics.ts) when GA4_MEASUREMENT_ID/
 // GA4_API_SECRET are configured; index.js is unchanged but is a caller of
 // the now-modified api.recordEvent().
-const CACHE_NAME = 'wavelengthz-shell-v87';
+// v88 expands analytics event coverage (issue #170, Tier 1 of the
+// 250K-users strategy discussion) beyond session_start/song_play --
+// index.js now records people_swipe/music_swipe/match_created on a deck
+// swipe (and selectTrack's search "quick like"), trackPicker.js records
+// message_sent for a shared track (consumed by messages.js/group.js, which
+// also record it for a plain-text send), groups.js records
+// group_created/group_joined, and drop.js records daily_drop_answered.
+const CACHE_NAME = 'wavelengthz-shell-v88';
 const APP_SHELL = [
   '/',
   '/app.js',

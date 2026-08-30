@@ -112,6 +112,8 @@ export function createGroupsApp() {
       this.error = null;
       try {
         await api.createGroup(this.newName.trim(), this.newTopic.trim() || null, this.selectedSongRaw ?? undefined);
+        // Issue #170: fire-and-forget, same as every other recordEvent call.
+        api.recordEvent('group_created').catch(() => {});
         this.newName = '';
         this.newTopic = '';
         this.showCreate = false;
@@ -130,6 +132,8 @@ export function createGroupsApp() {
       this.error = null;
       try {
         await api.joinGroup(g.id);
+        // Issue #170: fire-and-forget, same as every other recordEvent call.
+        api.recordEvent('group_joined').catch(() => {});
         await navigate(`/group?id=${g.id}`);
       } catch (e) {
         if (e.status === 403 && e.body?.error === 'group_full') {
