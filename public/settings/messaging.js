@@ -23,7 +23,7 @@ export function createMessagingApp() {
     ready: false,
     bio: { met: false, length: 0, required: 20 },
     photos: { met: false, count: 0, required: 3 },
-    likedSongs: { met: false, count: 0, required: 25 },
+    artistsActed: { met: false, count: 0, required: 50 },
     phone: { met: false, phoneNumber: null },
 
     // Phone verification's own local flow state -- entirely separate from
@@ -49,7 +49,7 @@ export function createMessagingApp() {
         this.ready = status.ready;
         this.bio = status.bio;
         this.photos = status.photos;
-        this.likedSongs = status.likedSongs;
+        this.artistsActed = status.artistsActed;
         this.phone = status.phone;
       } catch (e) {
         if (e.status === 401) {
@@ -124,7 +124,7 @@ export function createMessagingApp() {
     },
 
     recomputeReady() {
-      this.ready = this.bio.met && this.photos.met && this.likedSongs.met && this.phone.met;
+      this.ready = this.bio.met && this.photos.met && this.artistsActed.met && this.phone.met;
     },
   };
 }

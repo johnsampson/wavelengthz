@@ -5,10 +5,10 @@ import { fetchTopArtists, fetchTopTracks } from '../lib/spotify';
 import {
   messagingRequirements,
   photoCountFor,
-  likedSongCountFor,
+  artistsActedCountFor,
   MIN_BIO_LENGTH,
   MIN_PHOTOS,
-  MIN_LIKED_SONGS,
+  MIN_ARTISTS_ACTED,
 } from '../lib/messagingGate';
 import { getTasteDrift } from '../lib/tasteDrift';
 
@@ -124,17 +124,17 @@ export function registerMeRoutes(router: RouterType) {
     const user = await getSessionUser(request, env.DB);
     if (!user) return new Response('Unauthorized', { status: 401 });
 
-    const [photoCount, likedSongCount] = await Promise.all([
+    const [photoCount, artistsActedCount] = await Promise.all([
       photoCountFor(env.DB, user.id),
-      likedSongCountFor(env.DB, user.id),
+      artistsActedCountFor(env.DB, user.id),
     ]);
-    const requirements = messagingRequirements(user, photoCount, likedSongCount);
+    const requirements = messagingRequirements(user, photoCount, artistsActedCount);
 
     return Response.json({
-      ready: requirements.bio && requirements.photos && requirements.likedSongs && requirements.phone,
+      ready: requirements.bio && requirements.photos && requirements.artistsActed && requirements.phone,
       bio: { met: requirements.bio, length: user.bio?.trim().length ?? 0, required: MIN_BIO_LENGTH },
       photos: { met: requirements.photos, count: photoCount, required: MIN_PHOTOS },
-      likedSongs: { met: requirements.likedSongs, count: likedSongCount, required: MIN_LIKED_SONGS },
+      artistsActed: { met: requirements.artistsActed, count: artistsActedCount, required: MIN_ARTISTS_ACTED },
       phone: { met: requirements.phone, phoneNumber: user.phone_number },
     });
   });

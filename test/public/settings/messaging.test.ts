@@ -12,7 +12,7 @@ const NOT_READY_STATUS = {
   ready: false,
   bio: { met: false, length: 0, required: 20 },
   photos: { met: false, count: 0, required: 3 },
-  likedSongs: { met: false, count: 0, required: 25 },
+  artistsActed: { met: false, count: 0, required: 50 },
   phone: { met: false, phoneNumber: null },
 };
 
@@ -20,7 +20,7 @@ const READY_STATUS = {
   ready: true,
   bio: { met: true, length: 40, required: 20 },
   photos: { met: true, count: 3, required: 3 },
-  likedSongs: { met: true, count: 25, required: 25 },
+  artistsActed: { met: true, count: 50, required: 50 },
   phone: { met: true, phoneNumber: '+15551234567' },
 };
 
@@ -61,7 +61,7 @@ describe('messaging page', () => {
     expect(app.ready).toBe(false);
     expect(app.bio).toEqual(NOT_READY_STATUS.bio);
     expect(app.photos).toEqual(NOT_READY_STATUS.photos);
-    expect(app.likedSongs).toEqual(NOT_READY_STATUS.likedSongs);
+    expect(app.artistsActed).toEqual(NOT_READY_STATUS.artistsActed);
     expect(app.phone).toEqual(NOT_READY_STATUS.phone);
     expect(app.loading).toBe(false);
     vi.unstubAllGlobals();
@@ -181,7 +181,7 @@ describe('messaging page', () => {
   });
 
   it('verifyCode() marks phone met and recomputes ready on success', async () => {
-    const status = { ...NOT_READY_STATUS, bio: { met: true, length: 40, required: 20 }, photos: { met: true, count: 3, required: 3 }, likedSongs: { met: true, count: 25, required: 25 } };
+    const status = { ...NOT_READY_STATUS, bio: { met: true, length: 40, required: 20 }, photos: { met: true, count: 3, required: 3 }, artistsActed: { met: true, count: 50, required: 50 } };
     const { calls } = stubApi(status);
     const app = createMessagingApp();
     await app.init();

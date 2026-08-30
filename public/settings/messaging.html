@@ -50,12 +50,16 @@
 
     <div class="card flex items-center justify-between p-4">
       <div>
-        <p class="font-semibold" :class="likedSongs.met ? 'text-neutral-100' : 'text-neutral-300'">
-          <span x-text="likedSongs.met ? '✓' : '○'"></span> Like songs
+        <p class="font-semibold" :class="artistsActed.met ? 'text-neutral-100' : 'text-neutral-300'">
+          <span x-text="artistsActed.met ? '✓' : '○'"></span> Act on artists
         </p>
-        <p class="text-sm text-neutral-500" x-text="`${likedSongs.count} / ${likedSongs.required} liked songs`"></p>
+        <!-- Issue #145 (Round 7): "change the criteria for messaging from
+             liking 25 songs to acting on 50 artists that includes passing
+             or liking or skipping" -- any verdict counts now, not just a
+             like, so this no longer says "liked". -->
+        <p class="text-sm text-neutral-500" x-text="`${artistsActed.count} / ${artistsActed.required} artists`"></p>
       </div>
-      <a href="/" class="btn-ghost text-sm" x-show="!likedSongs.met">Switch to Music mode</a>
+      <a href="/" class="btn-ghost text-sm" x-show="!artistsActed.met">Switch to Music mode</a>
     </div>
 
     <div class="card p-4">

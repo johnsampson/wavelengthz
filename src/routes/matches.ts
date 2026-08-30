@@ -5,7 +5,7 @@ import { canRecall } from '../lib/messageRecall';
 import { computeMusicOverlap } from '../lib/musicOverlap';
 import { isValidMessageBody, isValidTrackCaption } from '../lib/messageFilter';
 import { resolveSharedTrack, loadSharedTracks, type ShareableSpotifyTrack } from '../lib/trackSharing';
-import { hasCompleteProfile, photoCountFor, likedSongCountFor } from '../lib/messagingGate';
+import { hasCompleteProfile, photoCountFor, artistsActedCountFor } from '../lib/messagingGate';
 
 // A soft-deleted account must disappear from matches and messaging
 // immediately (docs/PLAN.md §9), not linger until the 7-day grace period
@@ -216,7 +216,7 @@ export function registerMatchRoutes(router: RouterType) {
     const match = await loadActiveMatchForParticipant(env.DB, request.params.id, user.id);
     if (!match) return new Response('Forbidden', { status: 403 });
 
-    if (!hasCompleteProfile(user, await photoCountFor(env.DB, user.id), await likedSongCountFor(env.DB, user.id))) {
+    if (!hasCompleteProfile(user, await photoCountFor(env.DB, user.id), await artistsActedCountFor(env.DB, user.id))) {
       return Response.json({ error: 'profile_incomplete' }, { status: 403 });
     }
 

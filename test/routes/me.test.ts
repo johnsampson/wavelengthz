@@ -467,7 +467,7 @@ describe('GET /api/me/messaging-status', () => {
     expect(body.ready).toBe(false);
     expect(body.bio).toEqual({ met: false, length: 0, required: 20 });
     expect(body.photos).toEqual({ met: false, count: 0, required: 3 });
-    expect(body.likedSongs).toEqual({ met: false, count: 0, required: 25 });
+    expect(body.artistsActed).toEqual({ met: false, count: 0, required: 50 });
     expect(body.phone).toEqual({ met: false, phoneNumber: null });
   });
 
@@ -484,11 +484,11 @@ describe('GET /api/me/messaging-status', () => {
         .bind(`photo-${i}`, `users/u7/photo${i}.jpg`, i)
         .run();
     }
-    for (let i = 0; i < 25; i++) {
+    for (let i = 0; i < 50; i++) {
       await env.DB.prepare(
-        `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES (?, 'u7', 'track', ?, 'right', 1000, 1000)`
+        `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES (?, 'u7', 'artist', ?, 'right', 1000, 1000)`
       )
-        .bind(`swipe-${i}`, `track-${i}`)
+        .bind(`swipe-${i}`, `artist-${i}`)
         .run();
     }
 
@@ -502,7 +502,7 @@ describe('GET /api/me/messaging-status', () => {
     expect(body.ready).toBe(true);
     expect(body.bio.met).toBe(true);
     expect(body.photos).toEqual({ met: true, count: 3, required: 3 });
-    expect(body.likedSongs).toEqual({ met: true, count: 25, required: 25 });
+    expect(body.artistsActed).toEqual({ met: true, count: 50, required: 50 });
     expect(body.phone).toEqual({ met: true, phoneNumber: '+15551234567' });
   });
 
@@ -519,11 +519,11 @@ describe('GET /api/me/messaging-status', () => {
         .bind(`photo-${i}`, `users/u7/photo${i}.jpg`, i)
         .run();
     }
-    for (let i = 0; i < 25; i++) {
+    for (let i = 0; i < 50; i++) {
       await env.DB.prepare(
-        `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES (?, 'u7', 'track', ?, 'right', 1000, 1000)`
+        `INSERT INTO music_swipes (id, user_id, item_type, item_id, direction, created_at, updated_at) VALUES (?, 'u7', 'artist', ?, 'right', 1000, 1000)`
       )
-        .bind(`swipe-${i}`, `track-${i}`)
+        .bind(`swipe-${i}`, `artist-${i}`)
         .run();
     }
 
@@ -537,7 +537,7 @@ describe('GET /api/me/messaging-status', () => {
     expect(body.ready).toBe(false);
     expect(body.bio.met).toBe(true);
     expect(body.photos.met).toBe(true);
-    expect(body.likedSongs.met).toBe(true);
+    expect(body.artistsActed.met).toBe(true);
     expect(body.phone).toEqual({ met: false, phoneNumber: null });
   });
 });
