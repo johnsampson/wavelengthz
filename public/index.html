@@ -95,17 +95,20 @@
               x-text="mode === 'music' ? current?.name : current?.displayName"
             ></button>
           </h2>
-          <button
-            type="button"
-            x-show="mode === 'music' && current?.track"
-            class="mt-2 flex max-w-full items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm"
-            @pointerdown.stop
-            @click.stop="togglePreviewTrack()"
-            :aria-label="isCurrentPreviewTrack() ? 'Pause' : `Play ${current?.track?.name}`"
-          >
-            <span aria-hidden="true" x-text="isCurrentPreviewTrack() ? '⏸' : '▶️'"></span>
-            <span class="truncate" x-text="current?.track?.name"></span>
-          </button>
+          <!-- issue #159/#160 (part of the 250K-users strategy): the
+               artist's most-liked cataloged track, ready to tap without
+               leaving the deck -- replaces the old text chip that only
+               handed off to the shared player bar. Mounted/torn down
+               imperatively by index.js's showCardPreviewEmbed/
+               hideCardPreviewEmbed (Spotify's embed has no JS API to
+               redirect an existing iframe to a new track, so a track
+               change always means a fresh element -- same reasoning as
+               playerBar.js's own iframe), not declaratively via x-show,
+               since the actual `wl-card-preview-host` div below must
+               always exist in this card's markup, empty and hidden
+               (`class="hidden"`) as its default rest state, for those
+               functions to find. -->
+          <div id="wl-card-preview-host" class="mt-2 hidden" @pointerdown.stop @click.stop></div>
           <p class="text-neutral-200" x-text="current?.bio || current?.distanceLabel"></p>
           <!-- Shared chip row: people-mode's own top genres, or (as of the
                music-mode candidates response adding topGenres) an artist

@@ -28,6 +28,14 @@ function fakeWindow() {
   return { location: { href: '' } };
 }
 
+// Stands in for both '#card' and '#wl-card-preview-host' -- a bare {}
+// was fine while nothing but the (fully-mocked) attachSwipeDeck touched
+// the element, but showCardPreviewEmbed/hideCardPreviewEmbed (issue
+// #159/#160) call real DOM methods on whatever getElementById returns.
+function fakeDomElement() {
+  return { classList: { add: vi.fn(), remove: vi.fn() }, appendChild: vi.fn(), innerHTML: '' };
+}
+
 function stubApi(handler: (path: string) => Response) {
   vi.stubGlobal('fetch', vi.fn(async (path: string) => handler(path)));
 }
@@ -117,7 +125,7 @@ describe('deck app', () => {
 
   it('destroy() detaches the swipe-deck listener attached by showNext()', async () => {
     vi.stubGlobal('window', fakeWindow());
-    vi.stubGlobal('document', { getElementById: vi.fn(() => ({})) });
+    vi.stubGlobal('document', { getElementById: vi.fn(() => fakeDomElement()) });
     const detach = vi.fn();
     vi.mocked(attachSwipeDeck).mockReturnValue(detach);
     stubApi((path) => {
@@ -144,7 +152,7 @@ describe('deck app', () => {
   // button's own click handler already does.
   it('showNext wires onTap to viewArtist in Music mode', async () => {
     vi.stubGlobal('window', fakeWindow());
-    vi.stubGlobal('document', { getElementById: vi.fn(() => ({})) });
+    vi.stubGlobal('document', { getElementById: vi.fn(() => fakeDomElement()) });
     stubApi((path) => {
       if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
       if (path.startsWith('/api/candidates/'))
@@ -166,7 +174,7 @@ describe('deck app', () => {
 
   it('showNext wires onTap to viewProfile in People mode', async () => {
     vi.stubGlobal('window', fakeWindow());
-    vi.stubGlobal('document', { getElementById: vi.fn(() => ({})) });
+    vi.stubGlobal('document', { getElementById: vi.fn(() => fakeDomElement()) });
     stubApi((path) => {
       if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
       if (path.startsWith('/api/candidates/'))
@@ -188,17 +196,20 @@ describe('deck app', () => {
 
   it('destroy() is a safe no-op when nothing was ever attached', () => {
     vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { getElementById: vi.fn(() => null) });
     const app = createDeckApp();
 
     expect(() => app.destroy()).not.toThrow();
   });
 
   // Radio auto-advancing to a new track (or any other page/tap starting one)
-  // changes playerBar.js's own module state, which isCurrentAnthem/
-  // isCurrentPreviewTrack have no way to notice on their own -- see index.js's
-  // nowPlayingTick comment. init() must subscribe so Alpine has something to
-  // actually re-run those bindings on.
-  it('subscribes to now-playing changes on init and bumps nowPlayingTick so isCurrentAnthem/isCurrentPreviewTrack re-evaluate', async () => {
+  // changes playerBar.js's own module state, which isCurrentAnthem has no
+  // way to notice on its own -- see index.js's nowPlayingTick comment.
+  // init() must subscribe so Alpine has something to actually re-run that
+  // binding on. (Music mode's own preview track no longer reads
+  // playerBar.js's state at all as of issue #159/#160 -- it plays via its
+  // own self-contained card embed now, not a hand-off to the shared bar.)
+  it('subscribes to now-playing changes on init and bumps nowPlayingTick so isCurrentAnthem re-evaluates', async () => {
     vi.stubGlobal('window', fakeWindow());
     vi.stubGlobal('document', { getElementById: vi.fn(() => null) });
     stubApi(() => new Response('nope', { status: 401 }));
@@ -215,10 +226,9 @@ describe('deck app', () => {
     expect(app.nowPlayingTick).toBe(0);
     firePlayerChange?.();
     expect(app.nowPlayingTick).toBe(1);
-    app.current = { anthemTrack: { spotifyId: 'sp1', name: 'Song' }, track: { spotifyId: 'sp1', id: 't1', name: 'Song' } };
+    app.current = { anthemTrack: { spotifyId: 'sp1', name: 'Song' } };
     vi.mocked(isCurrentTrack).mockReturnValue(true);
     expect(app.isCurrentAnthem()).toBe(true);
-    expect(app.isCurrentPreviewTrack()).toBe(true);
     app.destroy();
   });
 
@@ -290,59 +300,143 @@ describe('deck app', () => {
     expect(togglePlayPause).not.toHaveBeenCalled();
   });
 
-  it('togglePreviewTrack toggles pause on the currently-playing preview track instead of restarting it', async () => {
+  // issue #159/#160 (part of the 250K-users strategy): the deck card's
+  // representative track now plays via its own inline Spotify embed,
+  // mounted/torn down imperatively by showNext() -- these replace the old
+  // togglePreviewTrack tests (that hand-off-to-the-shared-bar chip no
+  // longer exists).
+  function fakeDocumentWithCardHost() {
+    const host = fakeDomElement();
+    const card = fakeDomElement();
+    const iframe: any = {};
+    const getElementById = vi.fn((id: string) => (id === 'wl-card-preview-host' ? host : id === 'card' ? card : null));
+    const createElement = vi.fn(() => iframe);
+    return { getElementById, createElement, host, card, iframe };
+  }
+
+  it('showNext mounts an inline embed for the new candidate\'s representative track in Music mode', async () => {
     vi.stubGlobal('window', fakeWindow());
-    vi.mocked(isCurrentTrack).mockReturnValue(true);
-    const app = createDeckApp();
-    app.current = { name: 'Some Artist', track: { spotifyId: 'sp1', id: 't1', name: 'Song', imageUrl: 'img' } };
+    const doc = fakeDocumentWithCardHost();
+    vi.stubGlobal('document', doc);
+    stubApi((path) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
+      if (path.startsWith('/api/candidates/'))
+        return new Response(
+          JSON.stringify({ candidates: [{ id: 'c1', itemId: 'a1', name: 'Artist', track: { spotifyId: 'sp1', id: 't1', name: 'Song' } }] }),
+          { status: 200 }
+        );
+      return new Response('not found', { status: 404 });
+    });
+    const app: any = createDeckApp();
+    app.$nextTick = (fn: () => void) => fn();
+    app.mode = 'music';
 
-    await app.togglePreviewTrack();
+    await app.init();
 
-    expect(togglePlayPause).toHaveBeenCalled();
-    expect(play).not.toHaveBeenCalled();
+    expect(doc.createElement).toHaveBeenCalledWith('iframe');
+    expect(doc.iframe.src).toBe('https://open.spotify.com/embed/track/sp1?theme=0&autoplay=1');
+    expect(doc.host.appendChild).toHaveBeenCalledWith(doc.iframe);
+    expect(doc.host.classList.remove).toHaveBeenCalledWith('hidden');
   });
 
-  it('togglePreviewTrack hands off a new preview track to the player bar, tagged with the current artist name', async () => {
+  it('showNext tears down the card embed when the new candidate has no catalog track', async () => {
     vi.stubGlobal('window', fakeWindow());
-    vi.mocked(isCurrentTrack).mockReturnValue(false);
-    const app = createDeckApp();
-    app.current = { name: 'Some Artist', track: { spotifyId: 'sp1', id: 't1', name: 'Song', imageUrl: 'img', durationMs: 180000 } };
+    const doc = fakeDocumentWithCardHost();
+    vi.stubGlobal('document', doc);
+    stubApi((path) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
+      if (path.startsWith('/api/candidates/'))
+        return new Response(JSON.stringify({ candidates: [{ id: 'c1', itemId: 'a1', name: 'Artist', track: null }] }), { status: 200 });
+      return new Response('not found', { status: 404 });
+    });
+    const app: any = createDeckApp();
+    app.$nextTick = (fn: () => void) => fn();
+    app.mode = 'music';
 
-    await app.togglePreviewTrack();
+    await app.init();
 
-    // durationMs rides along so the bar can start at the hook rather than 0:00.
-    expect(play).toHaveBeenCalledWith({ spotifyId: 'sp1', id: 't1', name: 'Song', artistName: 'Some Artist', imageUrl: 'img', durationMs: 180000 });
+    expect(doc.createElement).not.toHaveBeenCalled();
+    expect(doc.host.classList.add).toHaveBeenCalledWith('hidden');
   });
 
-  it('togglePreviewTrack records a song_play analytics event for a fresh play, but not a resume', async () => {
+  // Issue #161: showCardPreviewEmbed (issue #159/#160's replacement for the
+  // old togglePreviewTrack chip) is now the actual "fresh play" moment for
+  // Music mode's card -- there's no more "already playing, so pause"
+  // resume branch to distinguish, since the embed remounts fresh on every
+  // card advance rather than toggling play/pause on a persistent bar.
+  it('records a song_play analytics event when showNext mounts a card embed', async () => {
     vi.stubGlobal('window', fakeWindow());
-    const fetchMock = vi.fn(async (path?: string, options?: any) => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const doc = fakeDocumentWithCardHost();
+    vi.stubGlobal('document', doc);
+    const fetchMock = vi.fn(async (path: string, options?: any) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
+      if (path.startsWith('/api/candidates/'))
+        return new Response(
+          JSON.stringify({ candidates: [{ id: 'c1', itemId: 'a1', name: 'Artist', track: { spotifyId: 'sp1', id: 't1', name: 'Song' } }] }),
+          { status: 200 }
+        );
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
     vi.stubGlobal('fetch', fetchMock);
-    vi.mocked(isCurrentTrack).mockReturnValue(false);
-    const app = createDeckApp();
-    app.current = { name: 'Some Artist', track: { spotifyId: 'sp1', id: 't1', name: 'Song', imageUrl: 'img' } };
+    const app: any = createDeckApp();
+    app.$nextTick = (fn: () => void) => fn();
+    app.mode = 'music';
 
-    await app.togglePreviewTrack();
+    await app.init();
 
-    const call = fetchMock.mock.calls.find((c) => c[0] === '/api/analytics/event');
+    // init() also fires its own session_start analytics event -- find the
+    // song_play one specifically rather than the first analytics call.
+    const analyticsCalls = fetchMock.mock.calls.filter((c) => c[0] === '/api/analytics/event');
+    const call = analyticsCalls.find((c) => JSON.parse((c[1] as any).body).eventType === 'song_play');
     expect(call).toBeTruthy();
-    expect(JSON.parse((call![1] as any).body)).toEqual({ eventType: 'song_play', metadata: { trackId: 't1' } });
-
-    fetchMock.mockClear();
-    vi.mocked(isCurrentTrack).mockReturnValue(true); // now "currently playing" -- next call is a resume
-    await app.togglePreviewTrack();
-    expect(fetchMock.mock.calls.find((c) => c[0] === '/api/analytics/event')).toBeUndefined();
+    expect(JSON.parse((call![1] as any).body)).toEqual({ eventType: 'song_play', metadata: { spotifyId: 'sp1' } });
   });
 
-  it('togglePreviewTrack is a no-op when the current card has no catalog track', async () => {
+  it('showNext never mounts the card embed in People mode, even if a candidate carries a track field', async () => {
     vi.stubGlobal('window', fakeWindow());
-    const app = createDeckApp();
-    app.current = { name: 'Some Artist', track: null };
+    const doc = fakeDocumentWithCardHost();
+    vi.stubGlobal('document', doc);
+    stubApi((path) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
+      if (path.startsWith('/api/candidates/'))
+        return new Response(
+          JSON.stringify({ candidates: [{ id: 'c1', displayName: 'Sam', track: { spotifyId: 'sp1', id: 't1', name: 'Song' } }] }),
+          { status: 200 }
+        );
+      return new Response('not found', { status: 404 });
+    });
+    const app: any = createDeckApp();
+    app.$nextTick = (fn: () => void) => fn();
+    app.mode = 'people';
 
-    await app.togglePreviewTrack();
+    await app.init();
 
-    expect(play).not.toHaveBeenCalled();
-    expect(togglePlayPause).not.toHaveBeenCalled();
+    expect(doc.createElement).not.toHaveBeenCalled();
+    expect(doc.host.classList.add).toHaveBeenCalledWith('hidden');
+  });
+
+  it('destroy() tears down the card\'s own preview embed', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    const doc = fakeDocumentWithCardHost();
+    vi.stubGlobal('document', doc);
+    stubApi((path) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
+      if (path.startsWith('/api/candidates/'))
+        return new Response(
+          JSON.stringify({ candidates: [{ id: 'c1', itemId: 'a1', name: 'Artist', track: { spotifyId: 'sp1', id: 't1', name: 'Song' } }] }),
+          { status: 200 }
+        );
+      return new Response('not found', { status: 404 });
+    });
+    const app: any = createDeckApp();
+    app.$nextTick = (fn: () => void) => fn();
+    app.mode = 'music';
+    await app.init();
+    doc.host.classList.add.mockClear();
+
+    app.destroy();
+
+    expect(doc.host.classList.add).toHaveBeenCalledWith('hidden');
   });
 
   // Explicit product rule: radio continues something the listener started,

@@ -54,6 +54,51 @@ function recordSessionStartOnce() {
   api.recordEvent('session_start').catch(() => {});
 }
 
+// Mounts the deck card's own inline Spotify embed for its representative
+// track -- issue #159/#160 (part of the 250K-users strategy discussion): a
+// visible, ready-to-tap (autoplay where the browser allows it) embed
+// directly on the card, replacing the old text chip that only handed off
+// to the shared player bar. Built via createElement + property assignment,
+// not an innerHTML string, so a track id never passes through HTML
+// parsing -- same reasoning as playerBar.js's own showIframe. Spotify's
+// embed exposes no JS API to redirect an existing iframe to a different
+// track, so a track change always means destroying and recreating this
+// element, same as playerBar.js's own iframe does for the bar.
+function showCardPreviewEmbed(spotifyId) {
+  const host = document.getElementById('wl-card-preview-host');
+  if (!host) return;
+  host.innerHTML = '';
+  const iframe = document.createElement('iframe');
+  iframe.src = `https://open.spotify.com/embed/track/${spotifyId}?theme=0&autoplay=1`;
+  iframe.width = '100%';
+  iframe.height = '80';
+  iframe.frameBorder = '0';
+  iframe.allow = 'autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture';
+  iframe.loading = 'lazy';
+  iframe.className = 'rounded-xl';
+  host.appendChild(iframe);
+  host.classList.remove('hidden');
+  // Issue #161: mounting this embed is the Music-mode equivalent of the
+  // old togglePreviewTrack()'s "fresh play" branch -- issue #160 replaced
+  // that hand-off-to-the-shared-bar chip with this self-contained embed,
+  // so the song_play event moves here with it. Fire-and-forget, same
+  // reasoning as recordSessionStartOnce above.
+  api.recordEvent('song_play', { spotifyId }).catch(() => {});
+}
+
+// Fully empties the host rather than just hiding it -- an iframe merely
+// hidden via CSS keeps its browsing context alive and keeps playing in the
+// background, the exact bug public/sw.js's own v7 changelog entry
+// documents fixing for the player bar's own iframe. Called whenever the
+// deck advances to a candidate with no track, the mode switches away from
+// Music, or the page itself is torn down.
+function hideCardPreviewEmbed() {
+  const host = document.getElementById('wl-card-preview-host');
+  if (!host) return;
+  host.classList.add('hidden');
+  host.innerHTML = '';
+}
+
 // Extracted from index.html's inline script -- see matches.js's comment for
 // why (same reasoning, same shape). Also adds destroy(), same new
 // requirement the router introduces as messages.js/group.js's poll timers:
@@ -120,15 +165,6 @@ export function createDeckApp() {
       return !!this.current?.anthemTrack && isCurrentTrack(this.current.anthemTrack.spotifyId);
     },
 
-    // Same pattern as isCurrentAnthem, for Music mode's own "play a song"
-    // chip below the artist name (current.track, from GET
-    // /api/candidates/music -- a representative catalog track for this
-    // artist, distinct from People mode's anthemTrack).
-    isCurrentPreviewTrack() {
-      void this.nowPlayingTick;
-      return !!this.current?.track && isCurrentTrack(this.current.track.spotifyId);
-    },
-
     async init() {
       recordSessionStartOnce();
       this.unsubscribeNowPlaying = onNowPlayingChange(() => {
@@ -175,6 +211,11 @@ export function createDeckApp() {
       }
       this.unsubscribeNowPlaying?.();
       this.unsubscribeNowPlaying = null;
+      // issue #159/#160: leaving the page entirely is exactly the same
+      // "no longer showing this card" case showNext() already handles per
+      // swipe -- without this, navigating away mid-play would leave the
+      // embed's iframe mounted and playing in a torn-down page.
+      hideCardPreviewEmbed();
     },
 
     async setMode(mode) {
@@ -210,6 +251,16 @@ export function createDeckApp() {
             onTap: () => (this.mode === 'music' ? this.viewArtist() : this.viewProfile()),
           });
         }
+        // issue #159/#160: swap in the new card's own representative-track
+        // embed (or tear down the previous one) every time the current
+        // candidate changes -- covers advancing via a swipe, a fresh
+        // loadQueue() on init, and a mode switch away from Music (current
+        // still exists in People mode, just never carries `track`).
+        if (this.mode === 'music' && this.current?.track) {
+          showCardPreviewEmbed(this.current.track.spotifyId);
+        } else {
+          hideCardPreviewEmbed();
+        }
       });
       preloadCandidateImage(this.queue[0], this.mode);
 
@@ -234,20 +285,6 @@ export function createDeckApp() {
     viewArtist() {
       if (!this.current || this.mode !== 'music') return;
       navigate(`/artist?id=${this.current.itemId}`);
-    },
-
-    async togglePreviewTrack() {
-      if (!this.current?.track) return;
-      if (this.isCurrentPreviewTrack()) {
-        await togglePlayPause();
-        return;
-      }
-      const { spotifyId, id, name, imageUrl, durationMs } = this.current.track;
-      await play({ spotifyId, id, name, artistName: this.current.name, imageUrl, durationMs: durationMs ?? null });
-      // Issue #161: a fresh play (not a resume via togglePlayPause above) --
-      // fire-and-forget, matching loadDailyDropPrompt()'s own "never block
-      // or break the deck over this" reasoning.
-      api.recordEvent('song_play', { trackId: id }).catch(() => {});
     },
 
     async decide(direction) {
@@ -433,7 +470,8 @@ export function createDeckApp() {
       // bump the way a catalog-backed track's like does.
       const { spotifyId, id, name, artistName, imageUrl } = this.current.anthemTrack;
       await play({ spotifyId, id, name, artistName, imageUrl });
-      // Issue #161: same fresh-play-only reasoning as togglePreviewTrack above.
+      // Issue #161: a fresh play (not a resume via togglePlayPause above) --
+      // fire-and-forget, same reasoning as recordSessionStartOnce.
       api.recordEvent('song_play', { trackId: id }).catch(() => {});
     },
   };

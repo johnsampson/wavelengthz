@@ -557,12 +557,23 @@
 // provider picker), only the copy assumed Spotify. login.html itself
 // (Google now btn-primary, Spotify btn-secondary) is in BYPASS_PATHS and
 // needs no cache entry.
-// v85 adds first-party analytics instrumentation (issue #161, part of the
+// v85 replaces the deck card's small tap-to-play text chip with an inline
+// Spotify embed frame (issue #159/#160, part of the 250K-users strategy):
+// the artist's most-liked cataloged track is now visible and playable
+// directly on the card, autoplaying where the browser allows it, instead
+// of handing off to the shared player bar. index.js's showNext() mounts/
+// tears down the embed imperatively (same reasoning as playerBar.js's own
+// iframe -- Spotify's embed can't be redirected to a new track in place);
+// togglePreviewTrack()/isCurrentPreviewTrack() are removed, no longer
+// reachable from index.html.
+// v86 adds first-party analytics instrumentation (issue #161, part of the
 // 250K-users strategy discussion) -- index.js now records a session_start
 // event once per session on init(), and a song_play event from
-// togglePreviewTrack()/toggleAnthem() on a fresh (non-resume) play. app.js
-// gains the new api.recordEvent() client method both call.
-const CACHE_NAME = 'wavelengthz-shell-v85';
+// showCardPreviewEmbed() (Music mode's card embed, replacing v85's
+// removed togglePreviewTrack() as the actual "fresh play" moment) and
+// toggleAnthem() (People mode) on a fresh (non-resume) play. app.js gains
+// the new api.recordEvent() client method both call.
+const CACHE_NAME = 'wavelengthz-shell-v86';
 const APP_SHELL = [
   '/',
   '/app.js',
