@@ -77,6 +77,44 @@ describe('deck app', () => {
     expect(app.current).toBeNull();
   });
 
+  // Issue #161: records reach even for a logged-out visitor -- the whole
+  // point is counting people beyond identified accounts too.
+  it('records a session_start analytics event on init, even when not authed', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { getElementById: vi.fn(() => null) });
+    const fetchMock = vi.fn(async (path: string, options?: any) => {
+      if (path === '/api/me') return new Response('nope', { status: 401 });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createDeckApp();
+
+    await app.init();
+
+    const call = fetchMock.mock.calls.find((c) => c[0] === '/api/analytics/event');
+    expect(call).toBeTruthy();
+    expect(JSON.parse((call![1] as any).body)).toEqual({ eventType: 'session_start', metadata: undefined });
+  });
+
+  it('does not record a second session_start event on a second init() within the same session', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { getElementById: vi.fn(() => null) });
+    const fetchMock = vi.fn(async (path: string, options?: any) => {
+      if (path === '/api/me') return new Response('nope', { status: 401 });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createDeckApp();
+    await app.init();
+    const firstCallCount = fetchMock.mock.calls.filter((c) => c[0] === '/api/analytics/event').length;
+    expect(firstCallCount).toBe(1);
+
+    await app.init(); // e.g. re-entering the page within the same tab session
+
+    const totalCallCount = fetchMock.mock.calls.filter((c) => c[0] === '/api/analytics/event').length;
+    expect(totalCallCount).toBe(1);
+  });
+
   it('destroy() detaches the swipe-deck listener attached by showNext()', async () => {
     vi.stubGlobal('window', fakeWindow());
     vi.stubGlobal('document', { getElementById: vi.fn(() => ({})) });
@@ -221,6 +259,26 @@ describe('deck app', () => {
     expect(play).toHaveBeenCalledWith({ spotifyId: 'sp1', id: 'sp1', name: 'Song', artistName: 'Some Artist', imageUrl: 'img' });
   });
 
+  it('toggleAnthem records a song_play analytics event for a fresh play, but not a resume', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    const fetchMock = vi.fn(async (path?: string, options?: any) => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.mocked(isCurrentTrack).mockReturnValue(false);
+    const app = createDeckApp();
+    app.current = { anthemTrack: { spotifyId: 'sp1', id: 'sp1', name: 'Song', artistName: 'Some Artist', imageUrl: 'img' } };
+
+    await app.toggleAnthem();
+
+    const call = fetchMock.mock.calls.find((c) => c[0] === '/api/analytics/event');
+    expect(call).toBeTruthy();
+    expect(JSON.parse((call![1] as any).body)).toEqual({ eventType: 'song_play', metadata: { trackId: 'sp1' } });
+
+    fetchMock.mockClear();
+    vi.mocked(isCurrentTrack).mockReturnValue(true); // now "currently playing" -- next call is a resume
+    await app.toggleAnthem();
+    expect(fetchMock.mock.calls.find((c) => c[0] === '/api/analytics/event')).toBeUndefined();
+  });
+
   it('toggleAnthem is a no-op when the current card has no anthem', async () => {
     vi.stubGlobal('window', fakeWindow());
     const app = createDeckApp();
@@ -254,6 +312,26 @@ describe('deck app', () => {
 
     // durationMs rides along so the bar can start at the hook rather than 0:00.
     expect(play).toHaveBeenCalledWith({ spotifyId: 'sp1', id: 't1', name: 'Song', artistName: 'Some Artist', imageUrl: 'img', durationMs: 180000 });
+  });
+
+  it('togglePreviewTrack records a song_play analytics event for a fresh play, but not a resume', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    const fetchMock = vi.fn(async (path?: string, options?: any) => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.mocked(isCurrentTrack).mockReturnValue(false);
+    const app = createDeckApp();
+    app.current = { name: 'Some Artist', track: { spotifyId: 'sp1', id: 't1', name: 'Song', imageUrl: 'img' } };
+
+    await app.togglePreviewTrack();
+
+    const call = fetchMock.mock.calls.find((c) => c[0] === '/api/analytics/event');
+    expect(call).toBeTruthy();
+    expect(JSON.parse((call![1] as any).body)).toEqual({ eventType: 'song_play', metadata: { trackId: 't1' } });
+
+    fetchMock.mockClear();
+    vi.mocked(isCurrentTrack).mockReturnValue(true); // now "currently playing" -- next call is a resume
+    await app.togglePreviewTrack();
+    expect(fetchMock.mock.calls.find((c) => c[0] === '/api/analytics/event')).toBeUndefined();
   });
 
   it('togglePreviewTrack is a no-op when the current card has no catalog track', async () => {

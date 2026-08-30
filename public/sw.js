@@ -550,7 +550,12 @@
 // tap (not a real swipe, and not an aborted drag attempt that just springs
 // back) -- index.js wires it to the same viewArtist()/viewProfile() the
 // name button already called.
-const CACHE_NAME = 'wavelengthz-shell-v83';
+// v84 adds first-party analytics instrumentation (issue #161, part of the
+// 250K-users strategy discussion) -- index.js now records a session_start
+// event once per session on init(), and a song_play event from
+// togglePreviewTrack()/toggleAnthem() on a fresh (non-resume) play. app.js
+// gains the new api.recordEvent() client method both call.
+const CACHE_NAME = 'wavelengthz-shell-v84';
 const APP_SHELL = [
   '/',
   '/app.js',

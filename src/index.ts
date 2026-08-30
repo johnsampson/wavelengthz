@@ -24,6 +24,7 @@ import { registerPhoneRoutes } from './routes/phone';
 import { registerDailyDropRoutes } from './routes/dailyDrop';
 import { registerInviteRoutes } from './routes/invites';
 import { registerSpotifyHealthRoutes } from './routes/spotifyHealth';
+import { registerAnalyticsRoutes } from './routes/analytics';
 import { purgeExpiredDeletions } from './lib/accountDeletion';
 import { refreshCatalogFromProfiles } from './db/catalogRefresh';
 import { discoverArtistsByGenre } from './lib/catalogDiscovery';
@@ -61,6 +62,7 @@ registerPhoneRoutes(router);
 registerDailyDropRoutes(router);
 registerInviteRoutes(router);
 registerSpotifyHealthRoutes(router);
+registerAnalyticsRoutes(router);
 
 // Falls back to the ASSETS binding (static HTML/JS/CSS under public/) for
 // anything that isn't an API route -- required once [assets].run_worker_first

@@ -4,6 +4,7 @@ import { hardDeleteUser } from '../lib/accountDeletion';
 import { constantTimeEqual } from '../lib/crypto';
 import { enrichArtistGenresFromMusicBrainz, runHourlyGenreEnrichment } from '../lib/genreEnrichment';
 import { fetchGenreDensities } from '../lib/genreDensity';
+import { distinctActiveUserCount } from '../lib/analytics';
 
 export function registerAdminRoutes(router: RouterType) {
   router.post('/internal/seed', async (request: Request, env: Env) => {
@@ -99,5 +100,28 @@ export function registerAdminRoutes(router: RouterType) {
 
     await hardDeleteUser(env, user.id);
     return Response.json({ ok: true });
+  });
+
+  // Issue #161 (part of the 250K-users strategy discussion): the actual
+  // provable number to hand to Spotify's own Extended Quota Mode review if
+  // that application ever happens -- distinct identified users with at
+  // least one analytics_events row in the trailing `?days=` window
+  // (default 30, matching Spotify's own "max 30 days old" requirement for
+  // the analytics export they ask applicants to upload), plus the
+  // anonymous-event count as a separate, honest reach signal alongside it.
+  router.get('/internal/analytics/mau', async (request: Request, env: Env) => {
+    if (!constantTimeEqual(request.headers.get('X-Seed-Secret') ?? '', env.SEED_SECRET)) {
+      return new Response('Forbidden', { status: 403 });
+    }
+
+    const daysParam = new URL(request.url).searchParams.get('days');
+    const days = daysParam ? Number(daysParam) : 30;
+    if (!Number.isFinite(days) || days <= 0) {
+      return Response.json({ error: 'invalid_days' }, { status: 400 });
+    }
+
+    const sinceMs = Date.now() - days * 24 * 60 * 60 * 1000;
+    const result = await distinctActiveUserCount(env.DB, sinceMs);
+    return Response.json({ days, sinceMs, ...result });
   });
 }

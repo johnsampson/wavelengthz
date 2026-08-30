@@ -39,6 +39,21 @@ export function preloadCandidateImage(candidate, mode) {
   new Image().src = url;
 }
 
+// Issue #161 (part of the 250K-users strategy discussion): once per real
+// session (not once per SPA navigation -- sessionStorage survives
+// router.js's in-place page swaps and a reload within the same tab, and is
+// cleared when the tab closes), record that someone showed up at all.
+// Fire-and-forget -- a failed/slow analytics call must never affect the
+// deck loading, same reasoning as loadDailyDropPrompt()'s own try/catch.
+// Works for a logged-out visitor too -- attribution to a real account (if
+// any) happens server-side off the session cookie, not anything passed
+// here.
+function recordSessionStartOnce() {
+  if (sessionStorage.getItem('wl_session_start_recorded')) return;
+  sessionStorage.setItem('wl_session_start_recorded', '1');
+  api.recordEvent('session_start').catch(() => {});
+}
+
 // Extracted from index.html's inline script -- see matches.js's comment for
 // why (same reasoning, same shape). Also adds destroy(), same new
 // requirement the router introduces as messages.js/group.js's poll timers:
@@ -115,6 +130,7 @@ export function createDeckApp() {
     },
 
     async init() {
+      recordSessionStartOnce();
       this.unsubscribeNowPlaying = onNowPlayingChange(() => {
         this.nowPlayingTick++;
       });
@@ -228,6 +244,10 @@ export function createDeckApp() {
       }
       const { spotifyId, id, name, imageUrl, durationMs } = this.current.track;
       await play({ spotifyId, id, name, artistName: this.current.name, imageUrl, durationMs: durationMs ?? null });
+      // Issue #161: a fresh play (not a resume via togglePlayPause above) --
+      // fire-and-forget, matching loadDailyDropPrompt()'s own "never block
+      // or break the deck over this" reasoning.
+      api.recordEvent('song_play', { trackId: id }).catch(() => {});
     },
 
     async decide(direction) {
@@ -413,6 +433,8 @@ export function createDeckApp() {
       // bump the way a catalog-backed track's like does.
       const { spotifyId, id, name, artistName, imageUrl } = this.current.anthemTrack;
       await play({ spotifyId, id, name, artistName, imageUrl });
+      // Issue #161: same fresh-play-only reasoning as togglePreviewTrack above.
+      api.recordEvent('song_play', { trackId: id }).catch(() => {});
     },
   };
 }

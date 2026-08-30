@@ -283,3 +283,66 @@ describe('POST /internal/users/:id/delete', () => {
     expect(res.status).toBe(404);
   });
 });
+
+// Issue #161 (part of the 250K-users strategy discussion): the report
+// endpoint applicants would eventually export for Spotify's own Extended
+// Quota Mode MAU verification.
+describe('GET /internal/analytics/mau', () => {
+  beforeEach(async () => {
+    await env.DB.exec('DELETE FROM analytics_events; DELETE FROM sessions; DELETE FROM music_source_tokens; DELETE FROM auth_identities; DELETE FROM users;');
+    await insertTestUser(env.DB, { id: 'u1' });
+    await env.DB.prepare(
+      `INSERT INTO analytics_events (id, user_id, event_type, created_at, updated_at) VALUES ('e1', 'u1', 'session_start', ?, ?)`
+    )
+      .bind(Date.now() - 5 * 24 * 60 * 60 * 1000, Date.now() - 5 * 24 * 60 * 60 * 1000)
+      .run();
+    await env.DB.prepare(
+      `INSERT INTO analytics_events (id, user_id, event_type, created_at, updated_at) VALUES ('e2', 'u1', 'song_play', ?, ?)`
+    )
+      .bind(Date.now() - 40 * 24 * 60 * 60 * 1000, Date.now() - 40 * 24 * 60 * 60 * 1000)
+      .run();
+    await env.DB.prepare(
+      `INSERT INTO analytics_events (id, user_id, event_type, created_at, updated_at) VALUES ('e3', NULL, 'session_start', ?, ?)`
+    )
+      .bind(Date.now() - 5 * 24 * 60 * 60 * 1000, Date.now() - 5 * 24 * 60 * 60 * 1000)
+      .run();
+  });
+
+  it('rejects requests without the correct seed secret', async () => {
+    const req = new Request('http://localhost/internal/analytics/mau', { method: 'GET' });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(403);
+  });
+
+  it('reports distinct active users and anonymous events within the default 30-day window, excluding older rows', async () => {
+    const req = new Request('http://localhost/internal/analytics/mau', {
+      headers: { 'X-Seed-Secret': env.SEED_SECRET },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    expect(body.days).toBe(30);
+    expect(body.distinctUsers).toBe(1); // u1's recent event counts once, its 40-day-old one doesn't extend the window
+    expect(body.anonymousEvents).toBe(1);
+  });
+
+  it('honors a ?days= override', async () => {
+    const req = new Request('http://localhost/internal/analytics/mau?days=45', {
+      headers: { 'X-Seed-Secret': env.SEED_SECRET },
+    });
+    const res = await worker.fetch(req, env, {} as ExecutionContext);
+    const body = await res.json<any>();
+    expect(body.days).toBe(45);
+    expect(body.distinctUsers).toBe(1); // now both of u1's events (5 and 40 days old) fall inside the window
+  });
+
+  it('rejects a non-numeric or non-positive ?days=', async () => {
+    for (const bad of ['not-a-number', '0', '-5']) {
+      const req = new Request(`http://localhost/internal/analytics/mau?days=${bad}`, {
+        headers: { 'X-Seed-Secret': env.SEED_SECRET },
+      });
+      const res = await worker.fetch(req, env, {} as ExecutionContext);
+      expect(res.status).toBe(400);
+    }
+  });
+});
