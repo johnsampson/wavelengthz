@@ -550,7 +550,14 @@
 // tap (not a real swipe, and not an aborted drag attempt that just springs
 // back) -- index.js wires it to the same viewArtist()/viewProfile() the
 // name button already called.
-const CACHE_NAME = 'wavelengthz-shell-v83';
+// v84 makes Google sign-on the primary login option (issue #156, part of
+// the 250K-users strategy): index.html's logged-out state copy drops its
+// Spotify-specific "Log in with Spotify" wording in favor of a
+// provider-neutral "Log in" -- the button already pointed at /login (the
+// provider picker), only the copy assumed Spotify. login.html itself
+// (Google now btn-primary, Spotify btn-secondary) is in BYPASS_PATHS and
+// needs no cache entry.
+const CACHE_NAME = 'wavelengthz-shell-v84';
 const APP_SHELL = [
   '/',
   '/app.js',
