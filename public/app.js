@@ -192,4 +192,10 @@ export const api = {
   // Settings -> "Your invites" (public/settings/invites.js). Codes I've
   // issued and their redemption state -- see migrations/0026.
   myInvites: () => request('/api/me/invites'),
+  // Issue #161 (part of the 250K-users strategy discussion): fire-and-forget
+  // first-party usage tracking -- works for a logged-out visitor too (no
+  // session required server-side), so callers shouldn't await this on any
+  // user-visible path. metadata is optional, free-form per eventType.
+  recordEvent: (eventType, metadata) =>
+    request('/api/analytics/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ eventType, metadata }) }),
 };

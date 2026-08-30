@@ -566,7 +566,14 @@
 // iframe -- Spotify's embed can't be redirected to a new track in place);
 // togglePreviewTrack()/isCurrentPreviewTrack() are removed, no longer
 // reachable from index.html.
-const CACHE_NAME = 'wavelengthz-shell-v85';
+// v86 adds first-party analytics instrumentation (issue #161, part of the
+// 250K-users strategy discussion) -- index.js now records a session_start
+// event once per session on init(), and a song_play event from
+// showCardPreviewEmbed() (Music mode's card embed, replacing v85's
+// removed togglePreviewTrack() as the actual "fresh play" moment) and
+// toggleAnthem() (People mode) on a fresh (non-resume) play. app.js gains
+// the new api.recordEvent() client method both call.
+const CACHE_NAME = 'wavelengthz-shell-v86';
 const APP_SHELL = [
   '/',
   '/app.js',

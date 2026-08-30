@@ -39,6 +39,21 @@ export function preloadCandidateImage(candidate, mode) {
   new Image().src = url;
 }
 
+// Issue #161 (part of the 250K-users strategy discussion): once per real
+// session (not once per SPA navigation -- sessionStorage survives
+// router.js's in-place page swaps and a reload within the same tab, and is
+// cleared when the tab closes), record that someone showed up at all.
+// Fire-and-forget -- a failed/slow analytics call must never affect the
+// deck loading, same reasoning as loadDailyDropPrompt()'s own try/catch.
+// Works for a logged-out visitor too -- attribution to a real account (if
+// any) happens server-side off the session cookie, not anything passed
+// here.
+function recordSessionStartOnce() {
+  if (sessionStorage.getItem('wl_session_start_recorded')) return;
+  sessionStorage.setItem('wl_session_start_recorded', '1');
+  api.recordEvent('session_start').catch(() => {});
+}
+
 // Mounts the deck card's own inline Spotify embed for its representative
 // track -- issue #159/#160 (part of the 250K-users strategy discussion): a
 // visible, ready-to-tap (autoplay where the browser allows it) embed
@@ -63,6 +78,12 @@ function showCardPreviewEmbed(spotifyId) {
   iframe.className = 'rounded-xl';
   host.appendChild(iframe);
   host.classList.remove('hidden');
+  // Issue #161: mounting this embed is the Music-mode equivalent of the
+  // old togglePreviewTrack()'s "fresh play" branch -- issue #160 replaced
+  // that hand-off-to-the-shared-bar chip with this self-contained embed,
+  // so the song_play event moves here with it. Fire-and-forget, same
+  // reasoning as recordSessionStartOnce above.
+  api.recordEvent('song_play', { spotifyId }).catch(() => {});
 }
 
 // Fully empties the host rather than just hiding it -- an iframe merely
@@ -145,6 +166,7 @@ export function createDeckApp() {
     },
 
     async init() {
+      recordSessionStartOnce();
       this.unsubscribeNowPlaying = onNowPlayingChange(() => {
         this.nowPlayingTick++;
       });
@@ -448,6 +470,9 @@ export function createDeckApp() {
       // bump the way a catalog-backed track's like does.
       const { spotifyId, id, name, artistName, imageUrl } = this.current.anthemTrack;
       await play({ spotifyId, id, name, artistName, imageUrl });
+      // Issue #161: a fresh play (not a resume via togglePlayPause above) --
+      // fire-and-forget, same reasoning as recordSessionStartOnce.
+      api.recordEvent('song_play', { trackId: id }).catch(() => {});
     },
   };
 }

@@ -85,6 +85,44 @@ describe('deck app', () => {
     expect(app.current).toBeNull();
   });
 
+  // Issue #161: records reach even for a logged-out visitor -- the whole
+  // point is counting people beyond identified accounts too.
+  it('records a session_start analytics event on init, even when not authed', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { getElementById: vi.fn(() => null) });
+    const fetchMock = vi.fn(async (path: string, options?: any) => {
+      if (path === '/api/me') return new Response('nope', { status: 401 });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createDeckApp();
+
+    await app.init();
+
+    const call = fetchMock.mock.calls.find((c) => c[0] === '/api/analytics/event');
+    expect(call).toBeTruthy();
+    expect(JSON.parse((call![1] as any).body)).toEqual({ eventType: 'session_start', metadata: undefined });
+  });
+
+  it('does not record a second session_start event on a second init() within the same session', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    vi.stubGlobal('document', { getElementById: vi.fn(() => null) });
+    const fetchMock = vi.fn(async (path: string, options?: any) => {
+      if (path === '/api/me') return new Response('nope', { status: 401 });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createDeckApp();
+    await app.init();
+    const firstCallCount = fetchMock.mock.calls.filter((c) => c[0] === '/api/analytics/event').length;
+    expect(firstCallCount).toBe(1);
+
+    await app.init(); // e.g. re-entering the page within the same tab session
+
+    const totalCallCount = fetchMock.mock.calls.filter((c) => c[0] === '/api/analytics/event').length;
+    expect(totalCallCount).toBe(1);
+  });
+
   it('destroy() detaches the swipe-deck listener attached by showNext()', async () => {
     vi.stubGlobal('window', fakeWindow());
     vi.stubGlobal('document', { getElementById: vi.fn(() => fakeDomElement()) });
@@ -231,6 +269,26 @@ describe('deck app', () => {
     expect(play).toHaveBeenCalledWith({ spotifyId: 'sp1', id: 'sp1', name: 'Song', artistName: 'Some Artist', imageUrl: 'img' });
   });
 
+  it('toggleAnthem records a song_play analytics event for a fresh play, but not a resume', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    const fetchMock = vi.fn(async (path?: string, options?: any) => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.mocked(isCurrentTrack).mockReturnValue(false);
+    const app = createDeckApp();
+    app.current = { anthemTrack: { spotifyId: 'sp1', id: 'sp1', name: 'Song', artistName: 'Some Artist', imageUrl: 'img' } };
+
+    await app.toggleAnthem();
+
+    const call = fetchMock.mock.calls.find((c) => c[0] === '/api/analytics/event');
+    expect(call).toBeTruthy();
+    expect(JSON.parse((call![1] as any).body)).toEqual({ eventType: 'song_play', metadata: { trackId: 'sp1' } });
+
+    fetchMock.mockClear();
+    vi.mocked(isCurrentTrack).mockReturnValue(true); // now "currently playing" -- next call is a resume
+    await app.toggleAnthem();
+    expect(fetchMock.mock.calls.find((c) => c[0] === '/api/analytics/event')).toBeUndefined();
+  });
+
   it('toggleAnthem is a no-op when the current card has no anthem', async () => {
     vi.stubGlobal('window', fakeWindow());
     const app = createDeckApp();
@@ -299,6 +357,39 @@ describe('deck app', () => {
 
     expect(doc.createElement).not.toHaveBeenCalled();
     expect(doc.host.classList.add).toHaveBeenCalledWith('hidden');
+  });
+
+  // Issue #161: showCardPreviewEmbed (issue #159/#160's replacement for the
+  // old togglePreviewTrack chip) is now the actual "fresh play" moment for
+  // Music mode's card -- there's no more "already playing, so pause"
+  // resume branch to distinguish, since the embed remounts fresh on every
+  // card advance rather than toggling play/pause on a persistent bar.
+  it('records a song_play analytics event when showNext mounts a card embed', async () => {
+    vi.stubGlobal('window', fakeWindow());
+    const doc = fakeDocumentWithCardHost();
+    vi.stubGlobal('document', doc);
+    const fetchMock = vi.fn(async (path: string, options?: any) => {
+      if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
+      if (path.startsWith('/api/candidates/'))
+        return new Response(
+          JSON.stringify({ candidates: [{ id: 'c1', itemId: 'a1', name: 'Artist', track: { spotifyId: 'sp1', id: 't1', name: 'Song' } }] }),
+          { status: 200 }
+        );
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app: any = createDeckApp();
+    app.$nextTick = (fn: () => void) => fn();
+    app.mode = 'music';
+
+    await app.init();
+
+    // init() also fires its own session_start analytics event -- find the
+    // song_play one specifically rather than the first analytics call.
+    const analyticsCalls = fetchMock.mock.calls.filter((c) => c[0] === '/api/analytics/event');
+    const call = analyticsCalls.find((c) => JSON.parse((c[1] as any).body).eventType === 'song_play');
+    expect(call).toBeTruthy();
+    expect(JSON.parse((call![1] as any).body)).toEqual({ eventType: 'song_play', metadata: { spotifyId: 'sp1' } });
   });
 
   it('showNext never mounts the card embed in People mode, even if a candidate carries a track field', async () => {
