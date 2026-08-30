@@ -573,7 +573,15 @@
 // removed togglePreviewTrack() as the actual "fresh play" moment) and
 // toggleAnthem() (People mode) on a fresh (non-resume) play. app.js gains
 // the new api.recordEvent() client method both call.
-const CACHE_NAME = 'wavelengthz-shell-v86';
+// v87 forwards analytics_events to Google Analytics 4 server-side (issue
+// #168, part of the 250K-users strategy discussion) -- app.js's
+// api.recordEvent() now generates and sends a per-device clientId
+// (localStorage) and a per-tab-session sessionId (sessionStorage) alongside
+// every event, so the Worker can forward them to GA4's Measurement
+// Protocol (src/lib/googleAnalytics.ts) when GA4_MEASUREMENT_ID/
+// GA4_API_SECRET are configured; index.js is unchanged but is a caller of
+// the now-modified api.recordEvent().
+const CACHE_NAME = 'wavelengthz-shell-v87';
 const APP_SHELL = [
   '/',
   '/app.js',
