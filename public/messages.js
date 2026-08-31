@@ -22,6 +22,7 @@ export function createMessagesApp() {
     ...createTrackPicker({
       share: (track, body) => api.shareTrack(matchId, track, body),
       loadPlaylist: () => api.matchPlaylist(matchId),
+      surface: 'match',
     }),
     matchId,
     messages: [],
@@ -216,6 +217,8 @@ export function createMessagesApp() {
       }
       try {
         await api.sendMessage(this.matchId, trimmed);
+        // Issue #170: fire-and-forget, same as every other recordEvent call.
+        api.recordEvent('message_sent', { surface: 'match', kind: 'text' }).catch(() => {});
         this.draft = '';
         this.now = Date.now();
         await this.load();

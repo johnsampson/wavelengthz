@@ -69,6 +69,24 @@ describe('POST /api/analytics/event', () => {
     expect(await env.DB.prepare('SELECT COUNT(*) as c FROM analytics_events').first<{ c: number }>()).toEqual({ c: 0 });
   });
 
+  // Issue #170: Tier 1 event-coverage expansion.
+  it.each(['people_swipe', 'music_swipe', 'match_created', 'message_sent', 'group_created', 'group_joined', 'daily_drop_answered'])(
+    'accepts %s as a valid event_type',
+    async (eventType) => {
+      const req = new Request('http://localhost/api/analytics/event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventType }),
+      });
+
+      const res = await worker.fetch(req, env, ctx);
+
+      expect(res.status).toBe(200);
+      const row = await env.DB.prepare('SELECT * FROM analytics_events').first<any>();
+      expect(row.event_type).toBe(eventType);
+    }
+  );
+
   it('rejects a non-JSON body with 400 rather than throwing', async () => {
     const req = new Request('http://localhost/api/analytics/event', {
       method: 'POST',

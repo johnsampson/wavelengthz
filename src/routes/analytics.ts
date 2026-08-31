@@ -3,7 +3,19 @@ import { getSessionUser } from '../lib/session';
 import { recordEvent, type AnalyticsEventType } from '../lib/analytics';
 import { sendToGA4 } from '../lib/googleAnalytics';
 
-const VALID_EVENT_TYPES: AnalyticsEventType[] = ['session_start', 'song_play'];
+// Issue #170: Tier 1 event-coverage expansion, see src/lib/analytics.ts's
+// AnalyticsEventType comment for the full rationale.
+const VALID_EVENT_TYPES: AnalyticsEventType[] = [
+  'session_start',
+  'song_play',
+  'people_swipe',
+  'music_swipe',
+  'match_created',
+  'message_sent',
+  'group_created',
+  'group_joined',
+  'daily_drop_answered',
+];
 
 export function registerAnalyticsRoutes(router: RouterType) {
   // Deliberately open to anonymous callers (no session required) -- issue

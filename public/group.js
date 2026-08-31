@@ -15,6 +15,7 @@ export function createGroupApp() {
     ...createTrackPicker({
       share: (track, body) => api.shareTrackToGroup(groupId, track, body),
       loadPlaylist: () => api.groupPlaylist(groupId),
+      surface: 'group',
     }),
     groupId,
     /** @type {{id: string, name: string, topic?: string, members: Array<{id: string, displayName?: string}>} | null} */
@@ -189,6 +190,8 @@ export function createGroupApp() {
       }
       try {
         await api.sendGroupMessage(this.groupId, trimmed);
+        // Issue #170: fire-and-forget, same as every other recordEvent call.
+        api.recordEvent('message_sent', { surface: 'group', kind: 'text' }).catch(() => {});
         this.draft = '';
         this.now = Date.now();
         await this.load();

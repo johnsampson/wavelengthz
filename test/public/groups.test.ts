@@ -32,15 +32,16 @@ describe('groups list', () => {
 
   it('clears the create form and reloads after a successful create', async () => {
     let created = false;
-    stubApi((path) => {
+    const fetchMock = vi.fn(async (path: string, options?: any) => {
       if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
       if (path === '/api/groups' && !created) {
         created = true;
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
       if (path === '/api/groups') return new Response(JSON.stringify({ groups: [{ id: 'g1', name: 'New group' }] }), { status: 200 });
-      return new Response('not found', { status: 404 });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
     });
+    vi.stubGlobal('fetch', fetchMock);
     const app = createGroupsApp();
     app.newName = 'New group';
     app.showCreate = true;
@@ -50,6 +51,9 @@ describe('groups list', () => {
     expect(app.newName).toBe('');
     expect(app.showCreate).toBe(false);
     expect(app.groups).toEqual([{ id: 'g1', name: 'New group' }]);
+    // Issue #170: Tier 1 event-coverage expansion.
+    const analyticsCalls = fetchMock.mock.calls.filter((c) => c[0] === '/api/analytics/event');
+    expect(analyticsCalls.some((c) => JSON.parse((c[1] as any).body).eventType === 'group_created')).toBe(true);
     vi.unstubAllGlobals();
   });
 
@@ -79,15 +83,16 @@ describe('groups list', () => {
   });
 
   it('navigates into the group after successfully joining', async () => {
-    stubApi((path) => {
-      if (path.endsWith('/join')) return new Response('{}', { status: 200 });
-      return new Response('{}', { status: 200 });
-    });
+    const fetchMock = vi.fn(async (path: string, options?: any) => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
     const app = createGroupsApp();
 
     await app.join({ id: 'g1' });
 
     expect(navigate).toHaveBeenCalledWith('/group?id=g1');
+    // Issue #170: Tier 1 event-coverage expansion.
+    const analyticsCalls = fetchMock.mock.calls.filter((c) => c[0] === '/api/analytics/event');
+    expect(analyticsCalls.some((c) => JSON.parse((c[1] as any).body).eventType === 'group_joined')).toBe(true);
     vi.unstubAllGlobals();
   });
 });

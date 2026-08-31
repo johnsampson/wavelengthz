@@ -24,6 +24,7 @@ function makePicker(deps: any = {}) {
   const picker: any = createTrackPicker({
     share: deps.share ?? vi.fn(async () => ({ ok: true })),
     loadPlaylist: deps.loadPlaylist ?? vi.fn(async () => ({ tracks: [], count: 0 })),
+    surface: deps.surface ?? 'match',
   });
   picker.$nextTick = (fn: () => void) => fn();
   picker.$refs = { trackSearchInput: { focus: vi.fn() } };
@@ -106,6 +107,11 @@ describe('track picker', () => {
   });
 
   it('shares the currently-playing track using the raw Spotify object', async () => {
+    // Issue #170: shareTrack also fires a fire-and-forget message_sent
+    // analytics event on success, a real fetch call this test doesn't
+    // otherwise care about -- stubbed so it resolves instead of hitting the
+    // real network.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
     const share = vi.fn(async () => ({ ok: true }));
     const picker = makePicker({ share });
     picker.nowPlayingRaw = { id: 'sp1', name: 'Landslide', artists: [{ id: 'a', name: 'FM' }] };
@@ -114,9 +120,11 @@ describe('track picker', () => {
     await picker.shareNowPlaying();
 
     expect(share).toHaveBeenCalledWith(picker.nowPlayingRaw, 'this one');
+    vi.unstubAllGlobals();
   });
 
   it('shares a search result as a Spotify-shaped object the server can resolve', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
     const share = vi.fn(async () => ({ ok: true }));
     const picker = makePicker({ share });
 
@@ -135,9 +143,11 @@ describe('track picker', () => {
       }),
       ''
     );
+    vi.unstubAllGlobals();
   });
 
   it('closes the picker and refreshes the thread and playlist after a successful share', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
     const loadPlaylist = vi.fn(async () => ({ tracks: [{ id: 't1' }], count: 1 }));
     const picker = makePicker({ loadPlaylist });
     picker.showTrackPicker = true;
@@ -147,6 +157,25 @@ describe('track picker', () => {
     expect(picker.showTrackPicker).toBe(false);
     expect(picker.load).toHaveBeenCalled();
     expect(picker.playlistCount).toBe(1);
+    vi.unstubAllGlobals();
+  });
+
+  // Issue #170: Tier 1 event-coverage expansion.
+  it('records a message_sent analytics event tagged kind: track after a successful share', async () => {
+    const fetchMock = vi.fn(async (path: string, options?: any) => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const share = vi.fn(async () => ({ ok: true }));
+    const picker = makePicker({ share, surface: 'group' });
+
+    await picker.shareTrack({ id: 'sp1', name: 'x' });
+
+    const analyticsCalls = fetchMock.mock.calls.filter((c) => c[0] === '/api/analytics/event');
+    const call = analyticsCalls.find((c) => JSON.parse((c[1] as any).body).eventType === 'message_sent');
+    expect(JSON.parse((call![1] as any).body)).toEqual({
+      eventType: 'message_sent',
+      metadata: { surface: 'group', kind: 'track' },
+    });
+    vi.unstubAllGlobals();
   });
 
   it('surfaces the Spotify-busy case distinctly from a generic failure', async () => {
@@ -179,6 +208,7 @@ describe('track picker', () => {
   });
 
   it('ignores a second share while one is already in flight', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
     let resolve: (v: any) => void = () => {};
     const share = vi.fn(() => new Promise((r) => { resolve = r; }));
     const picker = makePicker({ share });
@@ -189,6 +219,7 @@ describe('track picker', () => {
     await first;
 
     expect(share).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
   });
 
   it('plays a shared track through the persistent player bar', async () => {

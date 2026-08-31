@@ -96,6 +96,7 @@ describe('drop page', () => {
 
   it('submits a search result as the answer, reconstructing the raw Spotify shape', async () => {
     let sentBody: any = null;
+    let analyticsBody: any = null;
     stubApi({
       '/api/daily-drop': { prompt: PROMPT, myAnswer: null, answerCount: 0 },
       '/api/daily-drop/answer': (init: any) => {
@@ -103,6 +104,11 @@ describe('drop page', () => {
         return { myAnswer: { name: 'Song One', artistName: 'Artist One', spotifyId: 'sp1', imageUrl: 'https://i/1.jpg' } };
       },
       '/api/daily-drop/answers': { answers: [] },
+      // Issue #170: Tier 1 event-coverage expansion.
+      '/api/analytics/event': (init: any) => {
+        analyticsBody = JSON.parse(init.body);
+        return { ok: true };
+      },
     });
     const app = createDropApp();
     await app.init();
@@ -124,6 +130,8 @@ describe('drop page', () => {
     expect(app.myAnswer).toMatchObject({ name: 'Song One' });
     expect(app.answerCount).toBeGreaterThanOrEqual(1);
     expect(showToast).toHaveBeenCalled();
+    // Issue #170: Tier 1 event-coverage expansion.
+    expect(analyticsBody.eventType).toBe('daily_drop_answered');
   });
 
   it('shows a specific toast when Spotify cannot resolve the artist', async () => {
