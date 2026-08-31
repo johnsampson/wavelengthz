@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Wavelengthz — Cookie Policy</title>
+  <meta name="description" content="The complete, short list of what Wavelengthz stores in your browser." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/tailwind.css" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+</head>
+<body class="min-h-dvh bg-base text-neutral-50">
+  <header class="mx-auto flex max-w-2xl items-center justify-between px-4 py-6">
+    <a href="/" class="wordmark text-xl">Wavelengthz</a>
+    <a href="/" class="btn-ghost">Back to app</a>
+  </header>
+  <main class="legal-doc">
+    <h1>Cookie Policy</h1>
+    <p class="legal-meta">
+      Version 1.0 — Draft dated August 31, 2026 ·
+      <a href="/terms">Terms</a> ·
+      <a href="/privacy">Privacy</a> ·
+      <a href="/guidelines">Guidelines</a> ·
+      <a href="/safety">Safety</a> ·
+      <a href="/dmca">DMCA</a>
+    </p>
+
+    <p>
+      Wavelengthz uses less browser storage than most sites — no
+      third-party advertising trackers, no cross-site cookies, and no
+      cookie-consent banner full of vendor toggles. Here's the complete
+      list of what we store in your browser and why.
+    </p>
+
+    <h2>What we use</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Storage</th>
+          <th>Purpose</th>
+          <th>Type</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>wl_session</code> cookie</td>
+          <td>Keeps you signed in between visits. Without it, you'd have to
+            sign in on every page load.</td>
+          <td>Strictly necessary</td>
+        </tr>
+        <tr>
+          <td><code>wl_ga_client_id</code> (localStorage)</td>
+          <td>A randomly-generated id (not your name or account) used to
+            measure usage in aggregate — see our
+            <a href="/privacy">Privacy Policy</a> §5.</td>
+          <td>Analytics</td>
+        </tr>
+        <tr>
+          <td><code>wl_ga_session_id</code> (sessionStorage)</td>
+          <td>Same purpose as above, scoped to a single browser
+            tab/session rather than persisted long-term.</td>
+          <td>Analytics</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      That's the entire list. We don't set any advertising, cross-site
+      tracking, or third-party marketing cookies, and we don't run any ad
+      network's pixel on the site.
+    </p>
+
+    <h2>Why "cookie policy" covers localStorage too</h2>
+    <p>
+      <code>wl_ga_client_id</code> and <code>wl_ga_session_id</code> are
+      technically browser <code>localStorage</code>/<code>sessionStorage</code>
+      values, not cookies — but they serve the same purpose a typical
+      analytics cookie would, so we're describing them here rather than
+      drawing a technical distinction that wouldn't mean much in practice.
+      Notably, this also means our Google Analytics integration doesn't
+      load any Google script or set any Google cookie in your browser at
+      all — usage events are sent from our own server, not from your
+      browser directly.
+    </p>
+
+    <h2>Your choices</h2>
+    <ul>
+      <li><strong><code>wl_session</code></strong> can't be disabled
+        without also disabling the ability to stay signed in — it's the
+        login mechanism itself, not a tracking mechanism.</li>
+      <li><strong>The two analytics identifiers</strong> are cleared
+        automatically if you clear your browser's site data/local storage
+        for Wavelengthz, or you can clear them manually through your
+        browser's developer tools or site-settings panel. Clearing them
+        just means a new random id gets generated next time, which doesn't
+        affect anything about your account.</li>
+      <li>We don't currently respond to "Do Not Track" or Global Privacy
+        Control signals as a technical opt-out, since we don't do the kind
+        of cross-context behavioral advertising those signals are aimed at
+        stopping in the first place.</li>
+    </ul>
+
+    <h2>Changes to this policy</h2>
+    <p>
+      If what we store changes, we'll update this page and the
+      version/date at the top.
+    </p>
+  </main>
+  <footer class="legal-footer">
+    <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> ·
+    <a href="/guidelines">Guidelines</a> · <a href="/safety">Safety</a> ·
+    <a href="/dmca">DMCA</a>
+  </footer>
+</body>
+</html>

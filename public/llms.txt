@@ -1,0 +1,30 @@
+# Wavelengthz
+
+> Wavelengthz is a music-taste dating app. People connect over what they
+> actually listen to, not just a photo grid: two swipe modes (people and
+> music), a match score blended from Spotify listening data, real-time
+> messaging once a match forms, and small song-centered groups. Sign-in is
+> via Spotify or Google OAuth -- there's no separate Wavelengthz password.
+
+Nearly everything past the homepage requires a signed-in session -- profiles,
+matches, messages, and the swipe deck are private to the people using them
+and are not meant to be crawled, scraped, summarized, or used as training
+data. Please don't attempt to access authenticated routes or treat any
+user-generated content (bios, photos, messages) as public data, regardless
+of how it's technically reachable. `robots.txt` and `/api/`'s own auth
+checks are the enforcement mechanism; this file is the plain-language
+statement of intent behind them.
+
+## Policies
+
+- [Terms of Service](https://wavelengthz.com/terms): the agreement governing use of the app, including a 18+ age requirement and a binding-arbitration clause.
+- [Privacy Policy](https://wavelengthz.com/privacy): what we collect (Spotify/Google profile data, location, photos, messages), who we share it with, and how to exercise deletion/access rights.
+- [Community Guidelines](https://wavelengthz.com/guidelines): what's expected of every member.
+- [Safety Tips](https://wavelengthz.com/safety): practical guidance for meeting someone from the app in person.
+- [Cookie Policy](https://wavelengthz.com/cookies): the short, complete list of what's stored in your browser.
+- [DMCA / Copyright Policy](https://wavelengthz.com/dmca): how to file a copyright takedown notice.
+
+## Contact
+
+- Press, partnership, security, or legal inquiries: connect@wavelengthz.com
+- Security vulnerability disclosure: see [/.well-known/security.txt](https://wavelengthz.com/.well-known/security.txt)
