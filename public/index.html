@@ -297,18 +297,47 @@
     class="fixed inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-base/95 p-6 text-center backdrop-blur-sm"
     role="dialog"
     aria-modal="true"
-    aria-label="It's a match"
+    aria-label="You're on the same frequency"
   >
-    <!-- Same null-photoUrl guard as the deck card above -- the other user
-         may have no photo (photos are optional at onboarding). -->
-    <template x-if="matchModal?.photoUrl">
-      <img :src="matchModal?.photoUrl" :alt="matchModal?.name" class="h-32 w-32 rounded-full object-cover ring-4 ring-brand-500" />
-    </template>
-    <h2 class="wordmark text-3xl">It's a match!</h2>
-    <p class="text-neutral-300">You and <span x-text="matchModal?.name" class="font-semibold text-neutral-100"></span> liked each other.</p>
-    <div class="mt-2 flex w-full max-w-xs flex-col gap-2">
-      <a :href="`/messages?matchId=${matchModal?.matchId}`" class="btn-primary">Send a Message</a>
-      <button class="btn-secondary" @click="dismissMatch()">Keep Swiping</button>
+    <!-- Layered wavelength lines drifting slowly downward behind the
+         celebration -- ties it to the app's own "Wavelengthz"/frequency
+         identity. Two <use> copies of the same tile, stacked one tile-
+         height apart, let a single 0 -> 200px translateY loop
+         (styles.css's wl-wave-scroll) read as an endless downward scroll
+         with no visible seam. Decorative only: aria-hidden, and paused
+         under prefers-reduced-motion (see styles.css). -->
+    <svg
+      viewBox="0 0 200 200"
+      preserveAspectRatio="none"
+      class="pointer-events-none absolute inset-0 h-full w-full opacity-40"
+      aria-hidden="true"
+    >
+      <defs>
+        <g id="wl-wave-tile">
+          <path d="M-20,20 Q 5,4 30,20 T 80,20 T 130,20 T 180,20 T 230,20" fill="none" stroke="#FF5A7A" stroke-width="2.5" opacity="0.55" />
+          <path d="M-20,70 Q 10,50 40,70 T 100,70 T 160,70 T 220,70" fill="none" stroke="#FF7A93" stroke-width="2" opacity="0.45" />
+          <path d="M-20,120 Q 8,100 36,120 T 92,120 T 148,120 T 204,120" fill="none" stroke="#A78BFA" stroke-width="2.5" opacity="0.5" />
+          <path d="M-20,170 Q 12,150 44,170 T 108,170 T 172,170 T 236,170" fill="none" stroke="#8B5CF6" stroke-width="2" opacity="0.4" />
+        </g>
+      </defs>
+      <g class="wl-wave-scroll">
+        <use href="#wl-wave-tile" y="-200" />
+        <use href="#wl-wave-tile" y="0" />
+      </g>
+    </svg>
+
+    <div class="relative z-10 flex flex-col items-center gap-4">
+      <!-- Same null-photoUrl guard as the deck card above -- the other user
+           may have no photo (photos are optional at onboarding). -->
+      <template x-if="matchModal?.photoUrl">
+        <img :src="matchModal?.photoUrl" :alt="matchModal?.name" class="h-32 w-32 rounded-full object-cover ring-4 ring-brand-500" />
+      </template>
+      <h2 class="wordmark text-3xl">You're On The Same Frequency!</h2>
+      <p class="text-neutral-300">You and <span x-text="matchModal?.name" class="font-semibold text-neutral-100"></span> liked each other.</p>
+      <div class="mt-2 flex w-full max-w-xs flex-col gap-2">
+        <a :href="`/messages?matchId=${matchModal?.matchId}`" class="btn-primary">Send a Message</a>
+        <button class="btn-secondary" @click="dismissMatch()">Keep Swiping</button>
+      </div>
     </div>
   </div>
 

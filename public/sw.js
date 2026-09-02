@@ -588,7 +588,13 @@
 // message_sent for a shared track (consumed by messages.js/group.js, which
 // also record it for a plain-text send), groups.js records
 // group_created/group_joined, and drop.js records daily_drop_answered.
-const CACHE_NAME = 'wavelengthz-shell-v88';
+// v89 gives the deck's existing match-celebration modal (index.html's
+// matchModal, index.js's decide()/dismissMatch()) an actual "on the same
+// frequency" moment: copy changes from "It's a match!" to "You're On The
+// Same Frequency!", plus an animated backdrop of layered wavelength lines
+// drifting slowly downward (a new inline SVG in index.html, animated via
+// styles.css's new wl-wave-scroll keyframe, compiled into tailwind.css).
+const CACHE_NAME = 'wavelengthz-shell-v89';
 const APP_SHELL = [
   '/',
   '/app.js',

@@ -117,6 +117,27 @@ summary {
   animation: wl-marquee var(--wl-marquee-duration, 6s) ease-in-out infinite;
 }
 
+/*
+ * Backs index.html's match-celebration modal (matchModal): a downward
+ * translateY loop over the wave <g>'s two stacked <use> copies of the same
+ * 200-unit-tall tile (see index.html) -- 0 -> 200px lines up exactly with
+ * one tile height, so the loop point is visually identical to the start
+ * and the scroll reads as endless instead of snapping back. Decorative
+ * only, so it's dropped for prefers-reduced-motion.
+ */
+@keyframes wl-wave-scroll {
+  from { transform: translateY(0); }
+  to { transform: translateY(200px); }
+}
+.wl-wave-scroll {
+  animation: wl-wave-scroll 9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wl-wave-scroll {
+    animation: none;
+  }
+}
+
 @layer components {
   /*
    * Replaces every page's hardcoded pb-24/mb-20 bottom clearance above the
