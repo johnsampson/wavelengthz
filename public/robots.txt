@@ -1,0 +1,18 @@
+# Wavelengthz (https://wavelengthz.com)
+#
+# Everything under /api/ and /internal/ is the application's own backend
+# surface (JSON endpoints, admin/cron-triggered jobs) -- never meant to be
+# indexed and of zero value to a crawler. Everything else that's actually
+# reachable without an account (the homepage, sign-in, and the legal pages
+# below) is open.
+#
+# Authenticated app routes (/matches, /messages, /settings, etc.) aren't
+# explicitly disallowed here -- they don't need to be, since none of them
+# render anything for a crawler that isn't signed in anyway. See sitemap.xml
+# for the actual list of pages worth indexing.
+
+User-agent: *
+Disallow: /api/
+Disallow: /internal/
+
+Sitemap: https://wavelengthz.com/sitemap.xml

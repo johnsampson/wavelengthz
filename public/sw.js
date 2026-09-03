@@ -588,7 +588,18 @@
 // message_sent for a shared track (consumed by messages.js/group.js, which
 // also record it for a plain-text send), groups.js records
 // group_created/group_joined, and drop.js records daily_drop_answered.
-const CACHE_NAME = 'wavelengthz-shell-v88';
+// v89 adds the site's legal/foundation pages -- six new pages (terms,
+// privacy, guidelines, safety, cookies, dmca -- public/*.html, sourced from
+// legal/*.md) and root-level robots.txt/sitemap.xml/llms.txt plus
+// /.well-known/security.txt. The bump itself is for settings.html, which
+// gained a Terms/Privacy/Guidelines/Safety/Cookies/DMCA links footer (and
+// is already in APP_SHELL below); login.html gained the same links but
+// isn't precached either way. The six new pages are deliberately NOT added
+// to APP_SHELL below -- plain full-page navigations (not part of the
+// Alpine SPA, never intercepted by router.js since they're unregistered
+// routes), and offline availability isn't worth precaching for
+// rarely-visited static legal text.
+const CACHE_NAME = 'wavelengthz-shell-v89';
 const APP_SHELL = [
   '/',
   '/app.js',

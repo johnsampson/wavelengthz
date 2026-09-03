@@ -1,0 +1,11 @@
+# Wavelengthz security disclosure policy -- RFC 9116 (https://www.rfc-editor.org/rfc/rfc9116)
+#
+# Found a security issue? Please report it privately at the address below
+# rather than filing a public GitHub issue -- we'll acknowledge receipt and
+# work with you on a fix and a reasonable disclosure timeline. There is no
+# bug-bounty program at this time.
+
+Contact: mailto:connect@wavelengthz.com
+Expires: 2027-08-31T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://wavelengthz.com/.well-known/security.txt
