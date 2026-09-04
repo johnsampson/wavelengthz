@@ -16,6 +16,8 @@
   <div id="join-card" class="card flex w-full max-w-sm flex-col items-center gap-3 px-6 py-12 text-center">
     <span class="text-3xl">🎧</span>
     <p id="join-message" class="font-semibold text-neutral-100">Loading your invite...</p>
+    <p id="join-gender-badge" class="pill-toggle pill-toggle-active hidden"></p>
+    <p id="join-gender-note" class="hidden text-sm text-neutral-500"></p>
     <a id="join-continue" href="#" class="btn-primary mt-2 hidden w-full">Continue</a>
     <a id="join-no-code" href="/" class="btn-secondary hidden w-full">Back to Wavelengthz</a>
   </div>
@@ -24,6 +26,8 @@
     installTapFeedback();
 
     const messageEl = document.getElementById('join-message');
+    const genderBadgeEl = document.getElementById('join-gender-badge');
+    const genderNoteEl = document.getElementById('join-gender-note');
     const continueLink = document.getElementById('join-continue');
     const noCodeLink = document.getElementById('join-no-code');
 
@@ -41,9 +45,24 @@
           messageEl.textContent = 'This invite has already been used, or the link is no longer valid.';
           noCodeLink.classList.remove('hidden');
         } else {
-          const who = status.inviterName ? `${status.inviterName} invited you` : "You've been invited";
-          const gender = status.targetGender === 'male' ? 'a man' : status.targetGender === 'female' ? 'a woman' : 'anyone';
-          messageEl.textContent = `${who} to join Wavelengthz as ${gender}.`;
+          // Issue #173 (Round 8): "Need better language for this -- 'John
+          // invited you to join Wavelengthz as a woman.'" Splitting the
+          // inviter line from a distinct gender badge (rather than folding
+          // "as a woman" into one sentence) makes the restriction a thing
+          // you notice, not a clause you skim past -- and the note below
+          // spells out why, since the gate is self-attested, not enforced.
+          messageEl.textContent = status.inviterName
+            ? `${status.inviterName} invited you to Wavelengthz.`
+            : "You've been invited to Wavelengthz.";
+
+          if (status.targetGender === 'male' || status.targetGender === 'female') {
+            const isMale = status.targetGender === 'male';
+            genderBadgeEl.textContent = isMale ? '🚹 Men sign up' : '🚺 Women sign up';
+            genderBadgeEl.classList.remove('hidden');
+            genderNoteEl.textContent = `Only continue with this link if you're ${isMale ? 'a man' : 'a woman'} -- invites are gender-matched to keep Wavelengthz balanced as it grows.`;
+            genderNoteEl.classList.remove('hidden');
+          }
+
           continueLink.href = `/join/continue?code=${encodeURIComponent(code)}`;
           continueLink.classList.remove('hidden');
         }
