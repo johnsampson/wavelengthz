@@ -1,10 +1,8 @@
 # Wavelengthz Community Guidelines
 
-**Version 1.0 — Draft dated August 31, 2026**
+**Version 1.1 — Effective September 3, 2026**
 
-> **This is a first-pass draft, not legal advice.** It has not been reviewed
-> by a lawyer, but it's meant to be enforced starting now — a violation of
-> these guidelines is a violation of our [Terms of
+> A violation of these guidelines is a violation of our [Terms of
 > Service](./terms-of-service.md) (§4, §10), and can lead to content
 > removal, message/photo restriction, or account suspension.
 >

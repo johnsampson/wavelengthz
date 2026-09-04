@@ -12,6 +12,17 @@ export function buildGoogleAuthUrl(state: string, env: Env, redirectUri: string 
   url.searchParams.set('redirect_uri', redirectUri);
   url.searchParams.set('scope', SCOPES);
   url.searchParams.set('state', state);
+  // Round 8 (issue #173): without this, Google silently reuses whatever
+  // Google account is already active in the browser and skips its own
+  // account picker -- fine for the common case, but it means there was no
+  // way to sign in with a *different* Google account without first fully
+  // signing out of Google itself in that browser. `select_account` forces
+  // Google's chooser on every login attempt (still just one click if
+  // there's only one account, or the user picks the same one again), which
+  // is what actually lets an admin test multiple accounts and doubles as a
+  // reasonable general default against "I got logged into the wrong
+  // Google account" confusion.
+  url.searchParams.set('prompt', 'select_account');
   return url.toString();
 }
 

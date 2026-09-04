@@ -1,17 +1,7 @@
 # Wavelengthz Terms of Service
 
-**Version 1.1 — Draft dated August 31, 2026**
+**Version 1.2 — Effective September 3, 2026**
 
-> **This is a first-pass draft, not legal advice.** It has not been reviewed
-> by a lawyer. It's intended to accurately describe how Wavelengthz actually
-> works today so that real terms exist before any real user signs up (see
-> `docs/PLAN.md` §8), not to be the final version we launch with. Have this
-> reviewed by counsel before it governs real accounts — in particular §13
-> (Dispute Resolution) and §15 (Governing Law), which pick reasonable
-> defaults (individual arbitration, Delaware) but haven't been checked
-> against wherever Wavelengthz is actually incorporated or where its users
-> are.
->
 > Published version: `public/terms.html` — keep both in sync when editing.
 
 ## 1. Who can use Wavelengthz

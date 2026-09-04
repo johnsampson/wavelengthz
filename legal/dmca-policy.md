@@ -1,15 +1,12 @@
 # Wavelengthz DMCA / Copyright Policy
 
-**Version 1.0 — Draft dated August 31, 2026**
+**Version 1.1 — Effective September 3, 2026**
 
-> **This is a first-pass draft, not legal advice.** In particular: the
-> "designated agent" contact below (connect@wavelengthz.com) should be
-> replaced with, or supplemented by, an agent formally registered with the
-> U.S. Copyright Office's DMCA Designated Agent Directory before this
-> policy is relied on for the DMCA's safe-harbor protection — an
-> unregistered agent doesn't get you that protection even if the process
-> below is otherwise followed correctly. Have this reviewed by counsel
-> before launch.
+> Operational note: the designated agent below (connect@wavelengthz.com)
+> should also be registered with the U.S. Copyright Office's DMCA
+> Designated Agent Directory to qualify for the DMCA's safe-harbor
+> protection — that registration is a separate, one-time step from
+> publishing this page.
 >
 > Published version: `public/dmca.html` — keep both in sync when editing.
 

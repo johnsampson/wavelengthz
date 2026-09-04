@@ -599,7 +599,17 @@
 // Alpine SPA, never intercepted by router.js since they're unregistered
 // routes), and offline availability isn't worth precaching for
 // rarely-visited static legal text.
-const CACHE_NAME = 'wavelengthz-shell-v89';
+// v90 (issue #173, Round 8 batch 1): index.html's deck header gains a third
+// "Search" pill next to Music/People (Music mode only), replacing the small
+// btn-ghost search link that used to sit below the deck's action buttons --
+// easy to miss down there against a busy card photo. login.html hides the
+// "Continue with Spotify" button (Google-only signup for now; the
+// /login/spotify route itself is unchanged, so an existing Spotify-only
+// account can still sign back in directly, and Settings -> Account
+// connections still links Spotify for playlist/follow sync). Neither
+// login.html nor the six legal pages are precached, so index.html's content
+// change is what actually requires this bump.
+const CACHE_NAME = 'wavelengthz-shell-v90';
 const APP_SHELL = [
   '/',
   '/app.js',
