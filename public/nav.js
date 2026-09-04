@@ -177,7 +177,7 @@ async function pollNotifications() {
 
   let res;
   try {
-    res = await api.notifications();
+    res = await api.notifications({ silent: true }); // issue #173: a background tick, not a "loading" moment
   } catch (e) {
     return; // logged out or a transient failure -- just try again next tick
   }

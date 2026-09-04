@@ -599,7 +599,15 @@
 // Alpine SPA, never intercepted by router.js since they're unregistered
 // routes), and offline availability isn't worth precaching for
 // rarely-visited static legal text.
-const CACHE_NAME = 'wavelengthz-shell-v89';
+// v90 (this branch): a global "still loading" bar for slow/stuck API calls
+// (issue #173, public/loadingIndicator.js -- new file, added to APP_SHELL
+// below). Wired into app.js's shared request() helper, so this bump is for
+// both a new precached file and a content change to the already-precached
+// app.js/nav.js/messages.js/group.js.
+// Developed in parallel with other Round 8 PRs that also bump from v89 --
+// whichever merges last will need its number renumbered past whatever's
+// already landed by then.
+const CACHE_NAME = 'wavelengthz-shell-v90';
 const APP_SHELL = [
   '/',
   '/app.js',
@@ -613,6 +621,7 @@ const APP_SHELL = [
   '/toast.js',
   '/domUtils.js',
   '/tapFeedback.js',
+  '/loadingIndicator.js',
   '/alpine.js',
   '/playerBar.js',
   '/wavelengthzPlayer.js',
