@@ -68,4 +68,71 @@ describe('match detail', () => {
     expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('unmatch'));
     vi.unstubAllGlobals();
   });
+
+  // Issue #173: reasonDialogSubmit is this page's wiring of the shared
+  // reasonDialog.js picker (opened via openReportDialog()/openBlockDialog()
+  // -- see reasonDialog.test.ts for the picker's own open/select/validate
+  // logic). match.js is the only host with a real `block` mode.
+  describe('reasonDialogSubmit', () => {
+    async function loadedApp(fetchMock: ReturnType<typeof vi.fn>) {
+      vi.stubGlobal('window', fakeWindow());
+      vi.stubGlobal('fetch', fetchMock);
+      const app: any = createMatchApp();
+      await app.init();
+      return app;
+    }
+
+    it('block: submits reason/details, closes the dialog, and navigates to /matches', async () => {
+      const fetchMock = vi.fn(async (path: string, options?: any) => {
+        if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
+        if (path === '/api/matches/m1') return new Response(JSON.stringify({ match: { id: 'm1', otherUserId: 'u2' }, overlap: { sharedArtists: [], sharedTracks: [], sharedGenres: [] } }), { status: 200 });
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      });
+      const app = await loadedApp(fetchMock);
+      app.reasonDialogOpen = true;
+
+      await app.reasonDialogSubmit('block', 'fake_profile', undefined);
+
+      const call = fetchMock.mock.calls.find((c) => c[0] === '/api/block');
+      expect(JSON.parse((call![1] as any).body)).toEqual({ user_id: 'u2', reason: 'fake_profile', details: undefined });
+      expect(app.reasonDialogOpen).toBe(false);
+      expect(navigate).toHaveBeenCalledWith('/matches');
+      vi.unstubAllGlobals();
+    });
+
+    it('block: growls a toast, leaves the dialog open, and does not navigate when it fails', async () => {
+      const fetchMock = vi.fn(async (path: string) => {
+        if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
+        if (path === '/api/matches/m1') return new Response(JSON.stringify({ match: { id: 'm1', otherUserId: 'u2' }, overlap: { sharedArtists: [], sharedTracks: [], sharedGenres: [] } }), { status: 200 });
+        return new Response('nope', { status: 500 });
+      });
+      const app = await loadedApp(fetchMock);
+      app.reasonDialogOpen = true;
+
+      await app.reasonDialogSubmit('block', undefined, undefined);
+
+      expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('block'));
+      expect(app.reasonDialogOpen).toBe(true);
+      expect(navigate).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
+
+    it('report: submits reason/details and closes the dialog, without navigating', async () => {
+      const fetchMock = vi.fn(async (path: string, options?: any) => {
+        if (path === '/api/me') return new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 });
+        if (path === '/api/matches/m1') return new Response(JSON.stringify({ match: { id: 'm1', otherUserId: 'u2' }, overlap: { sharedArtists: [], sharedTracks: [], sharedGenres: [] } }), { status: 200 });
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      });
+      const app = await loadedApp(fetchMock);
+      app.reasonDialogOpen = true;
+
+      await app.reasonDialogSubmit('report', 'other', 'this is spam');
+
+      const call = fetchMock.mock.calls.find((c) => c[0] === '/api/report');
+      expect(JSON.parse((call![1] as any).body)).toEqual({ user_id: 'u2', reason: 'other', details: 'this is spam' });
+      expect(app.reasonDialogOpen).toBe(false);
+      expect(navigate).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
+  });
 });

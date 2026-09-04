@@ -2,11 +2,13 @@ import { api } from './app.js';
 import { requireAuth } from './auth.js';
 import { showErrorToast } from './toast.js';
 import { navigate } from './router.js';
+import { createReasonDialog } from './reasonDialog.js';
 
 // Extracted from match.html's inline script -- see matches.js's comment for
 // why (same reasoning, same shape).
 export function createMatchApp() {
   return {
+    ...createReasonDialog(),
     matchId: new URLSearchParams(window.location.search).get('id'),
     /** @type {{id: string, otherUserId: string, otherDisplayName?: string} | null} */
     match: null,
@@ -33,22 +35,21 @@ export function createMatchApp() {
       }
     },
 
-    async block() {
+    // Issue #173: block/report both now go through reasonDialog.js's shared
+    // picker (opened via openBlockDialog()/openReportDialog() from
+    // match.html) instead of a bare confirm/prompt with no reason captured.
+    async reasonDialogSubmit(mode, reason, details) {
       try {
-        await api.block(this.match.otherUserId);
-        await navigate('/matches');
+        if (mode === 'block') {
+          await api.block(this.match.otherUserId, reason, details);
+          this.closeReasonDialog();
+          await navigate('/matches');
+        } else {
+          await api.report(this.match.otherUserId, reason, details);
+          this.closeReasonDialog();
+        }
       } catch (e) {
-        showErrorToast('Could not block that user. Please try again.');
-      }
-    },
-
-    async report() {
-      const reason = prompt('Reason (inappropriate_photos, harassment, fake_profile, spam, underage, other):');
-      if (!reason) return;
-      try {
-        await api.report(this.match.otherUserId, reason);
-      } catch (e) {
-        showErrorToast('Could not submit that report. Please try again.');
+        showErrorToast(mode === 'block' ? 'Could not block that user. Please try again.' : 'Could not submit that report. Please try again.');
       }
     },
   };
