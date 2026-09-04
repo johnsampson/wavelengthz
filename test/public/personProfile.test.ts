@@ -133,4 +133,37 @@ describe('person profile page', () => {
     expect(unsubscribe).toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
+
+  // Issue #173: reasonDialogSubmit is this page's wiring of the shared
+  // reasonDialog.js picker (opened via openReportDialog() -- see
+  // reasonDialog.test.ts for the picker's own open/select/validate logic).
+  describe('reasonDialogSubmit (report)', () => {
+    it('submits the report with reason and details, then closes the dialog', async () => {
+      vi.stubGlobal('window', fakeWindow());
+      const fetchMock = vi.fn(async (path: string, options?: any) => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      vi.stubGlobal('fetch', fetchMock);
+      const app = createPersonProfileApp();
+      app.reasonDialogOpen = true;
+
+      await app.reasonDialogSubmit('report', 'harassment', 'kept messaging after I blocked once');
+
+      const call = fetchMock.mock.calls.find((c) => c[0] === '/api/report');
+      expect(JSON.parse((call![1] as any).body)).toEqual({ user_id: 'u2', reason: 'harassment', details: 'kept messaging after I blocked once' });
+      expect(app.reasonDialogOpen).toBe(false);
+      vi.unstubAllGlobals();
+    });
+
+    it('growls a toast and leaves the dialog open when the report fails', async () => {
+      vi.stubGlobal('window', fakeWindow());
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
+      const app = createPersonProfileApp();
+      app.reasonDialogOpen = true;
+
+      await app.reasonDialogSubmit('report', 'spam', undefined);
+
+      expect(showErrorToast).toHaveBeenCalledWith(expect.stringContaining('report'));
+      expect(app.reasonDialogOpen).toBe(true);
+      vi.unstubAllGlobals();
+    });
+  });
 });

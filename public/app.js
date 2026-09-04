@@ -125,8 +125,14 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ phoneNumber, code }),
     }),
-  block: (userId) =>
-    request('/api/block', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: userId }) }),
+  // reason/details optional (issue #173) -- see reasonDialog.js for the UI
+  // that collects them; same shape as report() below.
+  block: (userId, reason, details) =>
+    request('/api/block', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, reason, details }),
+    }),
   blocks: () => request('/api/blocks'),
   unblock: (userId) => request(`/api/blocks/${userId}/unblock`, { method: 'POST' }),
   blockedGenres: () => request('/api/genres/blocked'),

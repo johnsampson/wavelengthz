@@ -9,12 +9,19 @@ export function registerSafetyRoutes(router: RouterType) {
     const user = await getSessionUser(request, env.DB);
     if (!user) return new Response('Unauthorized', { status: 401 });
 
-    const { user_id } = await request.json<{ user_id: string }>();
+    // reason/details are both optional (issue #173): blocking stays a
+    // no-explanation-needed action (Terms of Service §6), this just gives
+    // the option of recording why, same VALID_REASONS set as a report --
+    // including 'other', which is where `details` actually matters.
+    const { user_id, reason, details } = await request.json<{ user_id: string; reason?: string; details?: string }>();
+    if (reason !== undefined && !VALID_REASONS.has(reason)) {
+      return Response.json({ error: 'invalid_reason' }, { status: 400 });
+    }
     const now = Date.now();
 
     await env.DB.prepare(
-      `INSERT OR IGNORE INTO blocks (id, blocker_id, blocked_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`
-    ).bind(crypto.randomUUID(), user.id, user_id, now, now).run();
+      `INSERT OR IGNORE INTO blocks (id, blocker_id, blocked_id, reason, details, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(crypto.randomUUID(), user.id, user_id, reason ?? null, details ?? null, now, now).run();
 
     const [a, b] = [user.id, user_id].sort();
     await env.DB.prepare(

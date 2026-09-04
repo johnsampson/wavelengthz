@@ -78,6 +78,57 @@ describe('POST /api/block', () => {
     expect(match.unmatched_by).toBe('u2');
   });
 
+  // Issue #173 (Round 8): reason/details are both optional, but stored when given.
+  it('stores an optional reason and details on the block row', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/block', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: 'u2', reason: 'other', details: 'kept sending links' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(200);
+
+    const block = await env.DB.prepare('SELECT reason, details FROM blocks WHERE blocker_id = ? AND blocked_id = ?').bind('u1', 'u2').first<any>();
+    expect(block.reason).toBe('other');
+    expect(block.details).toBe('kept sending links');
+  });
+
+  it('allows blocking with no reason at all -- blocking never requires an explanation', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/block', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: 'u2' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(200);
+
+    const block = await env.DB.prepare('SELECT reason, details FROM blocks WHERE blocker_id = ? AND blocked_id = ?').bind('u1', 'u2').first<any>();
+    expect(block.reason).toBeNull();
+    expect(block.details).toBeNull();
+  });
+
+  it('rejects a block reason outside the fixed set', async () => {
+    const cookie = await cookieFor('u1');
+    const res = await worker.fetch(
+      new Request('http://localhost/api/block', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: 'u2', reason: 'i just do not like them' }),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(400);
+  });
+
   it('is idempotent on a repeat block', async () => {
     const cookie = await cookieFor('u1');
     const block = () =>

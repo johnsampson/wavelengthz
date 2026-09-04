@@ -206,7 +206,7 @@
             No shared music activity yet.
           </p>
 
-          <button type="button" class="btn-ghost text-sm text-amber-400" @click="report()">Report this profile</button>
+          <button type="button" class="btn-ghost text-sm text-amber-400" @click="openReportDialog()">Report this profile</button>
         </div>
       </template>
 
@@ -281,6 +281,59 @@
       @click.stop="nextPhoto()"
       aria-label="Next photo"
     >›</button>
+  </div>
+
+  <!-- Issue #173: shared report/block reason picker -- see reasonDialog.js.
+       Identical markup to match.html's copy (this page has no block button,
+       report-only), kept duplicated rather than a shared partial since this
+       app has no templating/include mechanism for HTML fragments. -->
+  <div
+    x-show="reasonDialogOpen"
+    class="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center"
+    @click.self="closeReasonDialog()"
+  >
+    <div class="card w-full max-w-sm p-5">
+      <h2 class="mb-1 text-lg font-bold" x-text="reasonDialogMode === 'block' ? 'Block this person?' : 'Report this person'"></h2>
+      <p class="mb-4 text-sm text-neutral-400">
+        <span x-show="reasonDialogMode === 'block'">Blocking is immediate and doesn't require a reason -- telling us why is optional and helps us catch patterns.</span>
+        <span x-show="reasonDialogMode === 'report'">Choose the reason that fits best. This is reviewed by us, not shared with the person you're reporting.</span>
+      </p>
+      <div class="mb-3 flex flex-wrap gap-2">
+        <template x-for="opt in reasonDialogOptions" :key="opt.value">
+          <button
+            type="button"
+            class="pill-toggle text-sm"
+            :class="reasonDialogChoice === opt.value ? 'pill-toggle-active' : 'pill-toggle-inactive'"
+            @click="selectReasonDialogChoice(opt.value)"
+            x-text="opt.label"
+          ></button>
+        </template>
+      </div>
+      <textarea
+        x-show="reasonDialogChoice === 'other'"
+        x-model="reasonDialogOtherText"
+        class="field mb-4 h-20 resize-none"
+        placeholder="Tell us more..."
+        maxlength="500"
+      ></textarea>
+      <div class="flex gap-2">
+        <button type="button" class="btn-ghost flex-1" :disabled="reasonDialogSubmitting" @click="closeReasonDialog()">Cancel</button>
+        <button
+          x-show="reasonDialogMode === 'block'"
+          type="button"
+          class="btn-secondary flex-1"
+          :disabled="reasonDialogSubmitting"
+          @click="skipReasonDialog()"
+        >Skip</button>
+        <button
+          type="button"
+          class="btn-primary flex-1"
+          :disabled="reasonDialogSubmitting || !reasonDialogChoice || (reasonDialogChoice === 'other' && !reasonDialogOtherText.trim())"
+          @click="confirmReasonDialog()"
+          x-text="reasonDialogMode === 'block' ? 'Block' : 'Submit report'"
+        ></button>
+      </div>
+    </div>
   </div>
   </div>
 

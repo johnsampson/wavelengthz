@@ -2,6 +2,7 @@ import { api } from './app.js';
 import { requireAuth } from './auth.js';
 import { play, togglePlayPause, isCurrentTrack as isCurrentTrackGlobal, onNowPlayingChange } from './playerBar.js';
 import { showErrorToast } from './toast.js';
+import { createReasonDialog } from './reasonDialog.js';
 
 // Extracted from profile.html's inline script -- named personProfile.js
 // (not profile.js) to avoid confusion with the already-existing
@@ -11,6 +12,7 @@ const PAGE_SIZE = 6;
 
 export function createPersonProfileApp() {
   return {
+    ...createReasonDialog(),
     userId: new URLSearchParams(window.location.search).get('id'),
     /** @type {{displayName?: string, photoUrls: string[], isSelf?: boolean, anthemTrack?: {id: string, name?: string} | null, [key: string]: unknown} | null} */
     profile: null,
@@ -101,16 +103,15 @@ export function createPersonProfileApp() {
       this.carouselIndex = (this.carouselIndex - 1 + this.profile.photoUrls.length) % this.profile.photoUrls.length;
     },
 
-    // Same crude prompt-based flow as match.js's report() -- there's no
-    // report UI anywhere in the app yet beyond this, so this matches rather
-    // than reinvents it. Reports here can cover anything on the profile
-    // (photos, bio) since the report itself just targets the user, same as
-    // everywhere else reporting exists.
-    async report() {
-      const reason = prompt('Reason (inappropriate_photos, harassment, fake_profile, spam, underage, other):');
-      if (!reason) return;
+    // Issue #173: replaces the old bare prompt() that never even captured
+    // an "other" detail -- reasonDialog.js's shared picker, opened via
+    // openReportDialog() from profile.html. Reports here can cover anything
+    // on the profile (photos, bio) since the report itself just targets the
+    // user, same as everywhere else reporting exists.
+    async reasonDialogSubmit(_mode, reason, details) {
       try {
-        await api.report(this.userId, reason);
+        await api.report(this.userId, reason, details);
+        this.closeReasonDialog();
       } catch (e) {
         showErrorToast('Could not submit that report. Please try again.');
       }

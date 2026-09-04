@@ -599,7 +599,18 @@
 // Alpine SPA, never intercepted by router.js since they're unregistered
 // routes), and offline availability isn't worth precaching for
 // rarely-visited static legal text.
-const CACHE_NAME = 'wavelengthz-shell-v89';
+// v90 (issue #173, Round 8): "give the report and block functionality the
+// 'why' w/ an 'other' text field option." match.html and profile.html gain
+// a shared reason-picker dialog (public/reasonDialog.js) replacing
+// match.js's/personProfile.js's old bare prompt()-based report flow (which
+// never even captured the "other" detail despite the backend already
+// supporting it) and match.js's previously silent, no-reason block() call.
+// blocks table gains nullable reason/details columns (migrations/0030) --
+// optional, since blocking still never requires an explanation (Terms of
+// Service §6). Developed in parallel with another Round 8 PR that also
+// bumps this from v89 -- whichever merges second needs its own number
+// renumbered past whatever the first one landed as.
+const CACHE_NAME = 'wavelengthz-shell-v90';
 const APP_SHELL = [
   '/',
   '/app.js',
