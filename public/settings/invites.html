@@ -26,6 +26,24 @@
 
   <template x-if="!loading && invites">
     <div class="mx-auto max-w-md space-y-4">
+      <div x-show="canMintUnlimited" class="card space-y-2 p-4">
+        <h2 class="text-sm font-semibold text-neutral-200">Mint codes</h2>
+        <p class="text-xs text-neutral-500">Admin tool: these codes work for anyone, no gender lock.</p>
+        <div class="flex items-center gap-2">
+          <input
+            type="number"
+            min="1"
+            max="500"
+            x-model="mintCount"
+            class="field w-24"
+            aria-label="Number of codes to mint"
+          />
+          <button type="button" class="btn-secondary" :disabled="minting" @click="mintCodes()">
+            <span x-text="minting ? 'Minting...' : 'Mint codes'"></span>
+          </button>
+        </div>
+      </div>
+
       <div>
         <h2 class="mb-2 text-sm font-semibold text-neutral-200">Ready to send</h2>
         <p x-show="!unredeemed.length" class="text-sm text-neutral-500">You've used all your invites for now.</p>

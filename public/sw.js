@@ -599,7 +599,15 @@
 // Alpine SPA, never intercepted by router.js since they're unregistered
 // routes), and offline availability isn't worth precaching for
 // rarely-visited static legal text.
-const CACHE_NAME = 'wavelengthz-shell-v89';
+// v90 (this branch): Settings -> Your Invites (/settings/invites.js, already
+// in APP_SHELL below) gains a self-serve admin mint panel for the three
+// allowlisted invite-admin accounts (issue #173, src/lib/inviteCodes.ts's
+// isInviteAdmin) -- content change to a precached script, so the bump is
+// required even though nothing was added to/removed from APP_SHELL itself.
+// Developed in parallel with two other Round 8 PRs that also bump from v89 --
+// whichever of the three merges last will need its number renumbered past
+// whatever's already landed by then.
+const CACHE_NAME = 'wavelengthz-shell-v90';
 const APP_SHELL = [
   '/',
   '/app.js',

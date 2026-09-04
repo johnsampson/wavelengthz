@@ -1,7 +1,12 @@
 import type { IRequest, RouterType } from 'itty-router';
 import { getSessionUser, requestIsSecure } from '../lib/session';
 import { constantTimeEqual } from '../lib/crypto';
-import { generateInviteCode, lookupInviteCode, grantInviteCodes } from '../lib/inviteCodes';
+import { generateInviteCode, lookupInviteCode, grantInviteCodes, isInviteAdmin } from '../lib/inviteCodes';
+
+// Same cap as a sane guardrail against a fat-fingered count, not a real
+// expected ceiling -- a genuine campaign push can just call this more than
+// once.
+const MAX_MINT_COUNT = 500;
 
 export function registerInviteRoutes(router: RouterType) {
   // Public, no session -- the /join landing page calls this before OAuth
@@ -69,7 +74,37 @@ export function registerInviteRoutes(router: RouterType) {
       redeemed: r.redeemed_at != null,
       redeemedByName: r.redeemed_by_name,
     }));
-    return Response.json({ invites });
+    return Response.json({ invites, canMintUnlimited: isInviteAdmin(user.email) });
+  });
+
+  // Issue #173 (Round 8): a self-serve version of POST /internal/invites/generate
+  // for the three allowlisted admin accounts (isInviteAdmin, src/lib/inviteCodes.ts)
+  // -- reachable from Settings -> Your Invites with just a normal session, no
+  // SEED_SECRET. Always mints with target_gender NULL (usable by anyone), since
+  // the whole point is "connect@ can invite anyone", not another gender-locked
+  // batch. created_by_user_id is the admin's own id, so minted codes show up
+  // in their own "Ready to send" list above like any other invite.
+  router.post('/api/me/invites/mint', async (request: Request, env: Env) => {
+    const user = await getSessionUser(request, env.DB);
+    if (!user) return new Response('Unauthorized', { status: 401 });
+    if (!isInviteAdmin(user.email)) return new Response('Forbidden', { status: 403 });
+
+    const { count } = await request.json<{ count?: number }>();
+    if (!Number.isInteger(count) || count! <= 0 || count! > MAX_MINT_COUNT) {
+      return Response.json({ error: 'invalid_count' }, { status: 400 });
+    }
+
+    const now = Date.now();
+    const codes = Array.from({ length: count! }, () => generateInviteCode());
+    await env.DB.batch(
+      codes.map((code) =>
+        env.DB
+          .prepare(`INSERT INTO invite_codes (id, code, created_by_user_id, target_gender, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?)`)
+          .bind(crypto.randomUUID(), code, user.id, now, now)
+      )
+    );
+
+    return Response.json({ codes });
   });
 
   // Founding-cohort seeding, before any member exists to invite anyone --

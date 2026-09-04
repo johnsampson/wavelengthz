@@ -71,6 +71,17 @@ describe('GET /api/me/invites', () => {
         { code: 'EFGH5678', targetGender: 'female', redeemed: true, redeemedByName: 'Sam' },
       ])
     );
+    expect(body.canMintUnlimited).toBe(false); // u1 isn't one of the allowlisted admin emails
+  });
+
+  // Issue #173 (Round 8): the three allowlisted invite-admin accounts see
+  // canMintUnlimited: true so the frontend knows to show the mint panel.
+  it('reports canMintUnlimited: true for an allowlisted invite-admin email', async () => {
+    await insertTestUser(env.DB, { id: 'u1', spotifyId: 'sp1', email: 'connect@wavelengthz.com' });
+
+    const res = await worker.fetch(new Request('http://localhost/api/me/invites', { headers: { Cookie: await cookieFor('u1') } }), env, {} as ExecutionContext);
+
+    expect((await res.json<any>()).canMintUnlimited).toBe(true);
   });
 
   // Issue #127: "did we take the share/invite live? I don't see it."
@@ -114,6 +125,64 @@ describe('GET /api/me/invites', () => {
 
     const body = await res.json<any>();
     expect(body.invites).toHaveLength(0);
+  });
+});
+
+describe('POST /api/me/invites/mint', () => {
+  async function mint(cookie: string, body: any) {
+    return worker.fetch(
+      new Request('http://localhost/api/me/invites/mint', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+      env,
+      {} as ExecutionContext
+    );
+  }
+
+  it('returns 401 when not logged in', async () => {
+    const res = await worker.fetch(
+      new Request('http://localhost/api/me/invites/mint', { method: 'POST', body: JSON.stringify({ count: 5 }) }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 403 for a logged-in user who is not an allowlisted invite admin', async () => {
+    await insertTestUser(env.DB, { id: 'u1', spotifyId: 'sp1', email: 'someone@example.com' });
+    const res = await mint(await cookieFor('u1'), { count: 5 });
+    expect(res.status).toBe(403);
+  });
+
+  it('mints N codes with no gender lock, credited to the admin, for an allowlisted email', async () => {
+    await insertTestUser(env.DB, { id: 'u1', spotifyId: 'sp1', email: 'john@johnasampson.com' });
+
+    const res = await mint(await cookieFor('u1'), { count: 5 });
+
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    expect(body.codes).toHaveLength(5);
+    expect(new Set(body.codes).size).toBe(5); // all distinct
+
+    const rows = await env.DB.prepare('SELECT created_by_user_id, target_gender, redeemed_by_user_id FROM invite_codes WHERE created_by_user_id = ?')
+      .bind('u1')
+      .all<any>();
+    expect(rows.results).toHaveLength(5);
+    for (const row of rows.results) {
+      expect(row.target_gender).toBeNull();
+      expect(row.redeemed_by_user_id).toBeNull();
+    }
+  });
+
+  it('rejects an invalid or out-of-range count', async () => {
+    await insertTestUser(env.DB, { id: 'u1', spotifyId: 'sp1', email: 'connect@wavelengthz.com' });
+    const cookie = await cookieFor('u1');
+    expect((await mint(cookie, { count: 0 })).status).toBe(400);
+    expect((await mint(cookie, { count: -1 })).status).toBe(400);
+    expect((await mint(cookie, {})).status).toBe(400);
+    expect((await mint(cookie, { count: 501 })).status).toBe(400);
   });
 });
 

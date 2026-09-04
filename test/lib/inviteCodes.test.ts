@@ -6,6 +6,7 @@ import {
   INVITE_CODES_PER_MEMBER,
   generateInviteCode,
   isInviteOnly,
+  isInviteAdmin,
   claimInviteCode,
   grantInviteCodes,
   lookupInviteCode,
@@ -45,6 +46,24 @@ describe('isInviteOnly', () => {
   it('is on for any non-empty value', () => {
     expect(isInviteOnly({ INVITE_ONLY: 'true' })).toBe(true);
     expect(isInviteOnly({ INVITE_ONLY: '1' })).toBe(true);
+  });
+});
+
+describe('isInviteAdmin', () => {
+  it('is true for each of the three allowlisted admin emails', () => {
+    expect(isInviteAdmin('connect@wavelengthz.com')).toBe(true);
+    expect(isInviteAdmin('john@johnasampson.com')).toBe(true);
+    expect(isInviteAdmin('rhsassampson2005@gmail.com')).toBe(true);
+  });
+
+  it('is case-insensitive', () => {
+    expect(isInviteAdmin('Connect@Wavelengthz.com')).toBe(true);
+  });
+
+  it('is false for null, undefined, or any other email', () => {
+    expect(isInviteAdmin(null)).toBe(false);
+    expect(isInviteAdmin(undefined)).toBe(false);
+    expect(isInviteAdmin('someone@example.com')).toBe(false);
   });
 });
 

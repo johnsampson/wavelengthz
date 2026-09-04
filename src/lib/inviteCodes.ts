@@ -9,6 +9,23 @@
 // the two genders are actually balancing in practice.
 export const INVITE_CODES_PER_MEMBER = 2;
 
+// Issue #173 (Round 8): "make it so connect@wavelengthz.com can invite
+// anyone... or make it so connect@, john@johnasampson.com and
+// rhsassampson2005@gmail.com drop N new codes at a time -- think social
+// media campaign on X." A fixed allowlist rather than a `users.is_admin`
+// column/role system -- three specific real accounts get a self-serve
+// version of the same lever `POST /internal/invites/generate` already gives
+// ops (arbitrary count, target_gender NULL so the code works for anyone),
+// reachable from Settings -> Your Invites without needing SEED_SECRET.
+// Case-insensitive since Google account emails aren't guaranteed to come
+// back in any particular casing.
+const INVITE_ADMIN_EMAILS = ['connect@wavelengthz.com', 'john@johnasampson.com', 'rhsassampson2005@gmail.com'];
+
+export function isInviteAdmin(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return INVITE_ADMIN_EMAILS.includes(email.toLowerCase());
+}
+
 // 32 characters (a clean power of 2, so `byte % 32` below has zero modulo
 // bias), excluding 0/O/1/I -- easy to misread off a screen or read aloud,
 // per the design doc.
