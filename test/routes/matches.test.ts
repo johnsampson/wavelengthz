@@ -23,6 +23,9 @@ async function makeUser(id: string, email: string | null, displayName: string | 
     // users shouldn't need every test to separately clear that precondition.
     bio: 'A bio long enough to pass the profile-completeness gate.',
     phoneVerifiedAt: 1000,
+    // Issue #173 (Round 8): the gate's other two independent requirements.
+    guidelinesAcknowledgedAt: 1000,
+    safetyTipsAcknowledgedAt: 1000,
     accessToken: 'a',
     refreshToken: 'r',
     tokenExpiresAt: 9999999999999,

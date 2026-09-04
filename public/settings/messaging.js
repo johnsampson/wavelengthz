@@ -25,6 +25,9 @@ export function createMessagingApp() {
     photos: { met: false, count: 0, required: 3 },
     artistsActed: { met: false, count: 0, required: 50 },
     phone: { met: false, phoneNumber: null },
+    // Issue #173 (Round 8): independent acknowledgement of each policy page.
+    guidelines: { met: false },
+    safetyTips: { met: false },
 
     // Phone verification's own local flow state -- entirely separate from
     // the `phone` status object above, which only reflects what's actually
@@ -51,6 +54,8 @@ export function createMessagingApp() {
         this.photos = status.photos;
         this.artistsActed = status.artistsActed;
         this.phone = status.phone;
+        this.guidelines = status.guidelines;
+        this.safetyTips = status.safetyTips;
       } catch (e) {
         if (e.status === 401) {
           window.location.href = '/login';
@@ -124,7 +129,7 @@ export function createMessagingApp() {
     },
 
     recomputeReady() {
-      this.ready = this.bio.met && this.photos.met && this.artistsActed.met && this.phone.met;
+      this.ready = this.bio.met && this.photos.met && this.artistsActed.met && this.phone.met && this.guidelines.met && this.safetyTips.met;
     },
   };
 }

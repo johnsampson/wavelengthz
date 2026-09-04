@@ -116,6 +116,13 @@ export const api = {
   runFollowSync: () => request('/api/me/follow-sync/run', { method: 'POST' }),
   tasteDrift: () => request('/api/me/taste-drift'),
   messagingStatus: () => request('/api/me/messaging-status'),
+  // Issue #173 (Round 8): independent acknowledgement of each policy page --
+  // acknowledging one never implies the other. Called from public/guidelines.html
+  // and public/safety.html's own small acknowledge-button script, and
+  // available to /settings/messaging.js's checklist too (a re-acknowledge
+  // there is harmless, both endpoints are idempotent).
+  acknowledgeGuidelines: () => request('/api/me/acknowledge-guidelines', { method: 'POST' }),
+  acknowledgeSafetyTips: () => request('/api/me/acknowledge-safety-tips', { method: 'POST' }),
   /** @param {string} phoneNumber - E.164, e.g. "+15551234567" */
   startPhoneVerification: (phoneNumber) =>
     request('/api/phone/verify/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phoneNumber }) }),

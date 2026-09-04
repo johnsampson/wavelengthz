@@ -469,13 +469,17 @@ describe('GET /api/me/messaging-status', () => {
     expect(body.photos).toEqual({ met: false, count: 0, required: 3 });
     expect(body.artistsActed).toEqual({ met: false, count: 0, required: 50 });
     expect(body.phone).toEqual({ met: false, phoneNumber: null });
+    expect(body.guidelines).toEqual({ met: false });
+    expect(body.safetyTips).toEqual({ met: false });
   });
 
-  it('reports ready: true and every requirement met once all four are satisfied', async () => {
+  it('reports ready: true and every requirement met once all six are satisfied', async () => {
     const sessionId = await makeUser({
       bio: 'A bio long enough to pass the profile-completeness gate.',
       phoneNumber: '+15551234567',
       phoneVerifiedAt: 1000,
+      guidelinesAcknowledgedAt: 1000,
+      safetyTipsAcknowledgedAt: 1000,
     });
     for (let i = 0; i < 3; i++) {
       await env.DB.prepare(
@@ -504,6 +508,8 @@ describe('GET /api/me/messaging-status', () => {
     expect(body.photos).toEqual({ met: true, count: 3, required: 3 });
     expect(body.artistsActed).toEqual({ met: true, count: 50, required: 50 });
     expect(body.phone).toEqual({ met: true, phoneNumber: '+15551234567' });
+    expect(body.guidelines).toEqual({ met: true });
+    expect(body.safetyTips).toEqual({ met: true });
   });
 
   it('is not ready when every requirement but one is met -- reports the specific gap', async () => {
@@ -539,5 +545,55 @@ describe('GET /api/me/messaging-status', () => {
     expect(body.photos.met).toBe(true);
     expect(body.artistsActed.met).toBe(true);
     expect(body.phone).toEqual({ met: false, phoneNumber: null });
+  });
+});
+
+// Issue #173 (Round 8): each acknowledgement is its own endpoint, so
+// hitting one never sets the other -- see messagingGate.ts's own comment.
+describe('POST /api/me/acknowledge-guidelines', () => {
+  it('returns 401 when not logged in', async () => {
+    const res = await worker.fetch(new Request('http://localhost/api/me/acknowledge-guidelines', { method: 'POST' }), env, {} as ExecutionContext);
+    expect(res.status).toBe(401);
+  });
+
+  it('stamps guidelines_acknowledged_at, without touching safety_tips_acknowledged_at', async () => {
+    const userId = await insertTestUser(env.DB, { id: 'u8', spotifyId: 'sp8', createdAt: 1000, updatedAt: 1000 });
+    const { cookie } = await createSession(env.DB, userId);
+    const sessionId = cookie.split(';')[0].split('=')[1];
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/me/acknowledge-guidelines', { method: 'POST', headers: { Cookie: `wl_session=${sessionId}` } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(200);
+
+    const row = await env.DB.prepare('SELECT guidelines_acknowledged_at, safety_tips_acknowledged_at FROM users WHERE id = ?').bind(userId).first<any>();
+    expect(row.guidelines_acknowledged_at).not.toBeNull();
+    expect(row.safety_tips_acknowledged_at).toBeNull();
+  });
+});
+
+describe('POST /api/me/acknowledge-safety-tips', () => {
+  it('returns 401 when not logged in', async () => {
+    const res = await worker.fetch(new Request('http://localhost/api/me/acknowledge-safety-tips', { method: 'POST' }), env, {} as ExecutionContext);
+    expect(res.status).toBe(401);
+  });
+
+  it('stamps safety_tips_acknowledged_at, without touching guidelines_acknowledged_at', async () => {
+    const userId = await insertTestUser(env.DB, { id: 'u9', spotifyId: 'sp9', createdAt: 1000, updatedAt: 1000 });
+    const { cookie } = await createSession(env.DB, userId);
+    const sessionId = cookie.split(';')[0].split('=')[1];
+
+    const res = await worker.fetch(
+      new Request('http://localhost/api/me/acknowledge-safety-tips', { method: 'POST', headers: { Cookie: `wl_session=${sessionId}` } }),
+      env,
+      {} as ExecutionContext
+    );
+    expect(res.status).toBe(200);
+
+    const row = await env.DB.prepare('SELECT guidelines_acknowledged_at, safety_tips_acknowledged_at FROM users WHERE id = ?').bind(userId).first<any>();
+    expect(row.safety_tips_acknowledged_at).not.toBeNull();
+    expect(row.guidelines_acknowledged_at).toBeNull();
   });
 });

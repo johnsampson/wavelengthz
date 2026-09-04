@@ -14,6 +14,8 @@ const NOT_READY_STATUS = {
   photos: { met: false, count: 0, required: 3 },
   artistsActed: { met: false, count: 0, required: 50 },
   phone: { met: false, phoneNumber: null },
+  guidelines: { met: false },
+  safetyTips: { met: false },
 };
 
 const READY_STATUS = {
@@ -22,6 +24,8 @@ const READY_STATUS = {
   photos: { met: true, count: 3, required: 3 },
   artistsActed: { met: true, count: 50, required: 50 },
   phone: { met: true, phoneNumber: '+15551234567' },
+  guidelines: { met: true },
+  safetyTips: { met: true },
 };
 
 function stubApi(status: Record<string, unknown> = NOT_READY_STATUS) {
@@ -63,6 +67,8 @@ describe('messaging page', () => {
     expect(app.photos).toEqual(NOT_READY_STATUS.photos);
     expect(app.artistsActed).toEqual(NOT_READY_STATUS.artistsActed);
     expect(app.phone).toEqual(NOT_READY_STATUS.phone);
+    expect(app.guidelines).toEqual(NOT_READY_STATUS.guidelines);
+    expect(app.safetyTips).toEqual(NOT_READY_STATUS.safetyTips);
     expect(app.loading).toBe(false);
     vi.unstubAllGlobals();
   });
@@ -75,6 +81,23 @@ describe('messaging page', () => {
 
     expect(app.ready).toBe(true);
     vi.unstubAllGlobals();
+  });
+
+  // Issue #173 (Round 8): guidelines/safety-tips acknowledgement gate
+  // messaging same as every other requirement here, independently of each
+  // other.
+  it('recomputeReady() checks guidelines/safetyTips too, not just the original four requirements', () => {
+    const app = createMessagingApp();
+    app.bio = { met: true };
+    app.photos = { met: true };
+    app.artistsActed = { met: true };
+    app.phone = { met: true };
+    app.guidelines = { met: true };
+    app.safetyTips = { met: false }; // the one gap
+
+    app.recomputeReady();
+
+    expect(app.ready).toBe(false);
   });
 
   it('redirects to /login instead of showing an error when the status fetch is unauthorized', async () => {
@@ -181,7 +204,14 @@ describe('messaging page', () => {
   });
 
   it('verifyCode() marks phone met and recomputes ready on success', async () => {
-    const status = { ...NOT_READY_STATUS, bio: { met: true, length: 40, required: 20 }, photos: { met: true, count: 3, required: 3 }, artistsActed: { met: true, count: 50, required: 50 } };
+    const status = {
+      ...NOT_READY_STATUS,
+      bio: { met: true, length: 40, required: 20 },
+      photos: { met: true, count: 3, required: 3 },
+      artistsActed: { met: true, count: 50, required: 50 },
+      guidelines: { met: true },
+      safetyTips: { met: true },
+    };
     const { calls } = stubApi(status);
     const app = createMessagingApp();
     await app.init();

@@ -131,12 +131,37 @@ export function registerMeRoutes(router: RouterType) {
     const requirements = messagingRequirements(user, photoCount, artistsActedCount);
 
     return Response.json({
-      ready: requirements.bio && requirements.photos && requirements.artistsActed && requirements.phone,
+      ready: requirements.bio && requirements.photos && requirements.artistsActed && requirements.phone && requirements.guidelines && requirements.safetyTips,
       bio: { met: requirements.bio, length: user.bio?.trim().length ?? 0, required: MIN_BIO_LENGTH },
       photos: { met: requirements.photos, count: photoCount, required: MIN_PHOTOS },
       artistsActed: { met: requirements.artistsActed, count: artistsActedCount, required: MIN_ARTISTS_ACTED },
       phone: { met: requirements.phone, phoneNumber: user.phone_number },
+      guidelines: { met: requirements.guidelines },
+      safetyTips: { met: requirements.safetyTips },
     });
+  });
+
+  // Issue #173 (Round 8): independent acknowledgement of Community
+  // Guidelines/Safety Tips, each its own endpoint (not one combined
+  // "accept policies" route) so visiting/acknowledging one never implies
+  // the other -- see messagingGate.ts's own comment. Idempotent: a repeat
+  // call just re-stamps the same timestamp, harmless either way.
+  router.post('/api/me/acknowledge-guidelines', async (request: Request, env: Env) => {
+    const user = await getSessionUser(request, env.DB);
+    if (!user) return new Response('Unauthorized', { status: 401 });
+
+    const now = Date.now();
+    await env.DB.prepare('UPDATE users SET guidelines_acknowledged_at = ?, updated_at = ? WHERE id = ?').bind(now, now, user.id).run();
+    return Response.json({ ok: true, acknowledgedAt: now });
+  });
+
+  router.post('/api/me/acknowledge-safety-tips', async (request: Request, env: Env) => {
+    const user = await getSessionUser(request, env.DB);
+    if (!user) return new Response('Unauthorized', { status: 401 });
+
+    const now = Date.now();
+    await env.DB.prepare('UPDATE users SET safety_tips_acknowledged_at = ?, updated_at = ? WHERE id = ?').bind(now, now, user.id).run();
+    return Response.json({ ok: true, acknowledgedAt: now });
   });
 
   // Sets or clears the caller's anthem -- the one track that plays from a tap
