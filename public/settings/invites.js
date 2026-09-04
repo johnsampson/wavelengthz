@@ -1,4 +1,5 @@
 import { api } from '../app.js';
+import { showErrorToast } from '../toast.js';
 
 export function createInvitesApp() {
   return {
@@ -7,11 +8,18 @@ export function createInvitesApp() {
     error: null,
     loading: true,
     copiedCode: null,
+    // Issue #173 (Round 8): only true for the three allowlisted invite-admin
+    // accounts (src/lib/inviteCodes.ts's isInviteAdmin) -- everyone else never
+    // sees the mint panel at all, not just a disabled version of it.
+    canMintUnlimited: false,
+    mintCount: 20,
+    minting: false,
 
     async init() {
       try {
         const res = await api.myInvites();
         this.invites = res.invites;
+        this.canMintUnlimited = !!res.canMintUnlimited;
       } catch (e) {
         if (e.status === 401) {
           window.location.href = '/login';
@@ -20,6 +28,28 @@ export function createInvitesApp() {
         this.error = 'Could not load your invites. Please reload the page.';
       } finally {
         this.loading = false;
+      }
+    },
+
+    // Issue #173 (Round 8): "drop N new codes at a time -- think social
+    // media campaign on X." Prepends the freshly minted codes onto the
+    // existing list client-side rather than re-fetching -- the server
+    // already told us exactly what it created.
+    async mintCodes() {
+      const count = Number(this.mintCount);
+      if (!Number.isInteger(count) || count <= 0) {
+        showErrorToast('Enter a positive number of codes.');
+        return;
+      }
+      this.minting = true;
+      try {
+        const res = await api.mintInvites(count);
+        const minted = res.codes.map((code) => ({ code, targetGender: null, redeemed: false, redeemedByName: null }));
+        this.invites = [...minted, ...(this.invites ?? [])];
+      } catch (e) {
+        showErrorToast('Could not mint codes. Please try again.');
+      } finally {
+        this.minting = false;
       }
     },
 

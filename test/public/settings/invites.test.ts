@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createInvitesApp } from '../../../public/settings/invites.js';
+import { showErrorToast } from '../../../public/toast.js';
 
-function stubApi(invites: any[]) {
+vi.mock('../../../public/toast.js', () => ({ showErrorToast: vi.fn() }));
+
+function stubApi(invites: any[], canMintUnlimited = false) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (path: string) => {
-      if (path === '/api/me/invites') return new Response(JSON.stringify({ invites }), { status: 200 });
+      if (path === '/api/me/invites') return new Response(JSON.stringify({ invites, canMintUnlimited }), { status: 200 });
       return new Response('not found', { status: 404 });
     })
   );
@@ -13,6 +16,7 @@ function stubApi(invites: any[]) {
 
 beforeEach(() => {
   vi.unstubAllGlobals();
+  vi.mocked(showErrorToast).mockClear();
 });
 
 const UNREDEEMED = { code: 'ABCD1234', targetGender: 'female', redeemed: false, redeemedByName: null };
@@ -87,5 +91,73 @@ describe('invites page', () => {
 
     await expect(app.copyLink('ABCD1234')).resolves.toBeUndefined();
     expect(app.copiedCode).toBeNull();
+  });
+
+  // Issue #173 (Round 8): admin invite-minting, only ever shown to the three
+  // allowlisted accounts (src/lib/inviteCodes.ts's isInviteAdmin).
+  describe('canMintUnlimited / mintCodes', () => {
+    it('defaults to false for a non-admin account', async () => {
+      stubApi([UNREDEEMED]);
+      const app = createInvitesApp();
+      await app.init();
+      expect(app.canMintUnlimited).toBe(false);
+    });
+
+    it('is true when the server reports canMintUnlimited', async () => {
+      stubApi([], true);
+      const app = createInvitesApp();
+      await app.init();
+      expect(app.canMintUnlimited).toBe(true);
+    });
+
+    it('mints codes and prepends them onto the existing list, no gender label', async () => {
+      const fetchMock = vi.fn(async (path: string, options: any = {}) => {
+        if (path === '/api/me/invites') return new Response(JSON.stringify({ invites: [UNREDEEMED], canMintUnlimited: true }), { status: 200 });
+        if (path === '/api/me/invites/mint') {
+          expect(JSON.parse(options.body)).toEqual({ count: 10 });
+          return new Response(JSON.stringify({ codes: ['NEWCODE1', 'NEWCODE2'] }), { status: 200 });
+        }
+        return new Response('not found', { status: 404 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const app = createInvitesApp();
+      await app.init();
+      app.mintCount = 10;
+
+      await app.mintCodes();
+
+      expect(app.minting).toBe(false);
+      expect(app.invites![0]).toEqual({ code: 'NEWCODE1', targetGender: null, redeemed: false, redeemedByName: null });
+      expect(app.invites![1]).toEqual({ code: 'NEWCODE2', targetGender: null, redeemed: false, redeemedByName: null });
+      expect(app.invites![2]).toEqual(UNREDEEMED);
+    });
+
+    it('rejects a non-positive count without a network call', async () => {
+      stubApi([], true);
+      const app = createInvitesApp();
+      await app.init();
+      app.mintCount = 0;
+
+      await app.mintCodes();
+
+      expect(showErrorToast).toHaveBeenCalled();
+    });
+
+    it('surfaces an error toast and stops minting on failure', async () => {
+      const fetchMock = vi.fn(async (path: string) => {
+        if (path === '/api/me/invites') return new Response(JSON.stringify({ invites: [], canMintUnlimited: true }), { status: 200 });
+        if (path === '/api/me/invites/mint') return new Response(JSON.stringify({ error: 'forbidden' }), { status: 403 });
+        return new Response('not found', { status: 404 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const app = createInvitesApp();
+      await app.init();
+      app.mintCount = 5;
+
+      await app.mintCodes();
+
+      expect(showErrorToast).toHaveBeenCalled();
+      expect(app.minting).toBe(false);
+    });
   });
 });

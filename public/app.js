@@ -192,6 +192,11 @@ export const api = {
   // Settings -> "Your invites" (public/settings/invites.js). Codes I've
   // issued and their redemption state -- see migrations/0026.
   myInvites: () => request('/api/me/invites'),
+  // Issue #173 (Round 8): self-serve batch-mint for the three allowlisted
+  // invite-admin accounts (src/lib/inviteCodes.ts's isInviteAdmin). 403s for
+  // anyone else -- the UI only ever shows this when canMintUnlimited is true.
+  mintInvites: (count) =>
+    request('/api/me/invites/mint', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count }) }),
   // Issue #161 (part of the 250K-users strategy discussion): fire-and-forget
   // first-party usage tracking -- works for a logged-out visitor too (no
   // session required server-side), so callers shouldn't await this on any
