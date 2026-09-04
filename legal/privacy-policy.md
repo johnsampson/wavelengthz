@@ -1,16 +1,7 @@
 # Wavelengthz Privacy Policy
 
-**Version 1.0 — Draft dated August 31, 2026**
+**Version 1.1 — Effective September 3, 2026**
 
-> **This is a first-pass draft, not legal advice.** It has not been reviewed
-> by a lawyer. It's intended to accurately describe what Wavelengthz
-> actually collects and does today — required by `docs/PLAN.md` §8 and by
-> Spotify's Developer Terms, which condition API access on a published
-> privacy policy — not to be the final version we launch with. Have this
-> reviewed by counsel before it governs real users' data, in particular
-> §7 (international transfers) if Wavelengthz launches to EU users before a
-> GDPR representative/DPO arrangement is in place.
->
 > Published version: `public/privacy.html` — keep both in sync when editing.
 
 ## 1. Who this policy covers

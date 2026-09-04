@@ -18,7 +18,11 @@
     <p class="font-semibold text-neutral-100">Find your wavelength</p>
     <p class="text-sm text-neutral-400">Log in to start swiping on people and music.</p>
     <a href="/login/google" class="btn-primary mt-2 w-full">Continue with Google</a>
-    <a href="/login/spotify" class="btn-secondary w-full">Continue with Spotify</a>
+    <!-- Round 8: Spotify sign-in hidden for the time being, Google-only for
+         new signups. The /login/spotify and /callback routes themselves are
+         untouched -- an existing Spotify-only account can still sign back
+         in at that URL directly, and Settings -> Account connections still
+         lets a signed-in member link Spotify for playlist/follow sync. -->
   </div>
   <p class="mt-6 text-center text-xs text-neutral-500">
     By continuing, you agree to our <a href="/terms" class="underline hover:text-neutral-300">Terms</a>

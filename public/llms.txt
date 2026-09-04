@@ -1,23 +1,60 @@
 # Wavelengthz
 
-> Wavelengthz is a music-taste dating app. People connect over what they
-> actually listen to, not just a photo grid: two swipe modes (people and
-> music), a match score blended from Spotify listening data, real-time
-> messaging once a match forms, and small song-centered groups. Sign-in is
-> via Spotify or Google OAuth -- there's no separate Wavelengthz password.
+> Wavelengthz is a music-taste dating app: a Spotify-powered matchmaking
+> platform that pairs people by what they actually listen to, not just a
+> photo grid. It's built for anyone who's ever wanted a dating app based on
+> music taste, Spotify compatibility, or shared musical personality rather
+> than a swipe-on-looks-only format.
 
-Nearly everything past the homepage requires a signed-in session -- profiles,
-matches, messages, and the swipe deck are private to the people using them
-and are not meant to be crawled, scraped, summarized, or used as training
-data. Please don't attempt to access authenticated routes or treat any
-user-generated content (bios, photos, messages) as public data, regardless
-of how it's technically reachable. `robots.txt` and `/api/`'s own auth
-checks are the enforcement mechanism; this file is the plain-language
-statement of intent behind them.
+## What Wavelengthz is
+
+Wavelengthz connects people through their real Spotify listening history —
+top artists, top tracks, and genres — blended into a match score alongside
+traditional dating preferences (age, distance, gender, what someone is
+looking for). It's a hybrid of a music-discovery app and a dating app: two
+swipe modes let a member browse either people or music, so "date someone
+with your taste in music" and "find music through people with your taste"
+are the same product, not two separate features bolted together.
+
+## How it works
+
+- **Two swipe modes.** Music mode surfaces artists and tracks to like or
+  pass on, refining a member's taste profile over time and feeding both
+  Daily Drop and match scoring. People mode surfaces other members, ranked
+  by a blended music-compatibility + traditional-preference score.
+- **Sign-in via Spotify or Google** — no separate password, no manual
+  profile-building for music taste; it's pulled straight from a member's
+  real listening history.
+- **Daily Drop** — one shared music prompt a day, answered with a song,
+  browsable against everyone else's answer — a lower-stakes daily habit
+  than swiping.
+- **Matching and messaging** — a mutual like unlocks real-time messaging
+  and a running shared playlist with that match.
+- **Groups** — small, song-centered group chats anyone can start from a
+  track they're into.
+- **Trust & safety** — block/report, automated photo and message
+  moderation, and a 7-day account-deletion grace period.
+
+## Who it's for
+
+People who find "swipe on a photo grid" dating apps shallow, and want
+compatibility to start from something they actually care about — their
+music taste — rather than a curated bio. Particularly relevant for anyone
+searching for a "Spotify dating app," "music matching app," "dating app
+for music lovers," or a way to meet people through shared taste in artists
+and genres rather than appearance alone.
+
+## Data and privacy
+
+Nearly everything past the homepage requires a signed-in session — member
+profiles, matches, messages, and the swipe deck are private and not meant
+to be crawled, scraped, or used as training data, regardless of how
+they're technically reachable. See `robots.txt` and the policies below for
+the enforcement mechanism and the full detail.
 
 ## Policies
 
-- [Terms of Service](https://wavelengthz.com/terms): the agreement governing use of the app, including a 18+ age requirement and a binding-arbitration clause.
+- [Terms of Service](https://wavelengthz.com/terms): the agreement governing use of the app, including an 18+ age requirement and a binding-arbitration clause.
 - [Privacy Policy](https://wavelengthz.com/privacy): what we collect (Spotify/Google profile data, location, photos, messages), who we share it with, and how to exercise deletion/access rights.
 - [Community Guidelines](https://wavelengthz.com/guidelines): what's expected of every member.
 - [Safety Tips](https://wavelengthz.com/safety): practical guidance for meeting someone from the app in person.

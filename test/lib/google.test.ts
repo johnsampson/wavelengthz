@@ -20,6 +20,13 @@ describe('buildGoogleAuthUrl', () => {
     expect(url.searchParams.get('scope')).toContain('profile');
   });
 
+  // Round 8 (issue #173): without this, Google silently reuses whatever
+  // account is already active in the browser instead of offering a choice.
+  it('forces the account picker with prompt=select_account, so a different Google account can be chosen', () => {
+    const url = new URL(buildGoogleAuthUrl('state-abc', env));
+    expect(url.searchParams.get('prompt')).toBe('select_account');
+  });
+
   it('uses a supplied redirect_uri override instead of the env default', () => {
     const url = new URL(buildGoogleAuthUrl('state-abc', env, 'https://other.example.com/callback/google'));
     expect(url.searchParams.get('redirect_uri')).toBe('https://other.example.com/callback/google');
