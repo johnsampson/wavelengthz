@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { api } from '../../public/app.js';
+import { beginRequest, endRequest } from '../../public/loadingIndicator.js';
+
+vi.mock('../../public/loadingIndicator.js', () => ({ beginRequest: vi.fn(), endRequest: vi.fn() }));
 
 describe('api client', () => {
   it('api.me() fetches /api/me and returns parsed JSON', async () => {
@@ -259,6 +262,58 @@ describe('api client', () => {
 
       const body = JSON.parse(fetchMock.mock.calls[0][1].body);
       expect(body).toEqual({ eventType: 'session_start', metadata: undefined });
+      vi.unstubAllGlobals();
+    });
+  });
+
+  // Issue #173 (Round 8): "Add loading icons on lost api calls." request()
+  // wraps every call in beginRequest()/endRequest() (public/loadingIndicator.js)
+  // unless the caller opts out via `silent`.
+  describe('request() loading-indicator wiring', () => {
+    it('calls beginRequest/endRequest around a normal (non-silent) call', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ user: {} }), { status: 200 })));
+      vi.mocked(beginRequest).mockClear();
+      vi.mocked(endRequest).mockClear();
+
+      await api.me();
+
+      expect(beginRequest).toHaveBeenCalledTimes(1);
+      expect(endRequest).toHaveBeenCalledTimes(1);
+      vi.unstubAllGlobals();
+    });
+
+    it('still calls endRequest on a failed request -- the indicator must never get stuck on', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
+      vi.mocked(beginRequest).mockClear();
+      vi.mocked(endRequest).mockClear();
+
+      await expect(api.me()).rejects.toThrow();
+
+      expect(beginRequest).toHaveBeenCalledTimes(1);
+      expect(endRequest).toHaveBeenCalledTimes(1);
+      vi.unstubAllGlobals();
+    });
+
+    it('skips beginRequest/endRequest for a silent call (recordEvent)', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
+      vi.mocked(beginRequest).mockClear();
+      vi.mocked(endRequest).mockClear();
+
+      await api.recordEvent('session_start');
+
+      expect(beginRequest).not.toHaveBeenCalled();
+      expect(endRequest).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
+
+    it('never leaks `silent` into the actual fetch options', async () => {
+      const fetchMock = vi.fn(async (path: string, options?: any) => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await api.recordEvent('session_start');
+
+      const options = fetchMock.mock.calls[0][1];
+      expect(options.silent).toBeUndefined();
       vi.unstubAllGlobals();
     });
   });

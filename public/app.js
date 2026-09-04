@@ -1,19 +1,31 @@
-async function request(path, options = {}) {
-  const res = await fetch(path, { credentials: 'include', ...options });
-  if (!res.ok) {
-    let body = null;
-    try {
-      body = await res.json();
-    } catch (e) {
-      // Response body wasn't JSON (or was empty) -- leave body null so
-      // callers can still inspect `status` without crashing on parse.
+import { beginRequest, endRequest } from './loadingIndicator.js';
+
+// Issue #173 (Round 8): `silent: true` opts a call out of the global loading
+// bar -- for background work a person never asked for and isn't watching
+// (analytics pings, chat/notification polling), where showing "loading" on
+// a slow tick would be a false alarm, not a helpful one. It's stripped
+// before reaching fetch() below; every other option passes through as-is.
+async function request(path, { silent, ...options } = {}) {
+  if (!silent) beginRequest();
+  try {
+    const res = await fetch(path, { credentials: 'include', ...options });
+    if (!res.ok) {
+      let body = null;
+      try {
+        body = await res.json();
+      } catch (e) {
+        // Response body wasn't JSON (or was empty) -- leave body null so
+        // callers can still inspect `status` without crashing on parse.
+      }
+      const err = new Error(`Request to ${path} failed: ${res.status}`);
+      err.status = res.status;
+      err.body = body;
+      throw err;
     }
-    const err = new Error(`Request to ${path} failed: ${res.status}`);
-    err.status = res.status;
-    err.body = body;
-    throw err;
+    return res.status === 204 ? null : res.json();
+  } finally {
+    if (!silent) endRequest();
   }
-  return res.status === 204 ? null : res.json();
 }
 
 // Shared with onboarding.html and settings.html so the option list can't drift
@@ -49,7 +61,11 @@ export const api = {
   // artists table -- see GET /api/artists/search's `inCatalog: false` shape.
   createArtist: (spotifyArtistId) =>
     request('/api/artists', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ spotifyArtistId }) }),
-  messages: (matchId) => request(`/api/matches/${matchId}/messages`),
+  // `silent` (issue #173): messages.js's 3s poll passes { silent: true } so
+  // a slow background tick never flashes the loading bar; the initial load
+  // (opening the thread) leaves it unset, so a genuinely slow first load
+  // still shows it.
+  messages: (matchId, opts) => request(`/api/matches/${matchId}/messages`, opts),
   // Unscoped one-step song search (no artist_id) -- backs the track picker
   // in message threads and the deck's own song-search (index.js).
   // The artist-scoped form is artistTrackSearch below.
@@ -158,7 +174,10 @@ export const api = {
     const endpoint = mode === 'artist' || mode === 'track' ? 'music' : mode;
     return request(`/api/swipes/${endpoint}/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }) });
   },
-  notifications: () => request('/api/notifications'),
+  // `opts` (issue #173): nav.js's background poll passes { silent: true } --
+  // there's no page-level "loading" moment for the notification bell to
+  // begin with, so a slow tick has nothing useful to announce.
+  notifications: (opts) => request('/api/notifications', opts),
   markNotificationRead: (id) => request(`/api/notifications/${id}/read`, { method: 'POST' }),
   groups: () => request('/api/groups'),
   groupDetail: (groupId) => request(`/api/groups/${groupId}`),
@@ -166,7 +185,9 @@ export const api = {
     request('/api/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, topic, track }) }),
   joinGroup: (groupId) => request(`/api/groups/${groupId}/join`, { method: 'POST' }),
   leaveGroup: (groupId) => request(`/api/groups/${groupId}/leave`, { method: 'POST' }),
-  groupMessages: (groupId) => request(`/api/groups/${groupId}/messages`),
+  // `opts` (issue #173): same silent-poll-vs-loud-initial-load split as
+  // messages() above -- group.js's 3s poll passes { silent: true }.
+  groupMessages: (groupId, opts) => request(`/api/groups/${groupId}/messages`, opts),
   sendGroupMessage: (groupId, body) =>
     request(`/api/groups/${groupId}/messages`, {
       method: 'POST',
@@ -199,11 +220,14 @@ export const api = {
   // clientId/sessionId (issue #168) ride along so the server can forward
   // the same event to Google Analytics 4's Measurement Protocol -- see
   // getOrCreateAnalyticsClientId/getOrCreateAnalyticsSessionId below.
+  // silent (issue #173): purely a background usage ping nobody's watching --
+  // a slow one shouldn't ever surface as "loading" on screen.
   recordEvent: (eventType, metadata) =>
     request('/api/analytics/event', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ eventType, metadata, clientId: getOrCreateAnalyticsClientId(), sessionId: getOrCreateAnalyticsSessionId() }),
+      silent: true,
     }),
 };
 

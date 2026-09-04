@@ -83,7 +83,7 @@ export function createGroupApp() {
       if (document.hidden) return;
       this.now = Date.now(); // re-evaluates canRecall()'s x-show each tick
       try {
-        const res = await api.groupMessages(this.groupId);
+        const res = await api.groupMessages(this.groupId, { silent: true }); // issue #173: a background tick, not a "loading" moment
         const grew = res.messages.length > this.messages.length;
         // A recall doesn't change the message count -- it flips recalledAt
         // on an already-known row -- so length alone missed it entirely for
