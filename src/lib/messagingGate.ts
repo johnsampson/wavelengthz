@@ -21,10 +21,25 @@ export interface MessagingRequirements {
   photos: boolean;
   artistsActed: boolean;
   phone: boolean;
+  guidelines: boolean;
+  safetyTips: boolean;
 }
 
+// Issue #173 (Round 8): "make messaging and social requirements require
+// agreeing to and visiting guidelines, safety tips, etc, each
+// independently." Terms of Service and the Privacy Policy already have an
+// implied-consent moment before any account exists (public/login.html's
+// "By continuing, you agree..." line); Community Guidelines and Safety
+// Tips never had an equivalent moment for an existing member, so those are
+// the two tracked here -- as two independent booleans, not one combined
+// "accepted policies" flag, since visiting one is not visiting the other.
 export function messagingRequirements(
-  user: { bio: string | null; phone_verified_at: number | null },
+  user: {
+    bio: string | null;
+    phone_verified_at: number | null;
+    guidelines_acknowledged_at: number | null;
+    safety_tips_acknowledged_at: number | null;
+  },
   photoCount: number,
   artistsActedCount: number
 ): MessagingRequirements {
@@ -33,16 +48,23 @@ export function messagingRequirements(
     photos: photoCount >= MIN_PHOTOS,
     artistsActed: artistsActedCount >= MIN_ARTISTS_ACTED,
     phone: user.phone_verified_at != null,
+    guidelines: user.guidelines_acknowledged_at != null,
+    safetyTips: user.safety_tips_acknowledged_at != null,
   };
 }
 
 export function hasCompleteProfile(
-  user: { bio: string | null; phone_verified_at: number | null },
+  user: {
+    bio: string | null;
+    phone_verified_at: number | null;
+    guidelines_acknowledged_at: number | null;
+    safety_tips_acknowledged_at: number | null;
+  },
   photoCount: number,
   artistsActedCount: number
 ): boolean {
   const r = messagingRequirements(user, photoCount, artistsActedCount);
-  return r.bio && r.photos && r.artistsActed && r.phone;
+  return r.bio && r.photos && r.artistsActed && r.phone && r.guidelines && r.safetyTips;
 }
 
 export async function photoCountFor(db: D1Database, userId: string): Promise<number> {

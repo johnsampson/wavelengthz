@@ -599,7 +599,17 @@
 // Alpine SPA, never intercepted by router.js since they're unregistered
 // routes), and offline availability isn't worth precaching for
 // rarely-visited static legal text.
-const CACHE_NAME = 'wavelengthz-shell-v89';
+// v90 (issue #173, Round 8): "make messaging require agreeing to and
+// visiting guidelines, safety tips, etc, each independently." Adds two new
+// independent messagingGate.ts requirements -- guidelines_acknowledged_at/
+// safety_tips_acknowledged_at (migrations/0031) -- alongside the existing
+// bio/photos/artistsActed/phone ones. /settings/messaging (precached) gains
+// two new checklist rows linking out to /guidelines and /safety, each of
+// which (not precached, per the note above) now shows a small
+// sign-in-aware "I've read this" acknowledge banner. Developed in parallel
+// with other Round 8 PRs that also bump this from v89 -- whichever merges
+// last needs its number renumbered past whatever's already landed.
+const CACHE_NAME = 'wavelengthz-shell-v90';
 const APP_SHELL = [
   '/',
   '/app.js',

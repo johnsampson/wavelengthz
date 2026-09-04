@@ -23,6 +23,9 @@ async function makeUser(id: string, lat = 30.27, lng = -97.74, maxDistanceKm = 8
     // membership/messages, not about the gate itself.
     bio: 'A bio long enough to pass the profile-completeness gate.',
     phoneVerifiedAt: 1000,
+    // Issue #173 (Round 8): the gate's other two independent requirements.
+    guidelinesAcknowledgedAt: 1000,
+    safetyTipsAcknowledgedAt: 1000,
     accessToken: 'a',
     refreshToken: 'r',
     tokenExpiresAt: 9999999999999,

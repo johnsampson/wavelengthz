@@ -19,53 +19,79 @@ beforeAll(async () => {
   await applySchema(env.DB);
 });
 
+// Issue #173 (Round 8): guidelines/safety-tips acknowledgement, on top of
+// the pre-existing bio/photos/artistsActed/phone requirements. NOT_ACKED
+// unnamed here -- callers below just pass null/VERIFIED_AT-style timestamps
+// inline, mirroring how phone_verified_at already reads in this file.
+const UNMET = { bio: null, phone_verified_at: null, guidelines_acknowledged_at: null, safety_tips_acknowledged_at: null };
+const MET = { bio: COMPLETE_BIO, phone_verified_at: VERIFIED_AT, guidelines_acknowledged_at: VERIFIED_AT, safety_tips_acknowledged_at: VERIFIED_AT };
+
 describe('messagingRequirements', () => {
   it('flags every requirement independently -- an all-null/zero user meets none of them', () => {
-    const r = messagingRequirements({ bio: null, phone_verified_at: null }, 0, 0);
-    expect(r).toEqual({ bio: false, photos: false, artistsActed: false, phone: false });
+    const r = messagingRequirements(UNMET, 0, 0);
+    expect(r).toEqual({ bio: false, photos: false, artistsActed: false, phone: false, guidelines: false, safetyTips: false });
   });
 
   it('flags each requirement true once its own threshold is met, independent of the others', () => {
-    const r = messagingRequirements({ bio: COMPLETE_BIO, phone_verified_at: VERIFIED_AT }, MIN_PHOTOS, MIN_ARTISTS_ACTED);
-    expect(r).toEqual({ bio: true, photos: true, artistsActed: true, phone: true });
+    const r = messagingRequirements(MET, MIN_PHOTOS, MIN_ARTISTS_ACTED);
+    expect(r).toEqual({ bio: true, photos: true, artistsActed: true, phone: true, guidelines: true, safetyTips: true });
   });
 
   it('bio is false under the minimum length and true at exactly the minimum', () => {
-    expect(messagingRequirements({ bio: 'too short', phone_verified_at: null }, 0, 0).bio).toBe(false);
-    expect(messagingRequirements({ bio: COMPLETE_BIO, phone_verified_at: null }, 0, 0).bio).toBe(true);
+    expect(messagingRequirements({ ...UNMET, bio: 'too short' }, 0, 0).bio).toBe(false);
+    expect(messagingRequirements({ ...UNMET, bio: COMPLETE_BIO }, 0, 0).bio).toBe(true);
   });
 
   it('trims whitespace before measuring bio length -- padding does not count', () => {
     const padded = ' '.repeat(50) + 'short' + ' '.repeat(50);
-    expect(messagingRequirements({ bio: padded, phone_verified_at: null }, 0, 0).bio).toBe(false);
+    expect(messagingRequirements({ ...UNMET, bio: padded }, 0, 0).bio).toBe(false);
   });
 
   it('photos is false below MIN_PHOTOS and true at exactly MIN_PHOTOS', () => {
-    expect(messagingRequirements({ bio: null, phone_verified_at: null }, MIN_PHOTOS - 1, 0).photos).toBe(false);
-    expect(messagingRequirements({ bio: null, phone_verified_at: null }, MIN_PHOTOS, 0).photos).toBe(true);
+    expect(messagingRequirements(UNMET, MIN_PHOTOS - 1, 0).photos).toBe(false);
+    expect(messagingRequirements(UNMET, MIN_PHOTOS, 0).photos).toBe(true);
   });
 
   it('artistsActed is false below MIN_ARTISTS_ACTED and true at exactly MIN_ARTISTS_ACTED', () => {
-    expect(messagingRequirements({ bio: null, phone_verified_at: null }, 0, MIN_ARTISTS_ACTED - 1).artistsActed).toBe(false);
-    expect(messagingRequirements({ bio: null, phone_verified_at: null }, 0, MIN_ARTISTS_ACTED).artistsActed).toBe(true);
+    expect(messagingRequirements(UNMET, 0, MIN_ARTISTS_ACTED - 1).artistsActed).toBe(false);
+    expect(messagingRequirements(UNMET, 0, MIN_ARTISTS_ACTED).artistsActed).toBe(true);
   });
 
   it('phone is false when phone_verified_at is null, true otherwise', () => {
-    expect(messagingRequirements({ bio: null, phone_verified_at: null }, 0, 0).phone).toBe(false);
-    expect(messagingRequirements({ bio: null, phone_verified_at: VERIFIED_AT }, 0, 0).phone).toBe(true);
+    expect(messagingRequirements(UNMET, 0, 0).phone).toBe(false);
+    expect(messagingRequirements({ ...UNMET, phone_verified_at: VERIFIED_AT }, 0, 0).phone).toBe(true);
+  });
+
+  it('guidelines is false when guidelines_acknowledged_at is null, true otherwise', () => {
+    expect(messagingRequirements(UNMET, 0, 0).guidelines).toBe(false);
+    expect(messagingRequirements({ ...UNMET, guidelines_acknowledged_at: VERIFIED_AT }, 0, 0).guidelines).toBe(true);
+  });
+
+  it('safetyTips is false when safety_tips_acknowledged_at is null, true otherwise -- independent of guidelines', () => {
+    expect(messagingRequirements(UNMET, 0, 0).safetyTips).toBe(false);
+    expect(messagingRequirements({ ...UNMET, safety_tips_acknowledged_at: VERIFIED_AT }, 0, 0).safetyTips).toBe(true);
+    // Acknowledging one does not imply the other.
+    const guidelinesOnly = messagingRequirements({ ...UNMET, guidelines_acknowledged_at: VERIFIED_AT }, 0, 0);
+    expect(guidelinesOnly.guidelines).toBe(true);
+    expect(guidelinesOnly.safetyTips).toBe(false);
   });
 });
 
 describe('hasCompleteProfile', () => {
   it('is false when only some requirements are met', () => {
-    // Bio and photos met, artists acted on and phone are not.
-    expect(hasCompleteProfile({ bio: COMPLETE_BIO, phone_verified_at: null }, MIN_PHOTOS, 0)).toBe(false);
-    // Everything but phone verification.
-    expect(hasCompleteProfile({ bio: COMPLETE_BIO, phone_verified_at: null }, MIN_PHOTOS, MIN_ARTISTS_ACTED)).toBe(false);
+    // Bio and photos met, artists acted on, phone, and both acknowledgements are not.
+    expect(hasCompleteProfile({ ...UNMET, bio: COMPLETE_BIO }, MIN_PHOTOS, 0)).toBe(false);
+    // Everything but phone verification and the two acknowledgements.
+    expect(hasCompleteProfile({ ...UNMET, bio: COMPLETE_BIO }, MIN_PHOTOS, MIN_ARTISTS_ACTED)).toBe(false);
   });
 
-  it('is true only once every requirement is met', () => {
-    expect(hasCompleteProfile({ bio: COMPLETE_BIO, phone_verified_at: VERIFIED_AT }, MIN_PHOTOS, MIN_ARTISTS_ACTED)).toBe(true);
+  it('is false when every other requirement is met but only one of the two acknowledgements is', () => {
+    expect(hasCompleteProfile({ ...MET, safety_tips_acknowledged_at: null }, MIN_PHOTOS, MIN_ARTISTS_ACTED)).toBe(false);
+    expect(hasCompleteProfile({ ...MET, guidelines_acknowledged_at: null }, MIN_PHOTOS, MIN_ARTISTS_ACTED)).toBe(false);
+  });
+
+  it('is true only once every requirement, including both acknowledgements, is met', () => {
+    expect(hasCompleteProfile(MET, MIN_PHOTOS, MIN_ARTISTS_ACTED)).toBe(true);
   });
 });
 

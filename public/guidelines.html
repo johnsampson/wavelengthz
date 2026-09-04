@@ -34,6 +34,14 @@
       removal, message/photo restriction, or account suspension.
     </div>
 
+    <!-- Issue #173 (Round 8): shown only to a signed-in member who hasn't
+         acknowledged this page yet -- stays hidden entirely for an
+         anonymous visitor. Acknowledging counts as one of the independent
+         requirements toward unlocking messaging (src/lib/messagingGate.ts) --
+         reading Safety Tips is a separate requirement, not implied by this
+         one. -->
+    <div id="wl-ack-banner" class="legal-callout hidden" role="status"></div>
+
     <p>
       Wavelengthz exists to connect real people over real musical taste.
       These guidelines exist to keep it that way.
@@ -123,5 +131,54 @@
     <a href="/safety">Safety</a> · <a href="/cookies">Cookies</a> ·
     <a href="/dmca">DMCA</a>
   </footer>
+  <script type="module">
+    import { api } from '/app.js';
+    const banner = document.getElementById('wl-ack-banner');
+
+    (async () => {
+      let me;
+      try {
+        me = await api.me();
+      } catch (e) {
+        return; // not signed in, or a transient failure -- stay a plain static page
+      }
+      if (!me?.user) return;
+
+      let status;
+      try {
+        status = await api.messagingStatus();
+      } catch (e) {
+        return;
+      }
+
+      banner.classList.remove('hidden');
+
+      if (status.guidelines.met) {
+        banner.textContent = "✓ You've acknowledged our Community Guidelines.";
+        return;
+      }
+
+      const p = document.createElement('p');
+      p.className = 'mb-3';
+      p.textContent = 'Signed in? Acknowledging this page counts toward unlocking messaging.';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn-primary';
+      button.textContent = "I've read this";
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        button.textContent = 'Saving…';
+        try {
+          await api.acknowledgeGuidelines();
+          banner.innerHTML = '';
+          banner.textContent = "✓ Thanks — you've acknowledged our Community Guidelines.";
+        } catch (e) {
+          button.disabled = false;
+          button.textContent = "I've read this";
+        }
+      });
+      banner.append(p, button);
+    })();
+  </script>
 </body>
 </html>

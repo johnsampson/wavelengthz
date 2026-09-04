@@ -19,6 +19,8 @@ export interface UserRow {
   email_notifications_enabled: number;
   phone_number: string | null;
   phone_verified_at: number | null;
+  guidelines_acknowledged_at: number | null;
+  safety_tips_acknowledged_at: number | null;
   anthem_track_id: string | null;
   onboarded_at: number | null;
   deleted_at: number | null;
